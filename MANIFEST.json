@@ -2,7 +2,7 @@
   "product": "Alpaca",
   "description": "The engineering harness. A full-tree integrity record over the mechanism class the manifest declares; the memory class (runtime state) is excluded so the digest map describes the shipment and verifies on a fresh clone.",
   "file_count": 688,
-  "tree_digest": "343f30032798cdc619235d7dff7811d1d67c0952684ce93ee5816a07d1d00212",
+  "tree_digest": "8e2ebc8d617743807dc047a729838712f46eea4bfc7366107bd3dd908f8b5c8a",
   "tree_digest_note": "sha256 over '<sha256>  <path>' lines in path order, over every mechanism-class file except MANIFEST.json itself, every __pycache__/ dir and any *.pyc. Re-derive with: python3 gen_manifest.py --verify",
   "files": {
     ".claude/settings.json": "788c9903dcfbc6c7835957d80325d4a40c0405995cce88650cc0099e5b665506",
@@ -318,7 +318,7 @@
     "alpaca/tests/test_taskcontract.py": "8f1e5a63bf63bdc195428b78d52dd7fe012497d3202ca694d8457ede98853f2b",
     "alpaca/tests/test_transcripts.py": "7508d7de0ec00ca478716b0d18b22cccd8b2018c7a9fa67cadb4100416db00a0",
     "alpaca/tests/test_tunnel_service.py": "966afa0c0e752a2cfdd1797a2d6eb5d93af342b5588a3cdb541ebaa1f40db771",
-    "alpaca/tests/test_upgrade.py": "3f4b4a0d39cce3da20942ecc1027b0fe3b5f50fad183ef4ca1a9f44b8ef191d7",
+    "alpaca/tests/test_upgrade.py": "ddfcafa4549bf44ea0d934a66822713ecd356a8085ad70755520264c2867bdc1",
     "alpaca/tests/test_util.py": "b91c46112097803245915bae88c5c1261ead701bc6c4d5f22e94895c0119dc17",
     "alpaca/tests/test_verdict_contract.py": "b9bc4eaa263f06829f02e96f3b091c3d862aaa6d45359a34920f3c94cd386c30",
     "alpaca/tests/test_verdict_rows.py": "ea60229fa30c0353a4cafa025a7a1440d73deb01b1e3961422886e7f008b85bf",

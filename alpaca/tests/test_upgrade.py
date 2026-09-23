@@ -295,13 +295,13 @@ def _retire_trees(trees):
     _write_manifest(source, ["ALPACA-MANIFEST", "bin/alpaca", "alpaca/", ".claude/skills/alpaca-op/"],
                     [".alpaca/"])
     util.write_text(os.path.join(source, ".claude", "skills", "alpaca-op", "SKILL.md"), "op NEW\n")
-    util.write_text(os.path.join(root, "skills", "alpaca-intake", "SKILL.md"), "intake OLD\n")
-    util.write_text(os.path.join(root, "skills", "alpaca-op", "SKILL.md"), "op OLD\n")
-    util.write_text(os.path.join(root, "skills", "alpaca-op", "notes.md"), "edited here\n")
+    util.write_text(os.path.join(root, "skills", "old-intake", "SKILL.md"), "intake OLD\n")
+    util.write_text(os.path.join(root, "skills", "old-op", "SKILL.md"), "op OLD\n")
+    util.write_text(os.path.join(root, "skills", "old-op", "notes.md"), "edited here\n")
     util.write_text(os.path.join(root, "skills", "mine", "SKILL.md"), "the project's own\n")
-    _write_lock(root, {"skills/alpaca-intake/SKILL.md": "intake OLD\n",
-                       "skills/alpaca-op/SKILL.md": "op OLD\n",
-                       "skills/alpaca-op/notes.md": "as shipped\n",
+    _write_lock(root, {"skills/old-intake/SKILL.md": "intake OLD\n",
+                       "skills/old-op/SKILL.md": "op OLD\n",
+                       "skills/old-op/notes.md": "as shipped\n",
                        "bin/alpaca": "whatever\n"})
     return root, source
 
@@ -313,12 +313,12 @@ def test_a_path_the_release_dropped_loses_its_shipped_files(trees):
     root, source = _retire_trees(trees)
     p = upgrade.plan(root, source)
     assert "skills/" in p.dropped and "skills/" not in p.mechanism
-    assert sorted(p.remove) == ["skills/alpaca-intake/SKILL.md", "skills/alpaca-op/SKILL.md"]
-    assert sorted(p.dropped_kept) == ["skills/alpaca-op/notes.md", "skills/mine/SKILL.md"]
+    assert sorted(p.remove) == ["skills/old-intake/SKILL.md", "skills/old-op/SKILL.md"]
+    assert sorted(p.dropped_kept) == ["skills/mine/SKILL.md", "skills/old-op/notes.md"]
     upgrade.apply(root, source, clock=FixedClock(step=1))
-    assert not os.path.lexists(os.path.join(root, "skills", "alpaca-intake"))
-    assert not os.path.lexists(os.path.join(root, "skills", "alpaca-op", "SKILL.md"))
-    assert util.read_text(os.path.join(root, "skills", "alpaca-op", "notes.md")) == "edited here\n"
+    assert not os.path.lexists(os.path.join(root, "skills", "old-intake"))
+    assert not os.path.lexists(os.path.join(root, "skills", "old-op", "SKILL.md"))
+    assert util.read_text(os.path.join(root, "skills", "old-op", "notes.md")) == "edited here\n"
     assert util.read_text(os.path.join(root, "skills", "mine", "SKILL.md")) == "the project's own\n"
     assert util.read_text(os.path.join(root, ".claude", "skills", "alpaca-op", "SKILL.md")) == "op NEW\n"
 
@@ -330,9 +330,9 @@ def test_the_plan_verb_names_the_files_a_release_drops(trees, capsys, tmp_path, 
     args = argparse.Namespace(target=root, source=source, plan=True, recover=False)
     assert upgrade._cmd_upgrade(args) == 0
     out = capsys.readouterr().out
-    assert "dropped by the release, will be removed: skills/alpaca-intake/SKILL.md" in out
+    assert "dropped by the release, will be removed: skills/old-intake/SKILL.md" in out
     assert "dropped by the release, kept (not the shipped bytes): skills/mine/SKILL.md" in out
-    assert os.path.isfile(os.path.join(root, "skills", "alpaca-intake", "SKILL.md"))
+    assert os.path.isfile(os.path.join(root, "skills", "old-intake", "SKILL.md"))
 
 
 @pytest.mark.parametrize("phase", upgrade.PHASES)
@@ -341,7 +341,7 @@ def test_a_crash_leaves_the_dropped_files_fully_old_or_fully_new(trees, phase):
     with pytest.raises(upgrade._KillInjected):
         upgrade.apply(root, source, kill_at=phase, clock=FixedClock(step=1))
     upgrade.recover(root)
-    gone = not os.path.lexists(os.path.join(root, "skills", "alpaca-intake", "SKILL.md"))
+    gone = not os.path.lexists(os.path.join(root, "skills", "old-intake", "SKILL.md"))
     assert gone == (phase in upgrade._FORWARD_FROM), phase
     assert util.read_text(os.path.join(root, "skills", "mine", "SKILL.md")) == "the project's own\n"
 
