@@ -1,6 +1,6 @@
 """First-chat onboarding writer. The chat asks; this verb records. Runs once."""
 import os
-from alpaca import adopt, cli, db, project, util
+from alpaca import adopt, cli, db, manifest, project, util
 
 DONE_WHEN_0 = "project.yaml and intents/queue.md written"
 
@@ -31,6 +31,16 @@ def _template(root) -> dict:
 def _mapping(doc: dict, key: str) -> dict:
     value = doc.get(key)
     return value if isinstance(value, dict) else {}
+
+def _sensed_commands(root, draft: dict, template_commands: dict) -> dict:
+    """The sensed commands that replace a template value. A command sensed from a file the harness
+    itself ships (a mechanism path such as pytest.ini) describes the harness, not the project, and
+    the template already names that command, so the template's value stays. A command sensed from
+    a project file (a Makefile, package.json) still wins."""
+    own = {entry.rstrip("/") for entry in manifest.mechanism(root)}
+    traces = draft.get("traces") or {}
+    return {name: value for name, value in draft["commands"].items()
+            if name not in template_commands or traces.get(name) not in own}
 
 def _merge(template: dict, defaults: dict, answers: dict) -> dict:
     """Template keys first, in the template's order, with the `template` marker removed; a
@@ -71,7 +81,8 @@ def cmd_onboard(args):
     # t-002: onboarding merges the answers into the project.yaml already on disk (the shipped
     # template on a fresh copy) instead of rebuilding a subset, so every template key the answers
     # do not touch survives with its value and in its order. The precedence per key is: the
-    # generic default below < the template's value < a sensed fact < an answer the person gave.
+    # generic default below < the template's value < a command sensed from a project file (see
+    # _sensed_commands) < an answer the person gave.
     template = _template(root)
     defaults = {
         "phases": {"default": list(project.DEFAULT_PHASES)},
@@ -110,7 +121,7 @@ def cmd_onboard(args):
         # repository even when the flag was omitted.
         "existing_repo": bool(args.existing_repo) or draft["existing_repo"],
         "commands": {**defaults["commands"], **_mapping(template, "commands"),
-                     **draft["commands"]},
+                     **_sensed_commands(root, draft, _mapping(template, "commands"))},
         "style": style,
         "cwd_history": [root],
     }

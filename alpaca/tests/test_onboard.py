@@ -131,3 +131,15 @@ def test_onboard_template_sensed_commands_still_win(project):
     assert cfg["commands"]["build"] == tpl["commands"]["build"]
     # no --tier and no --preset: the template's values stay
     assert cfg["tier"] == tpl["tier"] and cfg["style"] == tpl["style"]
+
+
+def test_onboard_template_keeps_its_commands_over_the_harness_own_files(project):
+    # A fresh copy ships pytest.ini as a harness (mechanism) file. Sensing it says nothing about
+    # the project, so it must not replace the template's own test command with a generic guess
+    # (seen on the fresh-clone quickstart: `python3 -m pytest` replaced `bin/alpaca-python -m
+    # pytest`, and the host python3 has no yaml).
+    shutil.copy(os.path.join(REPO, "project.yaml"), os.path.join(project, "project.yaml"))
+    shutil.copy(os.path.join(REPO, "pytest.ini"), os.path.join(project, "pytest.ini"))
+    cli.main(["init"])
+    assert cli.main(["onboard", "--name", "d", "--who", "a:owner", "--what", "w"]) == 0
+    assert _raw(project)["commands"] == _template()["commands"]
