@@ -351,6 +351,28 @@ def baseline(conn, op, runbook_id):
     return None
 
 
+def _held_by_other_runbooks(conn, op, runbook_id, keys, store):
+    """{spec key: (runbook id, live row id)} for the keys of this intake that another runbook id
+    already holds in `op` with a live row (the head of its chain, not withdrawn): taking the runbook
+    in under a new id, in a new or moved file, would leave two live rows for each of them."""
+    from alpaca.checklist import supersession
+    latest = {}
+    for e in db.events(conn, kind=EVENT, limit=10 ** 9):
+        d = e["data"]
+        if d.get("op") == op and d.get("runbook_id") and d.get("runbook_id") != runbook_id:
+            latest[d["runbook_id"]] = d
+    held = {}
+    for other, d in sorted(latest.items()):
+        for key, entry in sorted((d.get("items") or {}).items()):
+            if key not in keys or key in held:
+                continue
+            head = supersession.head(store, entry.get("row"))
+            if head is None or head.get("step") == "withdrawn":
+                continue
+            held[key] = (other, head["id"])
+    return held
+
+
 def _renamed_from(conn, op, rel_runbook, runbook_id):
     """The runbook id the latest intake of this runbook file into `op` used, when it differs from
     `runbook_id`; else None."""
@@ -520,7 +542,8 @@ def project_edit(root, key, value):
         raise IntakeError(str(exc), code=BLOCKED)
     if before.get(key) == value:
         return None
-    new = spec_kits._replace_top_block(text, key, yaml.safe_dump({key: value}, sort_keys=False))
+    new = spec_kits._replace_top_block(text, key, yaml.safe_dump({key: value}, sort_keys=False),
+                                       keep_comments=True)
     want = dict(before)
     want[key] = value
     try:
@@ -731,8 +754,10 @@ def plan(root, conn, spec_path, runbook_path, *, op=None, session="cli", actor=I
     if old_id:
         raise IntakeError("the runbook %s was taken into %s with the id %s and now has the id %s. Intake "
                           "keys rows and tasks by the runbook id, so a new id would add a second set "
-                          "next to the first and leave the old rows open. Put the id back to %s, or "
-                          "keep the new id in a new runbook file" % (rel_runbook, op, old_id, rb_id, old_id),
+                          "next to the first. Put the id back to %s. A new id in a new runbook file "
+                          "is taken in as a second runbook: the rows and tasks of %s stay open, and "
+                          "you close or withdraw them by hand" % (rel_runbook, op, old_id, rb_id, old_id,
+                                                                  old_id),
                           code=BLOCKED)
     stages = [s["id"] for s in data["stages"]]
     check_stage = {c["id"]: s["id"] for s in data["stages"] for c in (s.get("checks") or [])}
@@ -842,6 +867,9 @@ def plan(root, conn, spec_path, runbook_path, *, op=None, session="cli", actor=I
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 
+    held = _held_by_other_runbooks(conn, op, rb_id, keys, store)
+    lvl = _level(conn, session, root) if waive else None    # a dry run refuses what the run would
+
     prof = _profile_plan(root, rel_runbook, stages)
     existing = _intake_tasks(conn, op, rb_id)
     current = taskcontract.latest(conn)
@@ -874,8 +902,13 @@ def plan(root, conn, spec_path, runbook_path, *, op=None, session="cli", actor=I
             "stages": stages, "required": len(required), "rows": rows, "tasks": tasks,
             "profile": {"module": prof["module"], "action": prof["action"], "stages": stages,
                         "plugin_checks": _plugin_checks(data)},
-            "warnings": ["%s %s: %s" % (w["code"], w["where"] or "-", w["message"]) for w in checked["warnings"]],
-            "_files": files, "_batch": batch, "_waive": waive, "_items": items_after,
+            "warnings": ["%s %s: %s" % (w["code"], w["where"] or "-", w["message"]) for w in checked["warnings"]]
+                        + ["KEY-HELD-BY-ANOTHER-RUNBOOK %s: the runbook id %s holds the live row %s for "
+                           "this spec item in %s, so the op carries two rows for it. If %s is the old id "
+                           "of this runbook, its rows and tasks stay open until you close or withdraw "
+                           "them by hand (docs/intake.md)" % (key, other, row, op, other)
+                           for key, (other, row) in sorted(held.items())],
+            "_files": files, "_batch": batch, "_waive": waive, "_items": items_after, "_level": lvl,
             "_profile": prof, "_task_writes": task_writes, "_existing_tasks": existing}
 
 
@@ -894,7 +927,9 @@ def apply(root, conn, p, *, session="cli", actor=INSTRUMENT):
     from alpaca.gates import verdict
     if not _changed(p):
         return p
-    lvl = _level(conn, session, root) if p["_waive"] else None   # read before anything is written
+    lvl = p.get("_level") if p["_waive"] else None             # read by plan, before any write
+    if p["_waive"] and lvl is None:
+        lvl = _level(conn, session, root)
     for rel, text in p["_files"].items():
         full = os.path.join(root, rel)
         if os.path.isfile(full):

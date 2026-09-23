@@ -138,7 +138,8 @@ the open op opened last, and refuses when none is open. The op must be open.
 4. **Profile.** The runbook's stage ids become the project's profile stages, so a contract can
    name one. When `project.yaml` names no profile, intake writes `intake_profile.py` at the project
    root (a `RunbookProfile` that lists the runbooks intake has read) and sets
-   `profile: intake_profile` with a line edit that keeps the file's comments. It refuses (BLOCKED)
+   `profile: intake_profile` with a line edit that keeps the file's comments, the comments of a
+   `profile:` key it replaces included (a trailing `# ...` and the comment lines under it). It refuses (BLOCKED)
    instead of writing over an `intake_profile.py` it did not write, and instead of rewriting a
    `project.yaml` the line edit cannot handle. `alpaca doctor` then checks each runbook and each plugin check script
    (present and executable). When `project.yaml` names a profile of its own, intake leaves it and
@@ -181,7 +182,11 @@ withdrawn and the new one added.
 The runbook `id:` keys the item folder, the rows' baseline and the tasks. Keep it once the runbook
 has been taken in: when the latest intake of the same runbook file into the op used another id,
 intake refuses (BLOCKED) and names the old id, since a new id would add a second set of rows and
-tasks next to the first and leave the old rows open. A new id belongs in a new runbook file.
+tasks next to the first. Put the id back. A new id in a new runbook file (or in the same runbook
+moved to a new path) is taken in as a second runbook: its rows and tasks are added, and the rows
+and tasks of the old id stay open until you close or withdraw them by hand. Intake names each spec
+item that another runbook id of the op already holds with a live row, with the warning
+`KEY-HELD-BY-ANOTHER-RUNBOOK <key>` (in the dry run too), so the two sets never pass unnoticed.
 
 OpenSpec changes go in one at a time. Intake applies one change folder to the living specs, so a
 second change proposed while the first is still under `openspec/changes/` does not see the first
