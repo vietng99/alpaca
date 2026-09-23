@@ -71,6 +71,10 @@ once.
    that same name and keep the scenario name starting with the id (`#### Scenario: SC-002`), so the
    row it changes is the row that was there.
 4. The spec for the next steps is the change folder `openspec/changes/<id>`.
+5. One change at a time: intake applies one change folder to the living specs. If an earlier
+   change is still under `openspec/changes/` (not archived), archive it first (step 5) and take
+   the living specs in, then propose this one. Do not drop the earlier change's coverage from the
+   runbook to get past the check: intake would withdraw its rows.
 
 ## Step 3: the runbook
 
@@ -111,5 +115,7 @@ Run `bin/alpaca intake openspec/specs <runbook.yaml>` once more: it must say "no
 
 - Never write rows, tasks or contracts by hand; intake is the one writer for them.
 - Never edit an intake item file under `.alpaca/intake/`; a spec change is a new intake.
+- Never change the runbook `id:` after the first intake; intake refuses it. A new id belongs in a
+  new runbook file.
 - Never move an owner gate, and never approve one; that stays with the owner at every level.
 - Never pick the kit against the person's stated choice.

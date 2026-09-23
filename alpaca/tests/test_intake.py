@@ -487,3 +487,191 @@ def test_task_add_keeps_its_cli_behaviour(project, capsys):
     conn = db.connect(project)
     ev = db.events(conn, kind="task-add")[-1]
     assert ev["data"] == {"statement": "do the thing", "title": "Thing", "phase": None, "why": None}
+
+
+# ------------------------------------------------------------------------------ review fixes (t-008 REVIEW.md)
+def _row(root, rid):
+    from alpaca import db
+    return db.rows(db.connect(root), "rows", "id=?", (rid,))[0]
+
+
+def test_a_criterion_changed_and_changed_back_supersedes_again_and_intake_goes_on(kit, capsys):
+    """F1: 50 ms -> 30 ms -> 50 ms. The revert is a third row that cites the 30 ms row; it is not
+    the frozen first row derived again, so the bridge takes it and later intakes still run."""
+    _op(capsys)
+    rc, first = _cli(["intake", kit["spec"], kit["runbook"], "--json"], capsys)
+    original = {r["key"]: r["row"] for r in first["rows"]["added"]}["SC-002"]
+    _edit(kit["spec"], "within 50 ms at the 95th percentile", "within 30 ms at the 95th percentile")
+    rc, out = _cli(["intake", kit["spec"], kit["runbook"], "--json"], capsys)
+    assert rc == 0, out
+    thirty = out["rows"]["superseded"][0]["new"]
+    _edit(kit["spec"], "within 30 ms at the 95th percentile", "within 50 ms at the 95th percentile")
+    rc, out = _cli(["intake", kit["spec"], kit["runbook"], "--json"], capsys)
+    assert rc == 0, out
+    assert [(r["key"], r["old"]) for r in out["rows"]["superseded"]] == [("SC-002", thirty)]
+    back = out["rows"]["superseded"][0]["new"]
+    assert back not in (original, thirty)
+    row = _row(kit["root"], back)
+    assert row["supersedes"] == thirty and "50 ms" in row["statement"]
+    rc, again = _cli(["intake", kit["spec"], kit["runbook"], "--json"], capsys)
+    assert rc == 0 and again["changed"] is False, again
+    # and the op is not stuck: a runbook change after the revert still lands
+    _edit(kit["runbook"], "when: port 8080 is already taken, so the service under test never starts",
+          "when: port 8080 is taken")
+    rc, later = _cli(["intake", kit["spec"], kit["runbook"], "--json"], capsys)
+    assert rc == 0 and [t["key"] for t in later["tasks"]["contracts"]] == ["stage:load-test"], later
+
+
+def test_a_removed_criterion_restored_with_the_same_text_comes_back(kit, capsys):
+    """F1: a spec-kit SC removed (withdrawn and waived) and then restored with its old text."""
+    from alpaca import db
+    from alpaca.checklist import verdict_row
+    _op(capsys)
+    rc, first = _cli(["intake", kit["spec"], kit["runbook"], "--json"], capsys)
+    original = {r["key"]: r["row"] for r in first["rows"]["added"]}["SC-003"]
+    spec_text = open(kit["spec"], encoding="utf-8").read()
+    rb_text = open(kit["runbook"], encoding="utf-8").read()
+    _edit(kit["spec"], "- **SC-003**: No link is lost when the service restarts.\n", "")
+    _edit(kit["runbook"], "covers: [SC-003, FR-006]", "covers: [FR-006]")
+    rc, out = _cli(["intake", kit["spec"], kit["runbook"], "--json"], capsys)
+    assert rc == 0, out
+    withdrawn = out["rows"]["withdrawn"][0]["new"]
+    _write(kit["spec"], spec_text)
+    _write(kit["runbook"], rb_text)
+    rc, out = _cli(["intake", kit["spec"], kit["runbook"], "--json"], capsys)
+    assert rc == 0, out
+    assert [(r["key"], r["old"]) for r in out["rows"]["superseded"]] == [("SC-003", withdrawn)]
+    back = out["rows"]["superseded"][0]["new"]
+    assert back != original
+    row = _row(kit["root"], back)
+    assert row["step"] == "check" and row["supersedes"] == withdrawn
+    conn = db.connect(kit["root"])
+    assert verdict_row.status_fold(conn, back) == "open"
+    rc, again = _cli(["intake", kit["spec"], kit["runbook"], "--json"], capsys)
+    assert rc == 0 and again["changed"] is False, again
+    # removed a second time: a second withdrawal, not the first one derived again
+    _edit(kit["spec"], "- **SC-003**: No link is lost when the service restarts.\n", "")
+    _edit(kit["runbook"], "covers: [SC-003, FR-006]", "covers: [FR-006]")
+    rc, out = _cli(["intake", kit["spec"], kit["runbook"], "--json"], capsys)
+    assert rc == 0, out
+    assert out["rows"]["withdrawn"][0]["old"] == back
+    assert out["rows"]["withdrawn"][0]["new"] != withdrawn
+
+
+def test_a_removed_openspec_scenario_restored_comes_back(project, capsys):
+    """F1 for OpenSpec: a scenario removed and then restored with the same text."""
+    _op(capsys)
+    specs, rb = _openspec(project)
+    rc, first = _cli(["intake", specs, rb, "--json"], capsys)
+    assert rc == 0, first
+    living = LIVING.replace("""#### Scenario: invalid url
+- **WHEN** a client posts a string that is not a URL
+- **THEN** the service answers 400
+
+""", "")
+    specs, rb = _openspec(project, living, tests="Shorten/valid url")
+    rc, out = _cli(["intake", specs, rb, "--json"], capsys)
+    assert rc == 0 and len(out["rows"]["withdrawn"]) == 1, out
+    specs, rb = _openspec(project)
+    rc, out = _cli(["intake", specs, rb, "--json"], capsys)
+    assert rc == 0, out
+    assert [r["key"] for r in out["rows"]["superseded"]] == ["links/Shorten/invalid url"]
+    rc, again = _cli(["intake", specs, rb, "--json"], capsys)
+    assert rc == 0 and again["changed"] is False, again
+
+
+def test_a_renamed_runbook_id_is_refused(kit, capsys):
+    """L1: the rows and tasks are keyed by the runbook id; a new id on the same file would add a
+    second set next to the first, so intake refuses and names the old id."""
+    _op(capsys)
+    assert _cli(["intake", kit["spec"], kit["runbook"], "--json"], capsys)[0] == 0
+    before = _counts(kit["root"])
+    _edit(kit["runbook"], "id: link-shortener", "id: link-shortener-2")
+    rc, out = _cli(["intake", kit["spec"], kit["runbook"], "--json"], capsys)
+    assert rc == 2 and out["verdict"] == "BLOCKED", out
+    assert "link-shortener" in out["reason"] and "link-shortener-2" in out["reason"]
+    assert _counts(kit["root"]) == before
+
+
+def test_a_chain_drift_halt_is_a_gate_line(kit, capsys, monkeypatch):
+    """L3: a Halt from supersession (here a prev_hash break) is a BLOCKED gate line, not a traceback."""
+    from alpaca.checklist import Halt, supersession
+    from alpaca.gates import verdict as vc
+    _op(capsys)
+    assert _cli(["intake", kit["spec"], kit["runbook"], "--json"], capsys)[0] == 0
+    _edit(kit["spec"], "within 50 ms at the 95th percentile", "within 30 ms at the 95th percentile")
+
+    def drift(rows):
+        raise Halt(vc.BLOCKED, supersession.R_CHAIN_DRIFT, "row 2 prev_hash=x, chain expected y")
+    monkeypatch.setattr(supersession, "verify_chain", drift)
+    before = _counts(kit["root"])
+    rc, out = _cli(["intake", kit["spec"], kit["runbook"]], capsys)
+    assert rc == 2, out
+    assert "SUPERSESSION-CHAIN-DRIFT" in out and "GATE alpaca-intake: BLOCKED" in out
+    assert _counts(kit["root"]) == before
+
+
+def test_a_level_that_cannot_be_read_refuses_the_waiver(project, capsys):
+    """L4: the level in force cannot be read (a bad default_level), so the withdrawal is refused
+    before anything is written, instead of a waiver recorded at a level nobody set."""
+    _op(capsys)
+    specs, rb = _openspec(project)
+    assert _cli(["intake", specs, rb, "--json"], capsys)[0] == 0
+    with open(os.path.join(project, "project.yaml"), "a", encoding="utf-8") as fh:
+        fh.write("default_level: banana\n")
+    living = LIVING.replace("""#### Scenario: invalid url
+- **WHEN** a client posts a string that is not a URL
+- **THEN** the service answers 400
+
+""", "")
+    specs, rb = _openspec(project, living, tests="Shorten/valid url")
+    before = _counts(project)
+    rc, out = _cli(["intake", specs, rb, "--json"], capsys)
+    assert rc == 2 and out["verdict"] == "BLOCKED" and "level" in out["reason"], out
+    assert _counts(project) == before
+
+
+def test_a_project_yaml_that_cannot_be_edited_in_place_is_refused(kit, capsys):
+    """L5: a project.yaml the text edit cannot keep (a flow mapping) is never rewritten through a
+    full dump that drops its comments."""
+    _op(capsys)
+    path = os.path.join(kit["root"], "project.yaml")
+    text = "# keep this comment\n{name: shortener, owner: me}\n"
+    _write(path, text)
+    rc, out = _cli(["intake", kit["spec"], kit["runbook"], "--dry-run", "--json"], capsys)
+    assert rc == 2 and "project.yaml" in out["reason"], out
+    rc, out = _cli(["intake", kit["spec"], kit["runbook"], "--json"], capsys)
+    assert rc == 2 and "project.yaml" in out["reason"], out
+    assert open(path, encoding="utf-8").read() == text
+
+
+def test_a_hand_written_intake_profile_is_not_overwritten(kit, capsys):
+    """L5: intake_profile.py that intake did not write is left alone and intake refuses."""
+    _op(capsys)
+    path = os.path.join(kit["root"], "intake_profile.py")
+    _write(path, "# my own profile\nPROFILE = None\n")
+    before = _counts(kit["root"])
+    rc, out = _cli(["intake", kit["spec"], kit["runbook"], "--json"], capsys)
+    assert rc == 2 and "intake_profile.py" in out["reason"], out
+    assert open(path, encoding="utf-8").read() == "# my own profile\nPROFILE = None\n"
+    assert _counts(kit["root"]) == before
+
+
+def test_row_statement_is_plain_text_and_the_item_file_has_a_format_line(project, capsys):
+    """L6: the criterion loses its markdown emphasis and ends with a period before "Shown by", and
+    the item file names its format, so a later layout change is a deliberate one."""
+    _op(capsys)
+    specs, rb = _openspec(project)
+    rc, out = _cli(["intake", specs, rb, "--json"], capsys)
+    assert rc == 0, out
+    rid = {r["key"]: r["row"] for r in out["rows"]["added"]}["links/Shorten/valid url"]
+    row = _row(project, rid)
+    assert "**" not in row["statement"], row["statement"]
+    assert "WHEN a client posts an http URL" in row["statement"]
+    assert "7-character code. Shown by test/tests-exit." in row["statement"], row["statement"]
+    item = row["proof"][len("local:"):].rsplit(":", 1)[0]
+    text = open(os.path.join(project, item), encoding="utf-8").read()
+    assert "format 1" in text.splitlines()[0]
+    from alpaca import intake
+    assert intake.criterion({"text": "it works"}) == "it works."
+    assert intake.criterion({"text": "Is it *fast*?"}) == "Is it fast?"

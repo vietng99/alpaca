@@ -70,7 +70,10 @@ OpenSpec scenario whose name starts with a spec-kit id keeps that id: `alpaca ru
 intake keys its row by the id. The scenario body is the criterion text, so the rows intake made
 from the spec-kit spec are kept with their verdicts. The move never writes over an existing file,
 records `moved_from` in the `spec:` block of `project.yaml`, and leaves the spec-kit files as
-history. A later OpenSpec change modifies `### Requirement: SC-002` under that name and keeps the
+history. It happens once: with `moved_from` recorded, a later `--prepare` says "already moved"
+and leaves the moved specs and the block as they are. Two feature folders whose names map to one
+capability (`001-links` and `002-links`) are refused (BLOCKED) before anything is installed or
+written; rename one of them first. A later OpenSpec change modifies `### Requirement: SC-002` under that name and keeps the
 scenario name starting with `SC-002`.
 
 ## alpaca intake
@@ -105,13 +108,20 @@ the open op opened last, and refuses when none is open. The op must be open.
    no row. For each item intake writes an intake item file, a one-row acceptance table:
 
    ```
-   | key | criterion | shown by | kind |
-   |---|---|---|---|
-   | SC-002 | A redirect answers within 50 ms at the 95th percentile under 200 requests per second. | load-test/redirect-p95, load-test/redirect-codes | check |
+   Intake item file, format 1. alpaca intake wrote this file ...
+
+   | key | criterion | shown by | kind | supersedes |
+   |---|---|---|---|---|
+   | SC-002 | A redirect answers within 50 ms at the 95th percentile under 200 requests per second. | load-test/redirect-p95, load-test/redirect-codes | check | - |
    ```
 
    The file sits under `.alpaca/intake/<op>/<runbook id>/items/` and its name ends with the first
-   twelve hex digits of its own sha256, so it is never rewritten. The acceptance-table parser
+   twelve hex digits of its own sha256, so it is never rewritten. `supersedes` is `-` for a first
+   row and the id of the row it replaces otherwise. The criterion is plain text: markdown emphasis
+   (`**WHEN**`) is dropped and it ends with a period. The row id digests the file bytes, so the
+   layout is part of each row's identity; the first line names the layout's format number, and a
+   change to the layout is a new format number and a documented change, since it makes every
+   intake row look changed at the next intake. The acceptance-table parser
    (`alpaca/checklist/artifact.py`) reads it, synthesis (`alpaca/checklist/synthesis.py`) makes the
    row, and the bridge (`alpaca/checklist/bridge.py`) lands it in the record. `shown by` names the
    checks (`<stage>/<check>`) that cover the item, or `the owner gate of stage <id>`. An item
@@ -128,7 +138,9 @@ the open op opened last, and refuses when none is open. The op must be open.
 4. **Profile.** The runbook's stage ids become the project's profile stages, so a contract can
    name one. When `project.yaml` names no profile, intake writes `intake_profile.py` at the project
    root (a `RunbookProfile` that lists the runbooks intake has read) and sets
-   `profile: intake_profile`. `alpaca doctor` then checks each runbook and each plugin check script
+   `profile: intake_profile` with a line edit that keeps the file's comments. It refuses (BLOCKED)
+   instead of writing over an `intake_profile.py` it did not write, and instead of rewriting a
+   `project.yaml` the line edit cannot handle. `alpaca doctor` then checks each runbook and each plugin check script
    (present and executable). When `project.yaml` names a profile of its own, intake leaves it and
    refuses (BLOCKED) unless that profile already declares every stage of the runbook.
 5. One `intake` event records the run: the op, the runbook, the spec, the row of each key, the task
@@ -145,13 +157,19 @@ item with the row the previous intake recorded for its key:
 
 | item | what intake does | mark |
 |---|---|---|
-| same text, same checks | nothing: the row, its id and its verdicts stay | `=` kept |
-| text or covering checks changed | a new row that cites the old one (`supersedes`), frozen and landed through `alpaca/checklist/supersession.py` and the bridge; the old row stays in the record, pointed forward by `superseded_by`, and drops off the board | `~` superseded |
+| same text and checks as its current row | nothing: the row, its id and its verdicts stay | `=` kept |
+| text or covering checks changed | a new row that cites the current one (`supersedes`), frozen and landed through `alpaca/checklist/supersession.py` and the bridge; the old row stays in the record, pointed forward by `superseded_by`, and drops off the board | `~` superseded |
 | gone from the spec | a withdrawal row that cites the old one, plus a waiver ("the spec no longer has this item") at the level in force, so it shows as done | `-` withdrawn |
 | new in the spec | a new row | `+` added |
 
+"Current row" is the head of the key's supersession chain. An item that goes back to text it had
+before (a reverted change, or a removed item restored with the same text) is compared with the
+current row, not with the old one, so it is a change: a new row that cites the current row. Its
+item file names that row in `supersedes`, so it never derives the frozen old row's id again.
+
 Verdicts bind a row id and its content hash, so a kept row keeps its verdicts and a superseded
-row's verdicts stay with the old row: the new row starts open and needs its own proof. A task whose
+row's verdicts stay with the old row: the new row starts open and needs its own proof. That holds
+for a revert too: the verdicts of the first row stay with it, and the new row needs its own proof. A task whose
 stage changed gets a new contract (the newest is current); a new stage gets a new task; a stage
 no longer in the runbook is listed as `!` and its task is left for a person to close or block.
 A rerun with nothing changed writes nothing at all (`nothing to change`).
@@ -160,12 +178,27 @@ The key of an item is its spec-kit id (`SC-002`, also when an OpenSpec scenario 
 else the OpenSpec scenario id. A renamed scenario or requirement is a new key: its old row is
 withdrawn and the new one added.
 
+The runbook `id:` keys the item folder, the rows' baseline and the tasks. Keep it once the runbook
+has been taken in: when the latest intake of the same runbook file into the op used another id,
+intake refuses (BLOCKED) and names the old id, since a new id would add a second set of rows and
+tasks next to the first and leave the old rows open. A new id belongs in a new runbook file.
+
+OpenSpec changes go in one at a time. Intake applies one change folder to the living specs, so a
+second change proposed while the first is still under `openspec/changes/` does not see the first
+one's requirements, and the runbook check refuses it (`COVERS-UNKNOWN`). Archive the first change
+and take `openspec/specs` in, then take the next change in. Do not drop the first change's
+coverage from the runbook to get past the check: intake would then withdraw and waive its rows.
+
+A withdrawal is waived at the level in force for the session. When that level cannot be read (a
+`default_level` in `project.yaml` that is not a level), intake refuses (BLOCKED) before it writes
+anything.
+
 ### Refusals
 
 | exit | when |
 |---|---|
 | 1 FAIL | the runbook fails `alpaca runbook check` against the spec; two items share a key; a change folder does not apply to the living specs; the spec cannot be parsed |
-| 2 BLOCKED | no open op (or the named op is closed); the runbook is outside the project; the project's own profile lacks runbook stages; a row to supersede does not match the intake item it names |
+| 2 BLOCKED | no open op (or the named op is closed); the runbook is outside the project; the project's own profile lacks runbook stages; a row to supersede does not match the intake item it names, or supersession refuses the chain; the runbook id changed since the last intake of that file; the level in force cannot be read for a waiver; `project.yaml` cannot take `profile:` by a line edit (a flow mapping, say), since intake never rewrites the whole file; an `intake_profile.py` that intake did not write is in the way |
 | 64 | a spec or runbook argument is missing |
 
 ### Output

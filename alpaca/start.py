@@ -14,7 +14,9 @@ The pick (the person can override it with --kit):
 
 A project uses one kit at a time. The first change to a spec-kit project moves it to OpenSpec:
 `--prepare` installs OpenSpec and writes each spec-kit spec as a living OpenSpec spec, one
-requirement per success criterion and functional requirement. Each scenario is named by its
+requirement per success criterion and functional requirement. It moves once: when `moved_from`
+is already in the `spec:` block, a later `--prepare` leaves the moved specs and the block alone.
+Two feature folders that map to one capability name are refused. Each scenario is named by its
 spec-kit id (`#### Scenario: SC-002`) and holds the criterion text, so the runbook's `covers`
 entries still match and `alpaca intake` keeps every row and its verdicts across the move. The
 spec-kit files stay as they are, as history.
@@ -128,9 +130,25 @@ def moved_spec_text(spec_path, rel_path):
     return "\n".join(out)
 
 
+def _refuse_collisions(root):
+    """Refuse (BLOCKED) when two or more feature folders map to one capability name, since the
+    move would write only the first of them."""
+    caps = {}
+    for rel in speckit_specs(root):
+        caps.setdefault(capability_name(os.path.dirname(rel)), []).append(rel)
+    clash = {cap: rels for cap, rels in caps.items() if len(rels) > 1}
+    if clash:
+        raise StartError("two spec-kit features map to one OpenSpec capability: %s. Rename a feature "
+                         "folder so each name after the number is its own, then run --prepare again"
+                         % "; ".join("%s from %s" % (cap, ", ".join(rels)) for cap, rels in sorted(clash.items())),
+                         code=BLOCKED)
+
+
 def move_to_openspec(root):
     """Write every spec-kit spec as a living OpenSpec spec (never over an existing file).
-    Returns [(spec-kit spec, OpenSpec spec, written?)]."""
+    Returns [(spec-kit spec, OpenSpec spec, written?)]. Two feature folders that map to one
+    capability name are refused before anything is written."""
+    _refuse_collisions(root)
     done = []
     for rel in speckit_specs(root):
         cap = capability_name(os.path.dirname(rel))
@@ -149,6 +167,10 @@ def prepare(root, kit, mode):
     from alpaca import spec_kits
     st = state(root)
     done = []
+    moved_from = spec_kits.recorded(root).get("moved_from")
+    moved_from = moved_from if isinstance(moved_from, dict) else None
+    if kit == "openspec" and st["speckit_specs"] and not moved_from:
+        _refuse_collisions(root)             # before the install, not halfway through
     if kit not in st["installed"] or st["recorded"] != kit:
         other = [k for k in KITS if k != kit][0]
         force = other in st["installed"] or st["recorded"] == other
@@ -161,7 +183,10 @@ def prepare(root, kit, mode):
             raise StartError("alpaca spec init --kit %s: %s" % (kit, exc),
                              code=BLOCKED if exc.blocked else FAIL)
         done.append("installed %s%s" % (kit, " (the project moves from spec-kit)" if force else ""))
-    if kit == "openspec" and st["speckit_specs"]:
+    if kit == "openspec" and st["speckit_specs"] and moved_from:
+        done.append("already moved from spec-kit (%s); the spec-kit files stay as history"
+                    % ", ".join(str(x) for x in (moved_from.get("specs") or [])))
+    elif kit == "openspec" and st["speckit_specs"]:
         moved = move_to_openspec(root)
         for src, dst, wrote in moved:
             done.append("%s %s from %s" % ("wrote" if wrote else "kept the existing", dst, src))

@@ -97,7 +97,7 @@ def test_prepare_moves_a_spec_kit_project_to_openspec_and_records_the_choice(pro
     with open(moved, "a", encoding="utf-8") as fh:
         fh.write("\n<!-- edited -->\n")
     rc, out = _cli(["start", NOTES, "--prepare", "--json"], capsys)
-    assert rc == 0 and any("kept the existing" in p for p in out["prepared"])
+    assert rc == 0 and any("already moved" in p for p in out["prepared"])
     assert "<!-- edited -->" in open(moved, encoding="utf-8").read()
 
 
@@ -111,3 +111,44 @@ def test_the_moved_spec_passes_the_example_runbook(project):
     result = runbook.check(os.path.join(EXAMPLE, "runbook.yaml"), os.path.join(project, "openspec", "specs"))
     assert result["verdict"] == "PASS", result["errors"]
     assert "The system SHALL meet success criterion SC-002." in text
+
+
+def test_prepare_after_the_move_does_not_move_again(project, capsys, monkeypatch):
+    """L7: once moved_from is recorded, --prepare leaves the moved specs and the spec block alone."""
+    from alpaca import spec_kits
+
+    def fake_init(root, kit, force=False, vendor_dir=None):
+        spec_kits.record(root, {"kit": kit, "version": "test", "also_present": "spec-kit"})
+        return {"verdict": "PASS"}
+    monkeypatch.setattr(spec_kits, "init", fake_init)
+    spec_kits.record(project, {"kit": "spec-kit", "version": "test"})
+    _feature(project)
+    rc, out = _cli(["start", NOTES, "--prepare", "--json"], capsys)
+    assert rc == 0, out
+    with open(os.path.join(project, "project.yaml"), encoding="utf-8") as fh:
+        before = fh.read()
+    rc, out = _cli(["start", NOTES, "--prepare", "--json"], capsys)
+    assert rc == 0, out
+    assert any("already moved" in p for p in out["prepared"]), out["prepared"]
+    assert not any("kept the existing" in p for p in out["prepared"])
+    with open(os.path.join(project, "project.yaml"), encoding="utf-8") as fh:
+        assert fh.read() == before
+
+
+def test_two_features_with_one_capability_name_are_refused(project, capsys, monkeypatch):
+    """L7: 001-link-shortener and 002-link-shortener both map to link-shortener; the move refuses
+    and writes nothing, instead of moving only the first."""
+    from alpaca import spec_kits
+
+    def fake_init(root, kit, force=False, vendor_dir=None):
+        spec_kits.record(root, {"kit": kit, "version": "test", "also_present": "spec-kit"})
+        return {"verdict": "PASS"}
+    monkeypatch.setattr(spec_kits, "init", fake_init)
+    spec_kits.record(project, {"kit": "spec-kit", "version": "test"})
+    _feature(project)
+    dst = os.path.join(project, "specs", "002-link-shortener")
+    os.makedirs(dst)
+    shutil.copy(os.path.join(EXAMPLE, "spec.md"), os.path.join(dst, "spec.md"))
+    rc, out = _cli(["start", NOTES, "--prepare", "--json"], capsys)
+    assert rc == 2 and "link-shortener" in out["reason"], out
+    assert not os.path.exists(os.path.join(project, "openspec", "specs", "link-shortener"))

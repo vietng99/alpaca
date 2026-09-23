@@ -8,8 +8,9 @@ Intake is a front door onto the checklist engine Alpaca already has, not a secon
     into one obligation row by synthesis (`checklist.synthesis`, the step model below) and landed by
     the bridge (`checklist.bridge`). The row id digests the file bytes, so an unchanged criterion
     keeps its row id, its row and its verdicts across intakes.
-  * a changed criterion gets a new row that cites the old one (`checklist.supersession.supersede`,
-    cite-and-freeze), landed by the same bridge; a removed one gets a withdrawal row that cites it
+  * a changed criterion gets a new row that cites the current one (`checklist.supersession.supersede`,
+    cite-and-freeze), landed by the same bridge. Its item file names the row it replaces, so a
+    criterion that goes back to earlier text is a new row too, never a frozen row derived again; a removed one gets a withdrawal row that cites it
     and a waiver (`checklist.verdict_row.waive`) that says why. A new one is added. Nothing is edited
     in place and nothing is deleted.
   * task contracts: one task per runbook stage and one per owner gate, added through
@@ -86,11 +87,18 @@ STEP_MODEL = {
     ],
 }
 
-_ITEM_HEADER = ("Intake item. alpaca intake wrote this file from a spec and a runbook and never "
-                "edits it; a later intake that sees a change writes a new file.")
+#: the layout of an intake item file. The file bytes are part of each row's identity (the row id
+#: digests them), so a change to this layout, to `item_text`, `_cell` or `criterion` makes every
+#: intake row look changed at the next intake. Such a change bumps this number and says so in
+#: docs/intake.md; it is never made in passing.
+ITEM_FORMAT = 1
+_ITEM_HEADER = ("Intake item file, format %d. alpaca intake wrote this file from a spec and a runbook "
+                "and never edits it; a later intake that sees a change writes a new file." % ITEM_FORMAT)
 _SLUG = re.compile(r"[^a-z0-9]+")
 _OP_ID = re.compile(r"^op-\d+$")
 _LIST_MARK = re.compile(r"^(?:[-*+]|\d{1,9}[.)])\s+")
+_STRONG = re.compile(r"\*\*(?=\S)(.+?)(?<=\S)\*\*")
+_EMPH = re.compile(r"(?<![\w*])\*(?=\S)([^*]+?)(?<=\S)\*(?![\w*])")
 _RENAME = re.compile(r"^\s*[-*]?\s*(FROM|TO)\s*:\s*`?\s*#{0,6}\s*(?:Requirement:\s*)?(.+?)\s*`?\s*$", re.I)
 
 
@@ -263,18 +271,27 @@ def item_key(item):
     return item.get("alias") or item["id"]
 
 
+def _plain(text):
+    """`text` without markdown emphasis (`**x**`, `*x*`), ending with a sentence mark."""
+    text = _EMPH.sub(r"\1", _STRONG.sub(r"\1", text)).strip()
+    if text and text[-1] not in ".!?":
+        text += "."
+    return text
+
+
 def criterion(item):
-    """The text a row stands for, on one line. spec-kit: the text after the id. OpenSpec: the
-    scenario name (without a leading spec-kit id) and the scenario body."""
+    """The text a row stands for, on one line, as plain text that ends with a period. spec-kit:
+    the text after the id. OpenSpec: the scenario name (without a leading spec-kit id) and the
+    scenario body."""
     from alpaca import runbook
     if "body" not in item:
-        return _canon([item.get("text") or ""])
+        return _plain(_canon([item.get("text") or ""]))
     alias, rest = runbook.scenario_alias(item.get("text") or "")
     title = _canon([rest if alias else (item.get("text") or "")])
     body = _canon(item.get("body") or [])
     if title and body:
-        return "%s: %s" % (title, body)
-    return title or body
+        return _plain("%s: %s" % (title, body))
+    return _plain(title or body)
 
 
 # ------------------------------------------------------------------------------ item files
@@ -286,9 +303,14 @@ def _cell(text):
     return " ".join(str(text).split()).replace("\\", "\\\\").replace("|", "\\|")
 
 
-def item_text(key, crit, shown_by, kind):
-    return ("%s\n\n| key | criterion | shown by | kind |\n|---|---|---|---|\n| %s | %s | %s | %s |\n"
-            % (_ITEM_HEADER, _cell(key), _cell(crit), _cell(shown_by), kind))
+def item_text(key, crit, shown_by, kind, supersedes=None):
+    """The bytes of one intake item file. `supersedes` is the row this item replaces ("-" for a
+    first row): it keeps a superseding item apart from every earlier row of its key, so a
+    criterion that goes back to earlier text (a revert, or a removed item restored) gets a new row
+    that cites the current one instead of deriving a frozen row's id again."""
+    return ("%s\n\n| key | criterion | shown by | kind | supersedes |\n|---|---|---|---|---|\n"
+            "| %s | %s | %s | %s | %s |\n"
+            % (_ITEM_HEADER, _cell(key), _cell(crit), _cell(shown_by), kind, _cell(supersedes or "-")))
 
 
 def _step_model(scratch):
@@ -326,6 +348,16 @@ def baseline(conn, op, runbook_id):
         d = e["data"]
         if d.get("op") == op and d.get("runbook_id") == runbook_id:
             return d
+    return None
+
+
+def _renamed_from(conn, op, rel_runbook, runbook_id):
+    """The runbook id the latest intake of this runbook file into `op` used, when it differs from
+    `runbook_id`; else None."""
+    for e in reversed(db.events(conn, kind=EVENT, limit=10 ** 9)):
+        d = e["data"]
+        if d.get("op") == op and d.get("runbook") == rel_runbook:
+            return d.get("runbook_id") if d.get("runbook_id") != runbook_id else None
     return None
 
 
@@ -473,23 +505,43 @@ def _read_project(root):
         raise IntakeError(str(exc), code=BLOCKED)
 
 
-def set_project_key(root, key, value):
-    """Write the top-level `key: value` into project.yaml, keeping comments and every other key
-    (the same text edit `alpaca spec init` uses for its block). Returns whether it wrote."""
+def project_edit(root, key, value):
+    """The project.yaml text with the top-level `key: value` set, keeping comments and every other
+    key (the same text edit `alpaca spec init` uses for its block), or None when it already says so.
+    A file the text edit cannot keep whole (a flow mapping, say) is refused, never rewritten
+    through a full dump that would drop its comments."""
     import yaml
     from alpaca import spec_kits
     path = os.path.join(root, "project.yaml")
     text = util.read_text(path) if os.path.isfile(path) else ""
-    before = spec_kits._parse_yaml(text)
+    try:
+        before = spec_kits._parse_yaml(text)
+    except spec_kits.KitError as exc:
+        raise IntakeError(str(exc), code=BLOCKED)
     if before.get(key) == value:
-        return False
+        return None
     new = spec_kits._replace_top_block(text, key, yaml.safe_dump({key: value}, sort_keys=False))
-    after = yaml.safe_load(new) or {}
     want = dict(before)
     want[key] = value
+    try:
+        after = yaml.safe_load(new) or {}
+    except yaml.YAMLError:
+        after = None
     if after != want:
-        new = yaml.safe_dump(want, sort_keys=False, allow_unicode=True)
-    util.write_text(path, new)
+        raise IntakeError("project.yaml cannot take `%s: %s` by a line edit (its layout is not one "
+                          "top-level key per line), and intake will not rewrite the whole file and drop "
+                          "its comments; add the line `%s: %s` by hand and run intake again"
+                          % (key, value, key, value), code=BLOCKED)
+    return new
+
+
+def set_project_key(root, key, value):
+    """Write the top-level `key: value` into project.yaml through `project_edit`. Returns whether
+    it wrote."""
+    new = project_edit(root, key, value)
+    if new is None:
+        return False
+    util.write_text(os.path.join(root, "project.yaml"), new)
     return True
 
 
@@ -512,9 +564,13 @@ def _profile_runbooks(root):
     return []
 
 
+#: the first line of every intake_profile.py intake writes; a file without it is someone else's.
+_PROFILE_MARK = '"""The domain profile `alpaca intake` writes (docs/intake.md).\n'
+
+
 def profile_text(runbooks):
     lines = ",\n".join("    %s" % json.dumps(r) for r in runbooks)
-    return ('"""The domain profile `alpaca intake` writes (docs/intake.md).\n\n'
+    return (_PROFILE_MARK + '\n'
             "It names the runbooks intake has read. Their stage ids are this project's profile stages,\n"
             "so a task contract can name one, and `alpaca doctor` checks each runbook and its plugin\n"
             "check scripts. alpaca intake rewrites this file. For hooks of your own, write your own\n"
@@ -613,9 +669,14 @@ def _profile_plan(root, rel_runbook, stages):
     text = profile_text(runbooks)
     path = os.path.join(root, PROFILE_FILE)
     writes = {}
+    if os.path.isfile(path) and not util.read_text(path).startswith(_PROFILE_MARK):
+        raise IntakeError("%s exists and intake did not write it; intake will not write over it. Move "
+                          "it, or name it in project.yaml `profile:` with the runbook stages"
+                          % PROFILE_FILE, code=BLOCKED)
     if not os.path.isfile(path) or util.read_text(path) != text:
         writes["file"] = text
     if named != PROFILE_MODULE:
+        project_edit(root, "profile", PROFILE_MODULE)       # refuses now, not halfway through apply
         writes["project.yaml"] = PROFILE_MODULE
     return {"module": PROFILE_MODULE, "action": "write" if writes else "kept", "writes": writes,
             "runbooks": runbooks}
@@ -651,7 +712,7 @@ def _open_op(conn, op):
 def plan(root, conn, spec_path, runbook_path, *, op=None, session="cli", actor=INSTRUMENT):
     """Everything intake would do, and nothing done. Raises IntakeError on a refusal."""
     from alpaca import runbook, taskcontract
-    from alpaca.checklist import supersession
+    from alpaca.checklist import Halt, supersession
     op = _open_op(conn, op)
     rel_runbook = _rel(root, runbook_path)
     if rel_runbook is None:
@@ -666,6 +727,13 @@ def plan(root, conn, spec_path, runbook_path, *, op=None, session="cli", actor=I
                                   for e in checked["errors"]])
     data, _report = runbook.load(runbook_path)
     rb_id = data["id"]
+    old_id = _renamed_from(conn, op, rel_runbook, rb_id)
+    if old_id:
+        raise IntakeError("the runbook %s was taken into %s with the id %s and now has the id %s. Intake "
+                          "keys rows and tasks by the runbook id, so a new id would add a second set "
+                          "next to the first and leave the old rows open. Put the id back to %s, or "
+                          "keep the new id in a new runbook file" % (rel_runbook, op, old_id, rb_id, old_id),
+                          code=BLOCKED)
     stages = [s["id"] for s in data["stages"]]
     check_stage = {c["id"]: s["id"] for s in data["stages"] for c in (s.get("checks") or [])}
     covered = checked["coverage"]["covered"]
@@ -690,8 +758,8 @@ def plan(root, conn, spec_path, runbook_path, *, op=None, session="cli", actor=I
         rows = {"added": [], "kept": [], "superseded": [], "withdrawn": []}
         files, batch, waive, items_after = {}, [], [], {}
 
-        def build(key, crit, shown, kind):
-            text = item_text(key, crit, shown, kind)
+        def build(key, crit, shown, kind, supersedes=None):
+            text = item_text(key, crit, shown, kind, supersedes)
             rel = "%s/%s.%s.md" % (item_dir, _slug(key), util.sha256_hex(text)[:12])
             row = _derive(model, scratch, rel, text, kind, op, session, actor)
             return rel, text, row
@@ -702,25 +770,39 @@ def plan(root, conn, spec_path, runbook_path, *, op=None, session="cli", actor=I
                 return None
             return supersession.head(store, entry.get("row"))
 
+        def supersede(key, head, rel, text, row):
+            """`row` (built citing `head`) frozen onto the lineage of `head`, or a refusal."""
+            if row["id"] in by_id:
+                raise IntakeError("the row %s that would supersede %s for %s is already in the record; "
+                                  "intake will not land it twice" % (row["id"], head["id"], key), code=BLOCKED)
+            try:
+                chain = supersession.supersede(_lineage(store, head, key), head["id"],
+                                               dict(row, supersedes=head["id"]))
+            except Halt as h:
+                raise IntakeError("supersession refused the row for %s: %s %s" % (key, h.code, h.detail),
+                                  code=BLOCKED)
+            batch.append(chain[-1])
+            files[rel] = text
+            return chain[-1]
+
         for key, item in keys.items():
             who = covered.get(item["id"]) or []
             checks = [w for w in who if not w.startswith("gate:")]
             shown = ", ".join("%s/%s" % (check_stage.get(w, "?"), w) if not w.startswith("gate:")
                               else "the owner gate of stage %s" % w[5:] for w in who)
             kind = "check" if checks else "review"
-            rel, text, row = build(key, criterion(item), shown, kind)
             head = head_of(key)
+            # the item as the current head would hold it: same text, same predecessor
+            rel, text, row = build(key, criterion(item), shown, kind, head and head.get("supersedes"))
             entry = {"key": key, "row": row["id"], "step": kind, "shown_by": shown}
             if head is not None and head["id"] == row["id"]:
                 from alpaca.checklist import verdict_row
                 rows["kept"].append(dict(entry, status=verdict_row.status_fold(conn, row["id"])))
             elif head is not None:
-                new_row = dict(row, supersedes=head["id"])
-                chain = supersession.supersede(_lineage(store, head, key), head["id"], new_row)
-                batch.append(chain[-1])
-                files[rel] = text
-                rows["superseded"].append(dict(entry, old=head["id"], new=chain[-1]["id"]))
-                entry["row"] = chain[-1]["id"]
+                rel, text, row = build(key, criterion(item), shown, kind, head["id"])
+                new = supersede(key, head, rel, text, row)
+                rows["superseded"].append(dict(entry, old=head["id"], new=new["id"]))
+                entry["row"] = new["id"]
             elif row["id"] in by_id:
                 rows["kept"].append(dict(entry, status="landed earlier"))
             else:
@@ -745,21 +827,18 @@ def plan(root, conn, spec_path, runbook_path, *, op=None, session="cli", actor=I
             old_file = _proof_path(head)
             old_crit = ""
             if old_file and os.path.isfile(os.path.join(root, old_file)):
-                from alpaca.checklist import Halt, artifact
+                from alpaca.checklist import artifact
                 try:
                     old = artifact.parse(os.path.join(root, old_file), KEY_COLUMN)
                     old_crit = (old["items"][0]["cells"].get("criterion") or "")
                 except Halt:
                     old_crit = ""
-            rel, text, row = build(key, old_crit or "(the text is not on file)", "-", "withdrawn")
-            new_row = dict(row, supersedes=head["id"])
-            chain = supersession.supersede(_lineage(store, head, key), head["id"], new_row)
-            batch.append(chain[-1])
-            files[rel] = text
-            waive.append(chain[-1]["id"])
-            rows["withdrawn"].append({"key": key, "old": head["id"], "new": chain[-1]["id"],
-                                      "row": chain[-1]["id"], "step": "withdrawn"})
-            items_after[key] = {"row": chain[-1]["id"], "step": "withdrawn"}
+            rel, text, row = build(key, old_crit or "(the text is not on file)", "-", "withdrawn", head["id"])
+            new = supersede(key, head, rel, text, row)
+            waive.append(new["id"])
+            rows["withdrawn"].append({"key": key, "old": head["id"], "new": new["id"],
+                                      "row": new["id"], "step": "withdrawn"})
+            items_after[key] = {"row": new["id"], "step": "withdrawn"}
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 
@@ -815,6 +894,7 @@ def apply(root, conn, p, *, session="cli", actor=INSTRUMENT):
     from alpaca.gates import verdict
     if not _changed(p):
         return p
+    lvl = _level(conn, session, root) if p["_waive"] else None   # read before anything is written
     for rel, text in p["_files"].items():
         full = os.path.join(root, rel)
         if os.path.isfile(full):
@@ -855,7 +935,6 @@ def apply(root, conn, p, *, session="cli", actor=INSTRUMENT):
             with db.transaction(conn):
                 migrate._backfill_superseded_by(conn)
     if p["_waive"]:
-        lvl = _level(conn, session, root)
         store = db.rows(conn, "rows", "1=1")
         by_id = {r["id"]: r for r in store}
         for rid in p["_waive"]:
@@ -898,11 +977,20 @@ def apply(root, conn, p, *, session="cli", actor=INSTRUMENT):
 
 
 def _level(conn, session, root):
+    """The level in force, as "L<n>", for the waiver of a withdrawn row. A level that cannot be read
+    is a refusal: a waiver is never recorded at a level nobody set."""
+    import yaml
+    from alpaca.posture import level
     try:
-        from alpaca.posture import level
-        return "L%d" % level.in_force(conn, session, root=root)
-    except Exception:
-        return "L2"
+        n = level.in_force(conn, session, root=root)
+    except (ValueError, TypeError, KeyError, OSError, yaml.YAMLError) as exc:
+        raise IntakeError("the level in force cannot be read (%s: %s), so intake will not waive the "
+                          "withdrawn rows; fix default_level in project.yaml or set the level, then run "
+                          "intake again" % (type(exc).__name__, exc), code=BLOCKED)
+    if not (level.MIN_LEVEL <= n <= level.MAX_LEVEL):
+        raise IntakeError("the level in force reads as %r, outside L%d-L%d, so intake will not waive the "
+                          "withdrawn rows" % (n, level.MIN_LEVEL, level.MAX_LEVEL), code=BLOCKED)
+    return "L%d" % n
 
 
 def public(p, dry_run):
