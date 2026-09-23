@@ -458,8 +458,8 @@ def _task_plan(data, rel_runbook):
             fails.append("the checks still fail after %s attempt(s)" % retry.get("max_attempts"))
         contract = {"input": _fit(inputs), "expected": _fit(outputs), "done_bar": _fit(done),
                     "fail_cases": _fit(fails), "stage": sid, "source": source}
-        desc = " ".join(str(stage.get("description") or title).split())
-        statement = "Run stage %s of runbook %s: %s Command: %s" % (sid, rb_id, desc, " ".join(str(stage.get("run")).split()))
+        desc = " ".join(str(stage.get("description") or title).split()).rstrip(".")
+        statement = "Run stage %s of runbook %s: %s. Command: %s" % (sid, rb_id, desc, " ".join(str(stage.get("run")).split()))
         out.append(("stage:%s" % sid, title[:60], statement, contract))
     return out
 
