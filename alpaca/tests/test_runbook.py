@@ -12,7 +12,10 @@ Requirements` in a change).
 """
 import json
 import os
+import shutil
 import stat
+import subprocess
+import sys
 import textwrap
 
 import pytest
@@ -858,3 +861,193 @@ def test_added_files_are_ascii_and_free_of_em_dash():
         with open(path, "rb") as fh:
             data = fh.read()
         assert all(b < 128 for b in data), path
+
+
+# ------------------------------------------------------------ review fixes (t-007 review)
+# M1: a success criterion written in another common shape must not drop out of coverage.
+@pytest.mark.parametrize("line", [
+    "- **SC-001**: the summary is mailed",
+    "- **SC-001:** the summary is mailed",
+    "* **SC-001**: the summary is mailed",
+    "+ **SC-001**: the summary is mailed",
+    "- SC-001: the summary is mailed",
+    "1. **SC-001**: the summary is mailed",
+    "1) SC-001: the summary is mailed",
+    "**SC-001**: the summary is mailed",
+    "**SC-001:** the summary is mailed",
+    "SC-001: the summary is mailed",
+    "### SC-001: the summary is mailed",
+    "| SC-001 | the summary is mailed |",
+    "| **SC-001** | the summary is mailed |",
+])
+def test_spec_kit_item_shapes(tmp_path, line):
+    path = tmp_path / "spec.md"
+    path.write_text("# Feature Specification: x\n\n## Success Criteria\n\n%s\n" % line, encoding="utf-8")
+    spec = runbook.parse_spec(str(path))
+    assert [(i["id"], i["required"]) for i in spec["items"]] == [("SC-001", True)]
+    assert spec["items"][0]["text"] == "the summary is mailed"
+    assert not spec["items"][0].get("loose")
+
+
+REVIEW_MIXED_SPEC = """\
+# Feature Specification: x
+## Success Criteria
+- **SC-001**: one
+- SC-002: two, written without bold
+1. **SC-003**: numbered list
+**SC-004**: no bullet
+| SC-005 | table row |
+"""
+
+
+def test_review_probe_mixed_spec_fails_on_the_uncovered_criteria(tmp_path):
+    spec = tmp_path / "spec.md"
+    spec.write_text(REVIEW_MIXED_SPEC, encoding="utf-8")
+    data = minimal()
+    data["stages"][1]["checks"][0]["covers"] = ["SC-001"]
+    result = runbook.check(write(tmp_path, data), spec_path=str(spec))
+    assert result["verdict"] == "FAIL"
+    assert result["spec"]["required"] == 5
+    assert result["coverage"]["missing"] == ["SC-002", "SC-003", "SC-004", "SC-005"]
+
+
+def test_an_id_seen_outside_a_known_shape_still_counts(tmp_path):
+    spec = tmp_path / "spec.md"
+    spec.write_text("# Feature Specification: x\n\n## Success Criteria\n\n- **SC-001**: one\n\n"
+                    "Also, SC-002 holds: the export finishes before FR-009 runs.\n", encoding="utf-8")
+    parsed = runbook.parse_spec(str(spec))
+    got = {i["id"]: (i["required"], bool(i.get("loose"))) for i in parsed["items"]}
+    assert got == {"SC-001": (True, False), "SC-002": (True, True), "FR-009": (False, True)}
+    data = minimal()
+    data["stages"][1]["checks"][0]["covers"] = ["FR-009"]
+    result = runbook.check(write(tmp_path, data), spec_path=str(spec))
+    assert result["verdict"] == "FAIL"        # SC-002 is loose, but required and uncovered
+    assert codes(result) == ["SPEC-UNCOVERED"]
+    assert result["coverage"]["missing"] == ["SC-002"]
+    assert "SPEC-UNPARSED" in runbook.WARNING_CODES
+    loose = [w for w in result["warnings"] if w["code"] == "SPEC-UNPARSED"]
+    assert {w["where"] for w in loose} == {"SC-002", "FR-009"}
+    assert "line 7" in loose[0]["message"]
+
+
+def test_ids_in_comments_and_fences_are_not_items(tmp_path):
+    spec = tmp_path / "spec.md"
+    spec.write_text("# Feature Specification: x\n\n## Success Criteria\n\n- **SC-001**: one\n"
+                    "<!-- - **SC-009**: an example in a one-line comment -->\n"
+                    "```\nSC-010: fenced\n```\n", encoding="utf-8")
+    assert [i["id"] for i in runbook.parse_spec(str(spec))["items"]] == ["SC-001"]
+
+
+# M2: `bin/alpaca` changes folder to the install root before Python starts; relative paths on
+# the command line must still be read from the folder the command was run in.
+def _install_copy(tmp_path):
+    inst = tmp_path / "inst"
+    (inst / "bin").mkdir(parents=True)
+    for name in ("alpaca", "alpaca-python"):
+        shutil.copy2(os.path.join(REPO, "bin", name), str(inst / "bin" / name))
+    os.symlink(os.path.join(REPO, "alpaca"), str(inst / "alpaca"))
+    py = inst / ".venv" / "bin" / "python"
+    py.parent.mkdir(parents=True)
+    py.write_text('#!/bin/sh\nexec "%s" "$@"\n' % sys.executable, encoding="utf-8")
+    py.chmod(0o755)
+    return inst
+
+
+def test_bin_alpaca_reads_relative_paths_from_the_caller_folder(tmp_path):
+    inst = _install_copy(tmp_path)
+    domain = inst / "domains" / "report"
+    domain.mkdir(parents=True)
+    (domain / "spec.md").write_text(SPEC_KIT, encoding="utf-8")
+    data = minimal()
+    data["stages"][1]["checks"][0]["covers"] = ["SC-002", "SC-003"]
+    write(domain, data)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("ALPACA_")}
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    proc = subprocess.run([str(inst / "bin" / "alpaca"), "runbook", "check", "runbook.yaml",
+                           "--spec", "spec.md"], cwd=str(domain), env=env, capture_output=True,
+                          text=True, timeout=120)
+    assert proc.returncode == verdict.PASS, proc.stdout + proc.stderr
+    assert "runbook: runbook.yaml" in proc.stdout
+    assert "spec: spec.md (spec-kit" in proc.stdout
+    assert "GATE alpaca-runbook-check: PASS" in proc.stdout
+    assert not (inst / ".alpaca").exists() and not (domain / ".alpaca").exists()
+
+
+def test_caller_folder_is_ignored_when_python_runs_elsewhere(tmp_path, monkeypatch, capsys):
+    other = tmp_path / "other"
+    other.mkdir()
+    monkeypatch.setenv("ALPACA_CALLER_CWD", str(other))
+    write(tmp_path, minimal())
+    rc, out = run_cli(tmp_path, monkeypatch, capsys, "runbook.yaml")
+    assert rc == verdict.PASS, out.out
+
+
+# L1: a json-field compares a bool only with a bool.
+def test_json_field_bool_is_not_a_number(tmp_path):
+    (tmp_path / "m.json").write_text(json.dumps({"ok": True, "off": False, "n": 1, "z": 0}),
+                                     encoding="utf-8")
+    base = {"id": "c", "type": "json-field", "path": "m.json"}
+    ev = lambda **kw: runbook.evaluate(dict(base, **kw), workdir=str(tmp_path))[0]
+    assert ev(field="ok", op="==", value=1) == verdict.FAIL
+    assert ev(field="off", op="==", value=0) == verdict.FAIL
+    assert ev(field="n", op="==", value=True) == verdict.FAIL
+    assert ev(field="z", op="!=", value=False) == verdict.PASS
+    assert ev(field="ok", op="==", value=True) == verdict.PASS
+    assert ev(field="ok", op="!=", value=1) == verdict.PASS
+    assert ev(field="n", op="==", value=1.0) == verdict.PASS
+
+
+# L2: a path that uses a variable is checked again once the variable is replaced.
+def test_evaluate_path_variable_may_not_leave_the_runbook_folder(tmp_path):
+    book = tmp_path / "book"
+    evidence = tmp_path / "evidence"
+    book.mkdir()
+    evidence.mkdir()
+    (tmp_path / "outside.txt").write_text("x", encoding="utf-8")
+    (evidence / "run.txt").write_text("x", encoding="utf-8")
+    (book / "in.txt").write_text("x", encoding="utf-8")
+    chk = {"id": "c", "type": "file-exists", "path": "${F}"}
+    ev = lambda path, **kn: runbook.evaluate(dict(chk, path=path), workdir=str(book), runbook_dir=str(book),
+                                             knobs=kn, evidence_dir=str(evidence))
+    code, reason = ev("${F}", F=str(tmp_path / "outside.txt"))
+    assert code == verdict.BLOCKED and "outside the runbook folder" in reason
+    assert ev("${F}", F="../outside.txt")[0] == verdict.BLOCKED
+    assert ev("${F}", F="in.txt")[0] == verdict.PASS
+    assert ev("${RUNBOOK_DIR}/in.txt")[0] == verdict.PASS
+    assert ev("${EVIDENCE_DIR}/run.txt")[0] == verdict.PASS
+    assert ev("${EVIDENCE_DIR}/../outside.txt")[0] == verdict.BLOCKED
+
+
+# L3: regex-in-file searches the whole file at once, `^` and `$` at each line (pinned, as the doc says).
+def test_regex_in_file_searches_the_whole_file(tmp_path):
+    (tmp_path / "log.txt").write_text("total\n12\n", encoding="utf-8")
+    chk = {"id": "c", "type": "regex-in-file", "path": "log.txt", "pattern": r"total\s+12$"}
+    assert runbook.evaluate(chk, workdir=str(tmp_path))[0] == verdict.PASS
+    assert runbook.evaluate(dict(chk, pattern=r"^12$"), workdir=str(tmp_path))[0] == verdict.PASS
+    with open(os.path.join(REPO, "docs", "runbook-format.md"), encoding="utf-8") as fh:
+        assert "searched line by line" not in fh.read()
+
+
+# L4: a json-field value with a partial ${NAME} is checked and replaced like a whole one.
+def test_json_field_value_with_a_partial_variable(tmp_path):
+    data = minimal()
+    data["stages"][1]["checks"][0].update(op="==", value="v${NOPE}")
+    result = runbook.check(write(tmp_path, data))
+    assert [e["where"] for e in result["errors"] if e["code"] == "VAR-UNKNOWN"] == [
+        "stages[1].checks[0].value"]
+    (tmp_path / "m.json").write_text(json.dumps({"version": "v3"}), encoding="utf-8")
+    chk = {"id": "c", "type": "json-field", "path": "m.json", "field": "version", "op": "==",
+           "value": "v${RELEASE}"}
+    assert runbook.evaluate(chk, workdir=str(tmp_path), knobs={"RELEASE": 3})[0] == verdict.PASS
+    assert runbook.evaluate(chk, workdir=str(tmp_path), knobs={"RELEASE": 4})[0] == verdict.FAIL
+
+
+# L5: the model plugin answers BLOCKED, with a reason, for a count that is not a whole number.
+def test_example_plugin_blocks_on_a_count_that_is_not_whole(tmp_path):
+    chk = {"id": "c", "type": "plugin", "script": "checks/status_codes.py",
+           "args": ["load.json", "301"]}
+    for counts in ({"301": 5, "502": "3"}, {"301": 5.5}, {"301": True}, {"301": -1}):
+        (tmp_path / "load.json").write_text(json.dumps({"status": counts}), encoding="utf-8")
+        code, reason = runbook.evaluate(chk, workdir=str(tmp_path), runbook_dir=EXAMPLE)
+        assert code == verdict.BLOCKED, (counts, reason)
+        assert "whole number" in reason, reason
