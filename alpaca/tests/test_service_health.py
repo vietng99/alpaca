@@ -139,14 +139,14 @@ def test_endpoint_failure_counted_without_leaking_payload(project, monkeypatch, 
 
 def test_supervision_configs_keep_remote_gate_and_project_identity(project):
     import shlex
-    units = serve.service_units(project, port=7328)
-    other = serve.service_units(str(Path(project).parent / 'other'), port=7328)
+    units = serve.service_units(project, port=7350)
+    other = serve.service_units(str(Path(project).parent / 'other'), port=7350)
     assert set(units).isdisjoint(other)
     assert len(units) == 2
     dashboard = next(body for name, body in units.items() if 'dashboard' in name)
     collector = next(body for name, body in units.items() if 'collector' in name)
     command = shlex.split(next(line.split('=', 1)[1] for line in dashboard.splitlines() if line.startswith('ExecStart=')))
-    assert command[-5:] == ['serve', '--keep', '--remote', '--port', '7328']
+    assert command[-5:] == ['serve', '--keep', '--remote', '--port', '7350']
     assert 'Restart=always' in dashboard and 'RestartSec=5' in dashboard
     assert 'Environment=ALPACA_SERVE_STRICT_PORT=1' in dashboard
     assert 'Restart=on-failure' in collector and 'ALPACA_SERVE_STRICT_PORT' not in collector

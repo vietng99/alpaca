@@ -121,8 +121,8 @@ def test_detach_prints_both_pages_and_the_exact_tunnel_line(stopped):
 
 def test_the_tunnel_line_is_built_from_the_current_user_and_this_host():
     import getpass
-    line = serve.tunnel_line(7328)
-    assert line == "ssh -N -L 7328:127.0.0.1:7328 %s@%s" % (getpass.getuser(), socket.gethostname())
+    line = serve.tunnel_line(7350)
+    assert line == "ssh -N -L 7350:127.0.0.1:7350 %s@%s" % (getpass.getuser(), socket.gethostname())
     # negative: the port is not left as a placeholder and the host is not localhost.
     assert "127.0.0.1@" not in line
 

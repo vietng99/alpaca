@@ -28,7 +28,7 @@ protocol: http2
 
 ingress:
   - hostname: example.com
-    service: http://127.0.0.1:7328
+    service: http://127.0.0.1:7350
   - service: http_status:404
 """
 
@@ -66,12 +66,12 @@ def free_port():
         return s.getsockname()[1]
 
 
-def test_add_registers_this_instance_with_a_local_url_never_7328(project, host):
+def test_add_registers_this_instance_with_a_local_url_never_the_reserved_port(project, host):
     login(project)
     result = workspace.add(project, name="Scratch")
     item = result["workspace"]
     assert item["id"] == workspace.instance_id(project)
-    assert item["port"] != 7328 and item["port"] not in workspace.RESERVED_PORTS
+    assert item["port"] != 7350 and item["port"] not in workspace.RESERVED_PORTS
     assert result["local"] == "http://127.0.0.1:%d/" % item["port"]
     assert item["href"] == "http://127.0.0.1:%d/hub/" % item["port"]
     assert item["hostname"] is None and item["root"] == os.path.realpath(project)
@@ -93,8 +93,8 @@ def test_add_refuses_a_taken_port_or_hostname_and_the_reserved_port(project, tmp
     with pytest.raises(ValueError, match="registered to"):
         workspace.add(project, hostname="other.example.com")
     with pytest.raises(ValueError, match="reserved"):
-        workspace.add(project, port=7328)
-    # the live config routes example.com to 7328: that hostname is not free either
+        workspace.add(project, port=7350)
+    # the live config routes example.com to 7350: that hostname is not free either
     with pytest.raises(ValueError, match="already routed"):
         workspace.add(project, hostname="example.com")
     with pytest.raises(ValueError):
@@ -103,14 +103,14 @@ def test_add_refuses_a_taken_port_or_hostname_and_the_reserved_port(project, tmp
 
 
 def test_the_reserved_port_is_allowed_only_when_it_is_this_instances_own(project, host, monkeypatch):
-    # with the foreign live rule gone, 7328 is refused for a new instance and allowed for the
+    # with the foreign live rule gone, 7350 is refused for a new instance and allowed for the
     # instance that already serves on it
     (host / ".cloudflared" / "config.yml").write_text("tunnel: x\ncredentials-file: /c.json\n")
     login(project)
     with pytest.raises(ValueError, match="reserved"):
-        workspace.add(project, port=7328)
-    monkeypatch.setattr(serve, "_read_state", lambda root: {"port": 7328})
-    assert workspace.add(project, port=7328)["workspace"]["port"] == 7328
+        workspace.add(project, port=7350)
+    monkeypatch.setattr(serve, "_read_state", lambda root: {"port": 7350})
+    assert workspace.add(project, port=7350)["workspace"]["port"] == 7350
 
 
 def test_list_and_remove(project, tmp_path, capsys):
@@ -124,7 +124,7 @@ def test_list_and_remove(project, tmp_path, capsys):
     assert cli.main(["workspace", "remove"]) == cli.PASS
     assert json.loads(capsys.readouterr().out)["removed"] == added["id"]
     assert [e["root"] for e in workspace.load()] == [os.path.realpath(other)]
-    assert cli.main(["workspace", "add", "--port", "7328"]) == cli.USAGE
+    assert cli.main(["workspace", "add", "--port", "7350"]) == cli.USAGE
     assert "reserved" in json.loads(capsys.readouterr().out)["error"]
 
 
@@ -144,7 +144,7 @@ def test_render_ingress_combines_every_hostname_and_carries_the_live_file(projec
     assert config["protocol"] == "http2"
     rules = config["ingress"]
     # the live rules first and unchanged, the registered hostnames before the live catch-all
-    assert rules == [{"hostname": "example.com", "service": "http://127.0.0.1:7328"},
+    assert rules == [{"hostname": "example.com", "service": "http://127.0.0.1:7350"},
                      {"hostname": "a.example.com", "service": "http://127.0.0.1:%d" % a["port"]},
                      {"hostname": "b.example.com", "service": "http://127.0.0.1:%d" % b["port"]},
                      {"service": "http_status:404"}]
@@ -183,19 +183,19 @@ def test_render_ingress_flags_and_refusals(project, host, tmp_path):
         workspace.render_ingress(project, "--token=x", tunnel_id="abc", credentials="/c")
 
 
-def test_service_units_use_the_registered_port_and_never_default_to_7328(project, monkeypatch):
+def test_service_units_use_the_registered_port_and_never_default_to_the_reserved_port(project, monkeypatch):
     units = serve.service_units(project)
     dashboard = next(body for name, body in units.items() if name.endswith("-dashboard.service"))
-    assert "--port 7328" not in dashboard
+    assert "--port 7350" not in dashboard
     port = free_port()
     workspace.add(project, port=port)
     dashboard = next(body for name, body in serve.service_units(project).items() if name.endswith("-dashboard.service"))
     assert dashboard.split("ExecStart=", 1)[1].splitlines()[0].endswith("--port %d" % port)
     # the derived default skips the reserved port even when the root hashes onto it
-    monkeypatch.setattr(serve.util, "sha256_hex", lambda value: "%04x" % (28 + 90 * 7))
+    monkeypatch.setattr(serve.util, "sha256_hex", lambda value: "%04x" % (50 + 90 * 7))
     monkeypatch.setattr(serve, "_port_open", lambda port, host="127.0.0.1": False)
-    assert 7300 + (28 + 90 * 7) % 90 == 7328
-    assert serve._default_port(project) != 7328
+    assert 7300 + (50 + 90 * 7) % 90 == 7350
+    assert serve._default_port(project) != 7350
 
 
 def test_collect_services_defaults_to_the_registered_port(project, capsys):
@@ -205,7 +205,7 @@ def test_collect_services_defaults_to_the_registered_port(project, capsys):
     result = json.loads(capsys.readouterr().out)
     assert result["port"] == port and result["local"] == "http://127.0.0.1:%d/" % port
     body = Path(result["directory"], next(n for n in result["units"] if n.endswith("-dashboard.service"))).read_text()
-    assert "--port %d" % port in body and "7328" not in body
+    assert "--port %d" % port in body and "7350" not in body
     assert cli.main(["serve", "--write-services"]) == cli.PASS
     files = json.loads(capsys.readouterr().out)["files"]
     assert "--port %d" % port in Path(next(f for f in files if f.endswith("-dashboard.service"))).read_text()
@@ -326,7 +326,7 @@ def test_t089_done_bar_scratch_instance_gets_local_url_and_ingress_entry(tmp_pat
     assert cli.main(["workspace", "render-ingress", "--tunnel", "main"]) == cli.PASS
     printed = capsys.readouterr().out
     rendered = yaml.safe_load(Path(scratch, ".alpaca/services/cloudflared-main.yml").read_text())
-    assert rendered["ingress"] == [{"hostname": "example.com", "service": "http://127.0.0.1:7328"},
+    assert rendered["ingress"] == [{"hostname": "example.com", "service": "http://127.0.0.1:7350"},
                                    {"hostname": "scratch.example.com", "service": "http://127.0.0.1:%d" % port},
                                    {"service": "http_status:404"}]
     assert "cloudflared tunnel route dns main scratch.example.com" in printed
