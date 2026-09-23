@@ -144,13 +144,19 @@ def _refuse_collisions(root):
                          code=BLOCKED)
 
 
-def move_to_openspec(root):
-    """Write every spec-kit spec as a living OpenSpec spec (never over an existing file).
-    Returns [(spec-kit spec, OpenSpec spec, written?)]. Two feature folders that map to one
-    capability name are refused before anything is written."""
+def _living_target(root, rel):
+    return os.path.join(root, "openspec", "specs", capability_name(os.path.dirname(rel)), "spec.md")
+
+
+def move_to_openspec(root, only=None):
+    """Write every spec-kit spec (or those in `only`) as a living OpenSpec spec (never over an
+    existing file). Returns [(spec-kit spec, OpenSpec spec, written?)]. Two feature folders that
+    map to one capability name are refused before anything is written."""
     _refuse_collisions(root)
     done = []
     for rel in speckit_specs(root):
+        if only is not None and rel not in only:
+            continue
         cap = capability_name(os.path.dirname(rel))
         target = os.path.join(root, "openspec", "specs", cap, "spec.md")
         text = moved_spec_text(os.path.join(root, rel), rel)
@@ -184,8 +190,24 @@ def prepare(root, kit, mode):
                              code=BLOCKED if exc.blocked else FAIL)
         done.append("installed %s%s" % (kit, " (the project moves from spec-kit)" if force else ""))
     if kit == "openspec" and st["speckit_specs"] and moved_from:
+        before = [str(x) for x in (moved_from.get("specs") or [])]
+        added = [rel for rel in speckit_specs(root) if rel not in before]
+        if added:
+            moved = move_to_openspec(root, only=added)
+            for src, dst, wrote in moved:
+                done.append("%s %s from %s (a spec-kit feature added after the move)"
+                            % ("wrote" if wrote else "kept the existing", dst, src))
+            block = dict(spec_kits.recorded(root))
+            block["moved_from"] = dict(moved_from, specs=before + [m[0] for m in moved])
+            spec_kits.record(root, block)
+        for rel in before:
+            target = _living_target(root, rel)
+            if os.path.isfile(os.path.join(root, rel)) and not os.path.exists(target):
+                done.append("the living spec %s moved from %s is missing; it is not written again "
+                            "(restore it from git if it was removed by mistake)"
+                            % (_rel(root, target), rel))
         done.append("already moved from spec-kit (%s); the spec-kit files stay as history"
-                    % ", ".join(str(x) for x in (moved_from.get("specs") or [])))
+                    % ", ".join(before))
     elif kit == "openspec" and st["speckit_specs"]:
         moved = move_to_openspec(root)
         for src, dst, wrote in moved:

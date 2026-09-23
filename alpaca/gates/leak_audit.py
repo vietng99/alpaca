@@ -52,6 +52,8 @@ R_TERMS_INSIDE_TARGET = "TERMS-INSIDE-TARGET"
 R_ALLOW_NO_REASON = "ALLOW-RULE-WITHOUT-REASON"
 R_ALLOW_BAD_REGEX = "ALLOW-RULE-MALFORMED"
 R_TERM_TOO_SHORT = "TERM-BELOW-MIN-LENGTH"
+R_TERM_LINE_UNUSABLE = "TERM-LINE-UNUSABLE"
+R_TERM_INCLUDE_ABSENT = "TERM-LIST-INCLUDE-ABSENT"
 R_MATCHER_DEAD_TERM = "MATCHER-SELFCHECK-FAILED"
 R_TARGET_ABSENT = "TARGET-ABSENT"
 R_TARGET_EMPTY = "TARGET-POPULATION-EMPTY"
@@ -108,13 +110,48 @@ SHAPE_RULES = (
      re.compile(r"\b[A-Za-z]:[\\/](?:Users|users|home)[\\/][A-Za-z0-9._\-]{2,}")),
 )
 
+# Look-alike letters folded to the Latin letter they imitate: Cyrillic and Greek letters that
+# render like Latin ones. A partial confusable skeleton (Unicode TR39), not the full table: the
+# full table needs data the standard library does not carry. Accents are removed before this map
+# is applied (see `defang`), so an accented look-alike folds too.
 _HOMOGLYPH = str.maketrans({
-    "А": "A", "Е": "E", "О": "O", "Р": "P", "С": "C",
-    "Х": "X", "У": "Y", "І": "I", "К": "K", "М": "M",
-    "Н": "H", "В": "B", "Т": "T",
-    "а": "a", "е": "e", "о": "o", "р": "p", "с": "c",
-    "х": "x", "у": "y", "і": "i",
+    # Cyrillic capitals and small letters
+    "\u0410": "A", "\u0412": "B", "\u0415": "E", "\u041a": "K", "\u041c": "M", "\u041d": "H",
+    "\u041e": "O", "\u0420": "P", "\u0421": "C", "\u0422": "T", "\u0423": "Y", "\u0425": "X",
+    "\u0406": "I", "\u0408": "J", "\u0405": "S", "\u04ae": "Y", "\u051a": "Q", "\u051c": "W",
+    "\u04c0": "I",
+    "\u0430": "a", "\u0435": "e", "\u043e": "o", "\u0440": "p", "\u0441": "c", "\u0443": "y",
+    "\u0445": "x", "\u0456": "i", "\u0458": "j", "\u0455": "s", "\u0501": "d", "\u04bb": "h",
+    "\u04cf": "l", "\u051b": "q", "\u051d": "w", "\u04af": "y", "\u0261": "g",
+    # Greek capitals and small letters
+    "\u0391": "A", "\u0392": "B", "\u0395": "E", "\u0396": "Z", "\u0397": "H", "\u0399": "I",
+    "\u039a": "K", "\u039c": "M", "\u039d": "N", "\u039f": "O", "\u03a1": "P", "\u03a4": "T",
+    "\u03a5": "Y", "\u03a7": "X",
+    "\u03b1": "a", "\u03bf": "o", "\u03b9": "i", "\u03c1": "p", "\u03ba": "k", "\u03c5": "u",
+    "\u03c7": "x", "\u03b3": "y", "\u03bd": "v", "\u03f2": "c", "\u03f3": "j",
+    # Latin letters that imitate other Latin letters
+    "\u0131": "i", "\u0237": "j", "\u0269": "i", "\u01c0": "l",
 })
+
+# Default_Ignorable_Code_Point (Unicode DerivedCoreProperties): characters that render as nothing.
+# Format characters (category Cf) and combining marks are removed by category in `defang`; these
+# ranges add the ignorable letters and fillers the categories miss (U+115F, U+3164, U+FFA0 and
+# the like), so a term cannot be split by any invisible character.
+_IGNORABLE = (
+    (0x00AD, 0x00AD), (0x034F, 0x034F), (0x061C, 0x061C), (0x115F, 0x1160), (0x17B4, 0x17B5),
+    (0x180B, 0x180F), (0x200B, 0x200F), (0x202A, 0x202E), (0x2060, 0x206F), (0x3164, 0x3164),
+    (0xFE00, 0xFE0F), (0xFEFF, 0xFEFF), (0xFFA0, 0xFFA0), (0xFFF0, 0xFFF8), (0x1BCA0, 0x1BCA3),
+    (0x1D173, 0x1D17A), (0xE0000, 0xE0FFF),
+)
+
+
+_IGNORABLE_SET = frozenset(cp for lo, hi in _IGNORABLE for cp in range(lo, hi + 1))
+
+
+def _invisible(ch):
+    return ord(ch) in _IGNORABLE_SET or unicodedata.category(ch) in ("Cf", "Mn", "Me")
+
+
 _SEP_RUN = re.compile(r"[\-‐]?[\s ]+")
 
 # ------------------------------------------------------------------ severity fold
@@ -189,17 +226,23 @@ def write_json_atomic(path, payload):
 
 
 def defang(text: str) -> str:
-    """Undo the cheap evasions before matching: compatibility normalisation, format characters
-    (soft hyphen, zero-width joiners, BOM), and Cyrillic homoglyphs."""
+    """Undo the cheap evasions before matching: compatibility normalisation (fullwidth letters),
+    every invisible character (format characters, combining marks such as a variation selector or
+    a combining grapheme joiner, and the other default-ignorable code points), accents, and the
+    Cyrillic and Greek look-alikes of Latin letters. Plain ASCII needs none of it."""
+    if text.isascii():
+        return text
     text = unicodedata.normalize("NFKC", text)
-    text = "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
-    return text.translate(_HOMOGLYPH)
+    text = "".join(ch for ch in unicodedata.normalize("NFD", text)
+                   if ch < "\x80" or not _invisible(ch))
+    return unicodedata.normalize("NFC", text).translate(_HOMOGLYPH)
 
 
 # ------------------------------------------------------------------ term list
 class TermList(object):
     def __init__(self):
         self.terms = []          # [(term, defanged_lower)]
+        self.regexes = []        # [(label, text_regex, bytes_regex)] - `re:` lines, never printed
         self.allow = []          # [(regex, reason, source_line)]
         self.shape_allow = []    # [(regex, reason, rule_number)] - shape hits only, whole value
         self.refused = []        # [(raw, why)]  - reported, never silent
@@ -207,37 +250,116 @@ class TermList(object):
         self.path = ""
 
 
-def _terms_from_lines(lines, source):
-    """Parse sealed-term lines into a TermList. Returns (TermList | None, reasons, detail)."""
-    reasons, detail = [], []
-    tl = TermList()
-    tl.path = source
-    seen = set()
+#: the directives a term list may carry; any other `!word:` or `#word:` line is refused as unusable.
+_DIRECTIVE = re.compile(r"^(?:!|#)[A-Za-z][A-Za-z0-9_-]*:")
+MAX_INCLUDE_DEPTH = 4
+
+
+def _compile_regex(pattern):
+    """(text_regex, bytes_regex) for a `re:` line, or raise ValueError saying why it is unusable."""
+    if not pattern:
+        raise ValueError("an empty pattern")
+    try:
+        rx = re.compile(pattern, re.IGNORECASE)
+        brx = re.compile(pattern.encode("utf-8"), re.IGNORECASE)
+    except re.error as e:
+        raise ValueError("the pattern does not compile (%s)" % e)
+    if rx.search("") is not None or rx.search(" ") is not None:
+        raise ValueError("the pattern matches an empty or blank string, so it would match "
+                         "everything")
+    return rx, brx
+
+
+def _terms_from_lines(lines, source, base_dir=None, _depth=0, _stack=(), _state=None):
+    """Parse sealed-term lines into a TermList. Returns (TermList | None, reasons, detail).
+
+    Line forms: `<term>` (a substring, case-insensitive, at least MIN_TERM_LEN characters, an
+    optional `  # note`); `re: <regex>` (case-insensitive, for whole-word names and path prefixes
+    too short or too common for a substring; `#re: <regex>` is the older spelling of the same
+    line); `!include: <path>` (another list, relative to this list's own folder); `!allow:` and
+    `!exempt:` lines; `# ...` comments. A line the barrier cannot use (a regex that does not
+    compile or matches everything, an unknown directive, an absent include) is REPORTED and makes
+    the list unusable, never skipped. Detail lines name the line number only: a report that
+    printed a term or the list's path would publish what it guards."""
+    top = _state is None
+    state = _state if _state is not None else {"tl": TermList(), "reasons": [], "detail": [],
+                                                "seen": set(), "raw": [], "lists": 1}
+    tl, reasons, detail = state["tl"], state["reasons"], state["detail"]
+    if top:
+        tl.path = source
+    label = "list line" if _depth == 0 else "included list %d, line" % state["lists"]
     for lineno, line in enumerate(lines, start=1):
         s = line.strip()
-        if not s or s.startswith("#"):
+        where = "%s %d" % (label, lineno)
+        if not s:
+            continue
+        if s.startswith("#re:") or s.startswith("re:"):
+            body = s[4:] if s.startswith("#re:") else s[3:]
+            pat = body.strip() if s.startswith("#re:") else body.split("  #", 1)[0].strip()
+            try:
+                rx, brx = _compile_regex(pat)
+            except ValueError as e:
+                reasons.append(R_TERM_LINE_UNUSABLE)
+                detail.append("%s: a regex line the barrier cannot use: %s" % (where, e))
+                continue
+            tl.regexes.append(("regex at " + where, rx, brx))
+            continue
+        if s.startswith("#") and not _DIRECTIVE.match(s):
             continue
         if s.startswith("!exempt:"):
+            continue
+        if s.startswith("!include:"):
+            target = s[len("!include:"):].split("  #", 1)[0].strip()
+            if not target or base_dir is None:
+                reasons.append(R_TERM_LINE_UNUSABLE)
+                detail.append("%s: an include with no file, or in a list that is not a file" % where)
+                continue
+            full = target if os.path.isabs(target) else os.path.join(base_dir, target)
+            real = os.path.realpath(full)
+            if real in _stack or _depth + 1 > MAX_INCLUDE_DEPTH:
+                reasons.append(R_TERM_LINE_UNUSABLE)
+                detail.append("%s: the include loops back or nests deeper than %d lists"
+                              % (where, MAX_INCLUDE_DEPTH))
+                continue
+            if not os.path.isfile(full):
+                reasons.append(R_TERM_INCLUDE_ABSENT)
+                detail.append("%s: the included list is absent" % where)
+                continue
+            try:
+                raw = read_bytes(full)
+                text = decode_utf8_strict(raw)
+            except LeakError:
+                reasons.append(R_TERMS_UNDECODABLE)
+                detail.append("%s: the included list is unreadable or not UTF-8" % where)
+                continue
+            state["raw"].append(raw)
+            state["lists"] += 1
+            _terms_from_lines(text.splitlines(), full, os.path.dirname(real), _depth + 1,
+                              _stack + (real,), state)
             continue
         if s.startswith("!allow:"):
             body = s[len("!allow:"):]
             if "#" not in body:
                 reasons.append(R_ALLOW_NO_REASON)
-                detail.append("%s:%d: allow rule carries no '# reason'" % (source, lineno))
+                detail.append("%s: allow rule carries no '# reason'" % where)
                 continue
             pat, reason = body.split("#", 1)
             pat, reason = pat.strip(), reason.strip()
             if not pat or not reason:
                 reasons.append(R_ALLOW_NO_REASON)
-                detail.append("%s:%d: allow rule has an empty pattern or reason" % (source, lineno))
+                detail.append("%s: allow rule has an empty pattern or reason" % where)
                 continue
             try:
                 rx = re.compile(pat, re.IGNORECASE)
             except re.error as e:
                 reasons.append(R_ALLOW_BAD_REGEX)
-                detail.append("%s:%d: %s" % (source, lineno, e))
+                detail.append("%s: %s" % (where, e))
                 continue
             tl.allow.append((rx, reason, lineno))
+            continue
+        if _DIRECTIVE.match(s):
+            reasons.append(R_TERM_LINE_UNUSABLE)
+            detail.append("%s: a directive the barrier does not know" % where)
             continue
         term = s.split("  #", 1)[0].strip()
         if not term:
@@ -245,19 +367,23 @@ def _terms_from_lines(lines, source):
         if len(term) < MIN_TERM_LEN:
             tl.refused.append((term, "shorter than %d chars" % MIN_TERM_LEN))
             reasons.append(R_TERM_TOO_SHORT)
-            detail.append("%s:%d: refused %r (substring matching on a token this short fires on "
-                          "ordinary prose)" % (source, lineno, term))
+            detail.append("%s: refused a term shorter than %d characters (substring matching on a "
+                          "token this short fires on ordinary prose; use a `re:` line)"
+                          % (where, MIN_TERM_LEN))
             continue
         key = defang(term).casefold()
-        if key in seen:
+        if key in state["seen"]:
             continue
-        seen.add(key)
+        state["seen"].add(key)
         tl.terms.append((term, key))
-    if not tl.terms:
-        reasons.append(R_TERMS_EMPTY)
-        detail.append("term source %s yields zero usable terms - refusing to adjudicate a "
-                      "universal claim against an empty witness set" % source)
+    if not top:
         return None, reasons, detail
+    if not tl.terms and not tl.regexes:
+        reasons.append(R_TERMS_EMPTY)
+        detail.append("the term list yields zero usable terms - refusing to adjudicate a "
+                      "universal claim against an empty witness set")
+        return None, reasons, detail
+    tl.included_raw = state["raw"]
     return tl, reasons, detail
 
 
@@ -305,30 +431,35 @@ def load_terms(path):
         text = decode_utf8_strict(raw)
     except LeakError as e:
         return None, [R_TERMS_UNDECODABLE], [str(e)]
-    tl, reasons, detail = _terms_from_lines(text.splitlines(), path)
+    tl, reasons, detail = _terms_from_lines(text.splitlines(), path,
+                                            os.path.dirname(os.path.realpath(path)))
     if tl is not None:
-        tl.digest = sha256_bytes(raw)
+        tl.digest = sha256_bytes(b"\0".join([raw] + list(getattr(tl, "included_raw", []))))
     return tl, reasons, detail
 
 
-def load_terms_from_project(root):
+def load_terms_from_project(root, cfg=None, base=None):
     """Resolve the sealed-term source from DATA in project.yaml, never a code literal.
 
-    Two shapes are honoured, in order: `barrier.terms` naming a file (a path relative to the
-    root), or `barrier.sealed_terms` giving the terms inline as a list. This is the M4.11 Step 3
-    seam: the term list is pointed at project.yaml, exactly as literal_guard points its forbidden
-    list there. Returns (TermList | None, reasons, detail).
+    Two shapes are honoured, in order: `barrier.terms` naming a file (a path relative to `base`,
+    which defaults to the root; the barrier passes the main worktree so linked worktrees share
+    the list), or `barrier.sealed_terms` giving the terms inline as a list. This is the M4.11
+    Step 3 seam: the term list is pointed at project.yaml, exactly as literal_guard points its
+    forbidden list there. `cfg` is an already-read configuration (the barrier's pinned copy).
+    Returns (TermList | None, reasons, detail).
     """
     from alpaca import project
-    try:
-        cfg = project.load(root) or {}
-    except Exception:
-        cfg = {}
+    if cfg is None:
+        try:
+            cfg = project.load(root) or {}
+        except Exception:
+            cfg = {}
     block = (cfg.get("barrier") or {})
     terms_file = block.get("terms")
     inline = block.get("sealed_terms")
     if terms_file:
-        p = terms_file if os.path.isabs(terms_file) else os.path.join(root, terms_file)
+        terms_file = str(terms_file)
+        p = terms_file if os.path.isabs(terms_file) else os.path.join(base or root, terms_file)
         tl, reasons, detail = load_terms(p)
     elif isinstance(inline, list) and inline:
         lines = [str(t) for t in inline]
@@ -426,6 +557,27 @@ def scan_text(tl: TermList, text: str, relpath: str, shape_on: bool):
                     hits.append(rec)
                 if lane != "line":
                     break
+        for label, rx, _brx in getattr(tl, "regexes", ()):
+            for m in rx.finditer(body):
+                if lane == "line":
+                    lineno, ctx = 0, ""
+                    for off, i, ln in offsets:
+                        if off <= m.start() < off + len(ln):
+                            lineno, ctx = i, ln.strip()[:200]
+                            break
+                else:
+                    lineno, ctx = 0, body[max(0, m.start() - 60):m.end() + 60]
+                why, at = _allowed(tl, ctx)
+                rec = {"file": relpath, "line": lineno, "kind": "term", "rule": label,
+                       "lane": lane, "context": ctx}
+                if why:
+                    rec["suppressed_by"] = why
+                    rec["allow_rule_line"] = at
+                    suppressed.append(rec)
+                else:
+                    hits.append(rec)
+                if lane != "line":
+                    break
         if not shape_on:
             continue
         for name, rx in SHAPE_RULES:
@@ -453,6 +605,39 @@ def scan_text(tl: TermList, text: str, relpath: str, shape_on: bool):
     return hits, suppressed
 
 
+#: bytes kept from the end of one chunk for the next, so a regex match that straddles a chunk edge
+#: is still seen. A regex line longer than this can be missed at an edge; the list's lines are
+#: names and path prefixes far shorter.
+REGEX_OVERLAP = 512
+
+
+def byte_hits(tl: TermList, chunks, exclude=frozenset()):
+    """The terms and regex lines found in a stream of byte chunks, raw and NUL-stripped (UTF-16
+    text without decoding it), case-insensitive. Memory is one chunk plus a small overlap, so a
+    blob of any size is scanned without being held whole. Returns the set of rules found."""
+    keys = [(term, key.encode("utf-8")) for term, key in tl.terms if term not in exclude]
+    rxs = [(label, brx) for label, _rx, brx in getattr(tl, "regexes", ()) if label not in exclude]
+    if not keys and not rxs:
+        for _chunk in chunks:           # a stream is always read to its end
+            pass
+        return set()
+    maxlen = max((len(k) for _, k in keys), default=1)
+    overlap = max(maxlen * 2 + 8, REGEX_OVERLAP if rxs else 0)
+    found = set()
+    tail = b""
+    for chunk in chunks:
+        window = tail + chunk
+        for proj in (window.lower(), window.replace(b"\x00", b"").lower()):
+            for term, kb in keys:
+                if term not in found and kb in proj:
+                    found.add(term)
+            for label, brx in rxs:
+                if label not in found and brx.search(proj):
+                    found.add(label)
+        tail = window[-overlap:] if len(window) > overlap else window
+    return found
+
+
 def scan_bytes_stream(tl: TermList, path: str, relpath: str, exclude=frozenset()):
     """Byte lane: every regular file, whatever its suffix, streamed. Two projections per chunk:
     the raw bytes (a term inside a compiled artefact or binary container) and the NUL-stripped
@@ -460,27 +645,9 @@ def scan_bytes_stream(tl: TermList, path: str, relpath: str, exclude=frozenset()
     carries the terms the text lane already accounted for, so it reports only what the text lane
     could not."""
     hits, suppressed = [], []
-    keys = [(term, key.encode("utf-8")) for term, key in tl.terms if term not in exclude]
-    if not keys:
-        return [], [], ""
-    maxlen = max((len(k) for _, k in keys), default=1)
-    overlap = maxlen * 2 + 8
-    found = set()
-    tail = b""
     try:
         with open(path, "rb") as f:
-            while True:
-                chunk = f.read(BYTE_CHUNK)
-                if not chunk:
-                    break
-                window = tail + chunk
-                for proj in (window.lower(), window.replace(b"\x00", b"").lower()):
-                    for term, kb in keys:
-                        if term in found:
-                            continue
-                        if kb in proj:
-                            found.add(term)
-                tail = window[-overlap:] if len(window) > overlap else window
+            found = byte_hits(tl, iter(lambda: f.read(BYTE_CHUNK), b""), exclude)
     except OSError as e:
         return None, None, str(e)
     for term in sorted(found):
@@ -636,10 +803,12 @@ def audit(target, terms_path=None, term_list=None, control=None, attestation=Non
     if tl is None:
         report.update({"verdict": vc.BLOCKED, "reason_codes": reasons, "detail": detail})
         return Result(vc.BLOCKED, reasons, report)
-    if R_ALLOW_NO_REASON in reasons or R_ALLOW_BAD_REGEX in reasons:
+    if any(r in reasons for r in (R_ALLOW_NO_REASON, R_ALLOW_BAD_REGEX, R_TERM_LINE_UNUSABLE,
+                                  R_TERM_INCLUDE_ABSENT, R_TERMS_UNDECODABLE)):
         verdicts.append(vc.BLOCKED)
     report["terms_digest"] = tl.digest
     report["terms_count"] = len(tl.terms)
+    report["regex_count"] = len(getattr(tl, "regexes", ()))
     report["allow_rules"] = len(tl.allow)
     report["terms_refused"] = tl.refused
 

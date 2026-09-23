@@ -6,8 +6,8 @@ The generic shape rules (a mailbox, a home path) fire on known fixtures in this 
 allow rules in project.yaml (`barrier.allow`, `<regex>  # <reason>`) clear exactly those values:
 a rule matches the WHOLE value, clears shape hits only, and never hides a sealed term. The term
 list itself is supplied by each clone (project.yaml `barrier.terms` names a path under the
-gitignored `.alpaca/`): when it is absent the barrier says the terms were NOT checked instead of
-staying silent, and when the configuration cannot be read the push is refused.
+gitignored `.alpaca/`): when it is configured but absent the push is refused (review 3, B5), and
+when the configuration cannot be read the push is refused.
 """
 import json
 import os
@@ -105,13 +105,13 @@ def test_a_malformed_allow_rule_refuses_the_push(repo):
 
 
 # ------------------------------------------------------------------ the term list and the config
-def test_an_absent_term_list_passes_but_says_the_terms_were_not_checked(repo):
+def test_an_absent_term_list_refuses_and_says_the_terms_were_not_checked(repo):
     root, _bare = repo
     _config(root, terms=".alpaca/not-supplied.txt")
     _commit(root, "notes.md", "the value is " + TERM + "\n", "add notes")
     res = _scan(root)
-    assert res.verdict == vc.PASS
-    assert barrier.R_TERMS_UNCHECKED in res.reasons
+    assert res.verdict == vc.BLOCKED
+    assert barrier.R_TERMS_MISSING in res.reasons
     text = barrier.render(res.report)
     assert "NOT checked" in text and "absent" in text
 
@@ -197,8 +197,8 @@ def test_real_push_of_a_branch_named_with_a_term_is_refused(repo):
 def test_the_hook_prefers_the_install_launcher(repo):
     root, _bare = repo
     body = open(barrier.install(root), encoding="utf-8").read()
-    assert "bin/alpaca-python -m alpaca.barrier prepush" in body
-    assert body.rstrip().endswith('exec python3 -m alpaca.barrier prepush "$@"')
+    assert 'exec bin/alpaca-python "$pin/run.py" prepush "$@"' in body
+    assert body.rstrip().endswith('exec python3 "$pin/run.py" prepush "$@"')
 
 
 def test_each_blob_is_read_once_however_many_commits_carry_it(repo, monkeypatch):
@@ -208,11 +208,13 @@ def test_each_blob_is_read_once_however_many_commits_carry_it(repo, monkeypatch)
     for i in range(4):
         _commit(root, "n%d.txt" % i, "n%d\n" % i, "more %d" % i)
     reads = []
-    real = barrier.blob_bytes
-    monkeypatch.setattr(barrier, "blob_bytes", lambda r, sha: reads.append(sha) or real(r, sha))
+    real = barrier._Objects.read
+    monkeypatch.setattr(barrier._Objects, "read",
+                        lambda self, sha: reads.append(sha) or real(self, sha))
     res = _scan(root)
     assert res.verdict == vc.PASS
-    assert len(reads) == len(set(reads))
+    big = _run(root, "rev-parse", "HEAD:big.txt").stdout.strip()
+    assert big in reads and len(reads) == len(set(reads))
 
 
 # ------------------------------------------------------------------ the shipped template

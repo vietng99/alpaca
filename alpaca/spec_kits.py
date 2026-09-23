@@ -205,12 +205,15 @@ def recorded(root) -> dict:
     return block if isinstance(block, dict) else {}
 
 
-def _replace_top_block(text, key, block_text) -> str:
+def _replace_top_block(text, key, block_text, keep_comments=False) -> str:
     """Put `block_text` (a dumped top-level mapping entry) in place of the top-level `key:` block,
-    or append it. Comments and the order of every other key are kept."""
+    or append it. Comments and the order of every other key are kept. With `keep_comments`, the
+    replaced key's own comments are kept too: a trailing `# ...` on its line (when the new entry
+    is one line) and the comment lines inside its old block, which follow the new entry."""
     lines = text.splitlines(keepends=True)
     out, i, done = [], 0, False
     head = re.compile(r"^%s:(\s|$)" % re.escape(key))
+    trailing = re.compile(r"^%s:[^#'\"\r\n]*?(\s+#[^\r\n]*)" % re.escape(key))
     while i < len(lines):
         if not done and head.match(lines[i]):
             j = i + 1
@@ -219,7 +222,14 @@ def _replace_top_block(text, key, block_text) -> str:
             keep = j
             while keep > i + 1 and not lines[keep - 1].strip():
                 keep -= 1                      # the blank lines after the old block stay
-            out.append(block_text)
+            if keep_comments:
+                m = trailing.match(lines[i])
+                if m and block_text.count("\n") == 1 and block_text.endswith("\n"):
+                    block_text = block_text[:-1] + m.group(1) + "\n"
+                out.append(block_text)
+                out.extend(ln for ln in lines[i + 1:keep] if ln.lstrip().startswith("#"))
+            else:
+                out.append(block_text)
             out.extend(lines[keep:j])
             i = j
             done = True

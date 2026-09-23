@@ -77,7 +77,7 @@ def repo(tmp_path):
     (root / ".alpaca").mkdir()
     (root / ".alpaca" / "sealed-terms.txt").write_text(TERM + "\n", encoding="utf-8")
     assert _run(str(root), "-c", "init.defaultBranch=main", "init").returncode == 0
-    _run(str(root), "config", "user.email", "t@example.invalid")
+    _run(str(root), "config", "user.email", "t@localhost")
     _run(str(root), "config", "user.name", "t")
     _run(str(root), "config", "commit.gpgsign", "false")
     bare = tmp_path / "remote.git"
@@ -158,7 +158,7 @@ def test_install_writes_hook_and_refuses_a_foreign_one(repo):
     p = barrier.install(root)
     assert os.path.isfile(p) and os.path.basename(p) == "pre-push"
     body = util.read_text(p)
-    assert "alpaca outbound barrier" in body and "alpaca.barrier prepush" in body
+    assert "alpaca outbound barrier" in body and "prepush" in body
     assert os.stat(p).st_mode & stat.S_IXUSR
     # rename-safe: no absolute path and no folder-name literal baked into the hook.
     assert root not in body and os.path.basename(REPO) not in body

@@ -113,16 +113,29 @@ barrier:
   - .alpaca/
   - .venv/
   - .env
+  - .env.local
+  - .env.*.local
   terms: .alpaca/sealed-terms.txt
   allow:
   - '[a-z0-9._%+\-]+@(?:[a-z0-9\-]+\.)*(?:example\.(?:com|org|net)|example|invalid|test|localhost)  #
     reserved placeholder domains (RFC 2606, RFC 6761) used by fixtures and docs; never a real mailbox'
-  - '[a-z0-9._%+\-]*@(?:pytest\.(?:fixture|mark\.[a-z_]+)|cli\.command|common\.fail|contextlib\.contextmanager)[a-z0-9_]*  #
-    the joined lane glues the end of one line to a Python decorator on the next line; not an address'
-  - '[a-z0-9._%+\-]*@reboot[a-z0-9.\-]*  # the joined lane glues prose to the crontab keyword @reboot;
-    not an address'
+  - '[a-z0-9._%+\-]*@(?:pytest\.(?:fixture|mark\.[a-z_]+)|cli\.command|common\.fail|contextlib\.contextmanager)(?:def[a-z0-9_]*)?  #
+    the joined lane glues the end of one line to a Python decorator on the next line, and to the
+    def that follows it; not an address'
+  - '[a-z0-9._%+\-]*@rebootweb-upscriptunder\.alpaca  # the joined lane glues a docstring line of
+    alpaca/observability/maintenance.py that names the crontab keyword @reboot; this one value only'
   - '/home/(?:owner|someone|secret)(?:/[^\s"''<>|]*)?  # generic home folders in test fixtures; no
     real user'
+  allow_blobs:
+  - '231a1ad716215de37ce8102dde533be859036f91  # alpaca/web/vendor/plex-sans.woff2, IBM Plex Sans
+    (OFL); WOFF2 needs the brotli module to open; opened and checked by the leak audit before the
+    first publish'
+  - '8bdb4c4b3f8fae88cc2e3c9c744952dccf89b15a  # alpaca/web/vendor/plex-mono.woff2, IBM Plex Mono
+    (OFL); WOFF2 needs the brotli module to open; opened and checked by the leak audit before the
+    first publish'
+  - 'b142a66f712be6b6d3e72aaf53d9a2e88b06eefc  # alpaca/web/vendor/plex-sans-medium.woff2, IBM Plex
+    Sans Medium (OFL); WOFF2 needs the brotli module to open; opened and checked by the leak audit
+    before the first publish'
 hub:
   enabled: false
   drop: /srv/alpaca-hub/tiles
