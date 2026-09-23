@@ -249,7 +249,15 @@ covers: ["Session Timeout/Idle timeout"]
 
 Matching ignores case and extra spaces. In a change's delta spec, scenarios under
 `## ADDED Requirements` and `## MODIFIED Requirements` are required, and scenarios under
-`## REMOVED Requirements` are not. Pass a folder (`openspec/specs`, or a change's `specs`
+`## REMOVED Requirements` are not. A change folder (`openspec/changes/<id>`, holding
+`proposal.md` and a `specs` folder) is read as the living specs next to it with the change
+applied, the way `alpaca intake` reads it (`docs/intake.md`): the runbook must cover the whole spec
+after the change, and a delta that does not apply is `SPEC-DELTA`.
+
+A scenario whose name starts with a spec-kit id (`#### Scenario: SC-002` or
+`#### Scenario: SC-002 redirect latency`) keeps that id: `covers: [SC-002]` matches it, an `SC`
+id is a required item and an `FR` id an optional one. This is how a project that moved from
+spec-kit to OpenSpec keeps its runbook (see `docs/intake.md`). Pass a folder (`openspec/specs`, or a change's `specs`
 folder) to read every `<capability>/spec.md` in it; the items are then
 `<capability>/<requirement>/<scenario>`, and the short form `<requirement>/<scenario>` is
 accepted when only one capability has it (`COVERS-AMBIGUOUS` otherwise).
@@ -374,6 +382,7 @@ Every error is reported at once, one per line: `ERROR <code> <where>: <message>`
 | `SPEC-UNCOVERED` | a success criterion or scenario is covered by no check or owner gate |
 | `COVERS-UNKNOWN` | a `covers` entry names nothing in the spec |
 | `COVERS-AMBIGUOUS` | a short OpenSpec key matches scenarios in more than one capability |
+| `SPEC-DELTA` | an OpenSpec change folder does not apply to its living specs (it names a requirement they lack, or adds one they have) |
 
 Warnings (`WARN <code> <where>: <message>`) do not change the verdict: `FR-UNCOVERED`,
 `SPEC-CLARIFY`, `COVERS-WITHOUT-SPEC` and `SPEC-UNPARSED` (an id found outside the known item
@@ -381,7 +390,8 @@ shapes; it is still counted, see "Linking checks to the spec").
 
 ## What intake takes from a runbook
 
-Intake builds on pieces Alpaca already has, and the runbook fields line up with them:
+`alpaca intake <spec> <runbook>` (`docs/intake.md`) builds on pieces Alpaca already has, and the
+runbook fields line up with them:
 
 - Each stage `id` becomes a profile stage (`alpaca/profile.py`, `stages()`), so
   `alpaca task add --stage` and the hub can name it.

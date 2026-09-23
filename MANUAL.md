@@ -60,6 +60,8 @@ The everyday operating verbs. Small on purpose.
 ### Specs and runbooks
 
 - `alpaca runbook` - `alpaca runbook check <file> [--spec <path>]` refuses a malformed runbook and, with a spec-kit or OpenSpec spec, fails when a success criterion or scenario has no check. Read-only; see `docs/runbook-format.md`.
+- `alpaca intake` - `alpaca intake <spec> <runbook> [--op <op>] [--dry-run]` checks the runbook against a spec-kit or OpenSpec spec, then gives the op one checklist row per success criterion or scenario, one task contract per runbook stage and per owner gate, and the profile stages. A rerun after a spec change supersedes only the rows whose criterion changed, withdraws removed ones, adds new ones and keeps the rest with their verdicts. See `docs/intake.md`.
+- `alpaca start` - `alpaca start <notes> [--kit spec-kit|openspec] [--prepare]` is the one entry point from raw notes: it picks spec-kit for a new thing or OpenSpec for a change, prepares the project, and prints the steps to a spec, a runbook and intake. The skill `skills/alpaca-from-notes/SKILL.md` walks them.
 
 ### Knowledge
 
@@ -252,6 +254,13 @@ output lists the files it replaced. A rerun that changes nothing leaves `project
 found on disk and the pins; `alpaca spec verify` checks every vendored archive against
 `vendor/VENDOR.json`. Nothing here uses the network. `setup/vendor_spec_kits.py` rebuilds the
 vendored copies from the upstream releases (maintainers only, needs the network).
+
+A project starts in spec-kit and moves to OpenSpec at its first change: `alpaca start <notes>
+--prepare` installs OpenSpec and writes each spec-kit spec as a living OpenSpec spec, one
+requirement per success criterion and functional requirement, each scenario named by its id
+(`#### Scenario: SC-002`). The runbook's `covers` entries keep matching, and `alpaca intake` keeps
+every row and its verdicts across the move. The spec-kit files stay as history. See
+`docs/intake.md`.
 
 ## This manual and its gate
 
