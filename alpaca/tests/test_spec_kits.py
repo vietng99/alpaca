@@ -363,3 +363,140 @@ def test_openspec_install_and_one_change_through_bin_openspec(tmp_path):
             os.environ["CLAUDE_ENV_FILE"] = old
     p = run("bash", "-c", ". %s && cd openspec && openspec list --specs" % env_file)
     assert p.returncode == 0 and "greeting" in p.stdout, p.stdout + p.stderr
+
+
+# ------------------------------------------------------------- review fixes (M2, L1, L2, L4)
+def _user_dirs(tmp_path, monkeypatch):
+    """Stand-ins for the user's own config, data and home dirs, so a test sees any write there."""
+    dirs = {"XDG_CONFIG_HOME": tmp_path / "user-config", "XDG_DATA_HOME": tmp_path / "user-data",
+            "HOME": tmp_path / "user-home"}
+    for name, path in dirs.items():
+        path.mkdir()
+        monkeypatch.setenv(name, str(path))
+    return dirs
+
+
+@pytest.mark.skipif(NODE is None, reason="OpenSpec runs on node; none on PATH")
+def test_openspec_reinstall_keeps_an_edit_unless_forced(project, tmp_path, monkeypatch, capsys):
+    from alpaca import spec_kits
+    _user_dirs(tmp_path, monkeypatch)
+    spec_kits.init(project, "openspec")
+    again = spec_kits.init(project, "openspec")
+    assert again["files"]["written"] == [] and again["files"]["replaced"] == []
+    edited = [".claude/commands/opsx/apply.md", ".claude/skills/openspec-propose/SKILL.md"]
+    for rel in edited:
+        with open(os.path.join(project, rel), "a", encoding="utf-8") as fh:
+            fh.write("local edit\n")
+    rc, doc = _run_cli(["spec", "init", "--kit", "openspec"], capsys)
+    assert rc == 2 and doc["verdict"] == "BLOCKED", doc
+    assert doc["detail"] == sorted(edited)
+    for rel in edited:
+        assert open(os.path.join(project, rel), encoding="utf-8").read().endswith("local edit\n")
+    rc, doc = _run_cli(["spec", "init", "--kit", "openspec", "--force"], capsys)
+    assert rc == 0 and doc["files"]["replaced"] == sorted(edited), doc
+    for rel in edited:
+        assert not open(os.path.join(project, rel), encoding="utf-8").read().endswith("local edit\n")
+
+
+@pytest.mark.skipif(NODE is None, reason="OpenSpec runs on node; none on PATH")
+def test_openspec_install_leaves_the_user_config_alone(project, tmp_path, monkeypatch):
+    """`openspec init` keeps a global config (profile, delivery, workflows). The install points it
+    at a directory inside the project, so the user's own OpenSpec config is never written and
+    never changes what the install generates."""
+    from alpaca import spec_kits
+    dirs = _user_dirs(tmp_path, monkeypatch)
+
+    def user_files():
+        return {str(p): p.read_bytes() for p in tmp_path.glob("user-*/**/*") if p.is_file()}
+
+    spec_kits.init(project, "openspec")
+    assert user_files() == {}, "the install wrote into the user's config, data or home dir"
+    cfg = dirs["XDG_CONFIG_HOME"] / "openspec"
+    cfg.mkdir()
+    (cfg / "config.json").write_text('{"profile": "core", "delivery": "skills"}\n', encoding="utf-8")
+    before = user_files()
+    spec_kits.init(project, "openspec", force=True)
+    assert user_files() == before
+    # the user's delivery=skills did not reach the install: the /opsx commands are still there
+    assert os.path.isfile(os.path.join(project, ".claude", "commands", "opsx", "apply.md"))
+
+
+def _tiny_openspec_vendor(tmp_path):
+    """A vendor dir holding one small npm-style package, pinned, for the runtime unpack tests."""
+    vd = tmp_path / "tiny-vendor"
+    (vd / "openspec" / "npm").mkdir(parents=True)
+    raw = io.BytesIO()
+    with tarfile.open(fileobj=raw, mode="w") as tar:
+        data = b"console.log('tiny');\n"
+        info = tarfile.TarInfo("package/bin/cli.js")
+        info.size = len(data)
+        info.mode = 0o755
+        tar.addfile(info, io.BytesIO(data))
+    tar_bytes = raw.getvalue()
+    import gzip
+    gz = gzip.compress(tar_bytes, mtime=0)
+    (vd / "openspec" / "npm" / "tiny-1.0.0.tgz").write_bytes(gz)
+    pins = {"openspec": {"version": "0.0.1", "entry": "node_modules/tiny/bin/cli.js",
+                         "packages": [{"name": "tiny", "file": "openspec/npm/tiny-1.0.0.tgz",
+                                       "sha256": hashlib.sha256(gz).hexdigest(),
+                                       "tar_sha256": hashlib.sha256(tar_bytes).hexdigest(),
+                                       "paths": ["node_modules/tiny"]}]}}
+    (vd / "VENDOR.json").write_text(json.dumps(pins), encoding="utf-8")
+    return str(vd), pins
+
+
+def test_a_runtime_unpacked_by_another_caller_meanwhile_is_used(tmp_path, monkeypatch):
+    """Two first runs at once: when the other caller puts a complete runtime in place between this
+    caller's check and its rename, this caller uses that runtime and does not fail."""
+    from alpaca import spec_kits
+    vd, pins = _tiny_openspec_vendor(tmp_path)
+    other = tmp_path / "other"
+    ready = spec_kits.ensure_runtime(str(other), pins, vd)
+    root = tmp_path / "proj"
+    dest = spec_kits.runtime_dir(str(root), pins)
+    real_replace = os.replace
+    raced = []
+
+    def racing_replace(src, dst, *a, **kw):
+        if os.path.abspath(dst) == os.path.abspath(dest) and not raced:
+            raced.append(src)
+            shutil.copytree(ready, dest)
+        return real_replace(src, dst, *a, **kw)
+
+    monkeypatch.setattr(os, "replace", racing_replace)
+    got = spec_kits.ensure_runtime(str(root), pins, vd)
+    assert raced and got == dest
+    assert os.path.isfile(os.path.join(dest, "node_modules", "tiny", "bin", "cli.js"))
+    leftovers = [n for n in os.listdir(os.path.dirname(dest)) if n.startswith(".unpack-")]
+    assert leftovers == []
+
+
+def test_record_keeps_the_blank_lines_after_the_spec_block(tmp_path):
+    from alpaca import spec_kits
+    text = "name: x\nspec:\n  kit: old\n\n# next section\nlist:\n- a\n"
+    (tmp_path / "project.yaml").write_text(text, encoding="utf-8")
+    spec_kits.record(str(tmp_path), {"kit": "openspec"})
+    assert (tmp_path / "project.yaml").read_text(encoding="utf-8") == \
+        "name: x\nspec:\n  kit: openspec\n\n# next section\nlist:\n- a\n"
+
+
+def test_a_malformed_project_yaml_is_a_fail_verdict_before_any_write(project, capsys):
+    path = os.path.join(project, "project.yaml")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("name: [unclosed\n")
+    rc, doc = _run_cli(["spec", "init", "--kit", "spec-kit"], capsys)
+    assert rc == 1 and doc["verdict"] == "FAIL" and "project.yaml" in doc["reason"], doc
+    assert not os.path.exists(os.path.join(project, ".specify"))
+    assert open(path, encoding="utf-8").read() == "name: [unclosed\n"
+
+
+def test_a_rerun_with_nothing_new_leaves_project_yaml_unchanged(project, monkeypatch):
+    from alpaca import spec_kits, util
+    stamps = iter(["2026-01-01T00:00:00+00:00", "2026-02-02T00:00:00+00:00"])
+    monkeypatch.setattr(util, "now_iso", lambda: next(stamps))
+    spec_kits.init(project, "spec-kit")
+    path = os.path.join(project, "project.yaml")
+    first = open(path, "rb").read()
+    spec_kits.init(project, "spec-kit")
+    assert open(path, "rb").read() == first
+    assert spec_kits.recorded(project)["installed"] == "2026-01-01T00:00:00+00:00"

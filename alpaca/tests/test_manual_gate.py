@@ -331,3 +331,29 @@ def test_non_m4_op_close_is_unaffected(project):
     cli.main(["init"])
     cli.main(["op", "new", "ship the widget", "--done-when", "green"])
     assert cli.main(["op", "close", "op-001", "--basis", "done"]) == vc.PASS
+
+
+# ------------------------------------------------------------------ wrapped list items
+def test_a_wrapped_list_item_renders_as_one_item(mod):
+    """A bullet wrapped onto indented continuation lines stays one <li>; it does not split into an
+    <li> holding the first line and a <p> holding the rest."""
+    md = ("- first line of the item\n  goes on here\n  and ends here.\n- second item\n\n"
+          "A paragraph.\n")
+    out = mod.markdown_to_html(md)
+    assert "<li>first line of the item goes on here and ends here.</li>" in out
+    assert "<li>second item</li>" in out
+    assert out.count("<p>") == 1 and "<p>A paragraph.</p>" in out
+
+
+def test_shipped_manual_has_no_list_item_split_into_a_paragraph(mod):
+    with open(os.path.join(REPO, "MANUAL.md"), encoding="utf-8") as fh:
+        md = fh.read()
+    out = mod.markdown_to_html(md)
+    for line in md.split("\n"):
+        if line.startswith("  ") and line.strip() and not line.lstrip().startswith(("-", "*", "|")):
+            assert "<p>%s" % mod._inline(line.strip()) not in out, line
+
+
+def test_shipped_page_is_the_render_of_the_manual(mod):
+    with open(HTML_FILE, encoding="utf-8") as fh:
+        assert fh.read() == mod.render(REPO), "docs/manual.html is stale; rerun setup/build_manual_html.py"

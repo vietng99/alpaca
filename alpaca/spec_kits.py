@@ -17,7 +17,13 @@ Both tools are used as their upstreams ship them, at the versions pinned in `ven
 
 A project uses one kit, so the two never overlap: `alpaca spec init` refuses the second kit when the
 project already has the other one (by its files or by the `spec:` block in `project.yaml`), unless
-`--force`. `--force` also lets the install replace files that differ from the vendored copy.
+`--force`. For either kit the install also refuses to replace a file that differs from what the
+kit would write (an edited skill, command or template), unless `--force`; OpenSpec's output is
+first generated in a scratch directory and compared, so a refusal writes nothing.
+
+`openspec init` keeps a global config (profile, delivery, workflows) under XDG_CONFIG_HOME. The
+install gives it a scratch config dir that is removed afterwards, so it never writes the user's
+own OpenSpec config and the user's settings do not change what the install generates.
 
     alpaca spec init --kit spec-kit|openspec [--force]   install and record the kit
     alpaca spec status                                   the recorded kit and the kits found on disk
@@ -166,13 +172,28 @@ def detect(root) -> dict:
     return found
 
 
-def _read_yaml(root) -> dict:
+def _parse_yaml(text) -> dict:
+    """project.yaml text as a mapping; a file that does not parse, or is not a mapping, is a
+    KitError (a FAIL verdict), not a traceback."""
     import yaml
+    try:
+        doc = yaml.safe_load(text) if text else None
+    except yaml.YAMLError as exc:
+        raise KitError("project.yaml does not parse; fix it and rerun (%s)"
+                       % " ".join(str(exc).split()))
+    if doc is None:
+        return {}
+    if not isinstance(doc, dict):
+        raise KitError("project.yaml is not a mapping of keys; fix it and rerun")
+    return doc
+
+
+def _read_yaml(root) -> dict:
     path = os.path.join(root, "project.yaml")
     if not os.path.isfile(path):
         return {}
     with open(path, encoding="utf-8") as fh:
-        return yaml.safe_load(fh) or {}
+        return _parse_yaml(fh.read())
 
 
 def recorded(root) -> dict:
@@ -192,10 +213,15 @@ def _replace_top_block(text, key, block_text) -> str:
     head = re.compile(r"^%s:(\s|$)" % re.escape(key))
     while i < len(lines):
         if not done and head.match(lines[i]):
-            i += 1
-            while i < len(lines) and (not lines[i].strip() or lines[i][0] in " \t-"):
-                i += 1
+            j = i + 1
+            while j < len(lines) and (not lines[j].strip() or lines[j][0] in " \t-"):
+                j += 1
+            keep = j
+            while keep > i + 1 and not lines[keep - 1].strip():
+                keep -= 1                      # the blank lines after the old block stay
             out.append(block_text)
+            out.extend(lines[keep:j])
+            i = j
             done = True
             continue
         out.append(lines[i])
@@ -207,8 +233,10 @@ def _replace_top_block(text, key, block_text) -> str:
     return "".join(out)
 
 
-def record(root, block: dict) -> None:
-    """Write `spec: <block>` into project.yaml, keeping the rest of the file as it is."""
+def record(root, block: dict) -> bool:
+    """Write `spec: <block>` into project.yaml, keeping the rest of the file as it is. The first
+    `installed` time is kept while the kit and version stay the same, and the file is not written
+    when nothing changed. Returns whether the file was written."""
     import yaml
     from alpaca import util
     path = os.path.join(root, "project.yaml")
@@ -216,7 +244,14 @@ def record(root, block: dict) -> None:
     if os.path.isfile(path):
         with open(path, encoding="utf-8") as fh:
             text = fh.read()
-    before = yaml.safe_load(text) or {} if text else {}
+    before = _parse_yaml(text)
+    old = before.get("spec")
+    block = dict(block)
+    if isinstance(old, dict) and "installed" in block and old.get("installed") \
+            and (old.get("kit"), old.get("version")) == (block.get("kit"), block.get("version")):
+        block["installed"] = old["installed"]
+    if old == block:
+        return False
     new = _replace_top_block(text, "spec", yaml.safe_dump({"spec": block}, sort_keys=False))
     after = yaml.safe_load(new) or {}
     want = dict(before)
@@ -225,6 +260,7 @@ def record(root, block: dict) -> None:
         before["spec"] = block
         new = yaml.safe_dump(before, sort_keys=False, allow_unicode=True)
     util.write_text(path, new)
+    return True
 
 
 # ------------------------------------------------------------------------------ file writes
@@ -338,16 +374,49 @@ def ensure_runtime(root, pins=None, vendor_dir=None) -> str:
     op = pins["openspec"]
     dest = runtime_dir(root, pins)
     digest = _packages_digest(op)
-    marker = os.path.join(dest, MARKER)
-    if os.path.isfile(marker):
-        try:
-            with open(marker, encoding="utf-8") as fh:
-                if json.load(fh).get("packages_digest") == digest:
-                    return dest
-        except (OSError, ValueError):
-            pass
+    if _runtime_ready(dest, digest):
+        return dest
     parent = os.path.dirname(dest)
     os.makedirs(parent, exist_ok=True)
+    with _unpack_lock(os.path.join(parent, ".%s.lock" % os.path.basename(dest))):
+        if _runtime_ready(dest, digest):       # another caller finished while this one waited
+            return dest
+        return _unpack_runtime(op, vendor_dir, dest, digest)
+
+
+def _runtime_ready(dest, digest) -> bool:
+    try:
+        with open(os.path.join(dest, MARKER), encoding="utf-8") as fh:
+            return json.load(fh).get("packages_digest") == digest
+    except (OSError, ValueError):
+        return False
+
+
+class _unpack_lock:
+    """An exclusive lock file around the first-run unpack, so two first runs at once do not both
+    rename into the same directory. Where fcntl is missing the lock is a no-op; the rename below
+    still treats a runtime completed by another caller as success."""
+
+    def __init__(self, path):
+        self.path, self.fh = path, None
+
+    def __enter__(self):
+        try:
+            import fcntl
+        except ImportError:
+            return self
+        self.fh = open(self.path, "a")
+        fcntl.flock(self.fh.fileno(), fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, *exc):
+        if self.fh is not None:
+            self.fh.close()                    # closing the file releases the lock
+        return False
+
+
+def _unpack_runtime(op, vendor_dir, dest, digest) -> str:
+    parent = os.path.dirname(dest)
     tmp = tempfile.mkdtemp(dir=parent, prefix=".unpack-openspec-")
     try:
         for pkg in op["packages"]:
@@ -370,7 +439,12 @@ def ensure_runtime(root, pins=None, vendor_dir=None) -> str:
         if os.path.exists(dest):
             old = dest + ".old-%d" % os.getpid()
             os.replace(dest, old)
-        os.replace(tmp, dest)
+        try:
+            os.replace(tmp, dest)
+        except OSError:
+            if not _runtime_ready(dest, digest):
+                raise
+            shutil.rmtree(tmp, ignore_errors=True)   # another caller put a complete runtime there
         if old:
             shutil.rmtree(old, ignore_errors=True)
     except BaseException:
@@ -418,36 +492,95 @@ def openspec_env(base=None) -> dict:
     return env
 
 
-def _openspec_files(root) -> list:
+def _walk_files(root, tops) -> list:
     out = []
-    for top in ("openspec", ".claude/commands/opsx"):
-        base = os.path.join(root, top)
+    for base in tops:
         for dp, dn, fn in os.walk(base):
             dn.sort()
             out += [os.path.relpath(os.path.join(dp, f), root).replace(os.sep, "/") for f in sorted(fn)]
+    return out
+
+
+def _openspec_files(root) -> list:
+    """Every file the OpenSpec install owns or reads in the project: openspec/, the /opsx
+    commands and the openspec-* skills."""
     import glob
-    for d in sorted(glob.glob(os.path.join(root, ".claude", "skills", "openspec-*"))):
-        for dp, dn, fn in os.walk(d):
-            dn.sort()
-            out += [os.path.relpath(os.path.join(dp, f), root).replace(os.sep, "/") for f in sorted(fn)]
-    return sorted(out)
+    tops = [os.path.join(root, "openspec"), os.path.join(root, ".claude", "commands", "opsx")]
+    tops += sorted(glob.glob(os.path.join(root, ".claude", "skills", "openspec-*")))
+    return sorted(_walk_files(root, tops))
 
 
-def install_openspec(root, pins, vendor_dir, force=False) -> dict:
-    cmd = openspec_command(root, pins, vendor_dir)
+def _digests(root, rels) -> dict:
+    out = {}
+    for rel in rels:
+        path = os.path.join(root, *rel.split("/"))
+        if os.path.isfile(path) and not os.path.islink(path):
+            out[rel] = sha256_file(path)
+    return out
+
+
+#: the scratch global config `openspec init` reads: the profile and delivery the install uses,
+#: stated so no migration step runs and the user's own settings play no part.
+INIT_GLOBAL_CONFIG = {"featureFlags": {}, "profile": "core", "delivery": "both"}
+
+
+def _run_openspec_init(cmd, target, work, force) -> subprocess.CompletedProcess:
+    """`openspec init --tools claude --profile core` on `target`, with XDG_CONFIG_HOME and
+    XDG_DATA_HOME pointed at `work` (a scratch dir the caller removes)."""
+    cfg = os.path.join(work, "config")
+    os.makedirs(os.path.join(cfg, "openspec"), exist_ok=True)
+    os.makedirs(os.path.join(work, "data"), exist_ok=True)
+    with open(os.path.join(cfg, "openspec", "config.json"), "w", encoding="utf-8") as fh:
+        json.dump(INIT_GLOBAL_CONFIG, fh)
+    env = openspec_env()
+    env.update({"XDG_CONFIG_HOME": cfg, "XDG_DATA_HOME": os.path.join(work, "data")})
     args = cmd + ["init", "--tools", "claude", "--profile", "core", "--no-animation"]
     if force:
         args.append("--force")
-    args.append(os.path.realpath(root))
-    before = set(_openspec_files(root))
-    p = subprocess.run(args, cwd=root, env=openspec_env(), stdin=subprocess.DEVNULL,
+    args.append(os.path.realpath(target))
+    p = subprocess.run(args, cwd=target, env=env, stdin=subprocess.DEVNULL,
                        capture_output=True, text=True, timeout=INIT_TIMEOUT)
     if p.returncode != 0:
         raise KitError("openspec init failed (exit %d): %s" % (
             p.returncode, (p.stderr or p.stdout).strip()[-800:]))
-    after = _openspec_files(root)
-    return {"written": [f for f in after if f not in before], "present": after,
-            "cli": "bin/openspec", "init_output": p.stdout.strip().splitlines()[-12:]}
+    return p
+
+
+def install_openspec(root, pins, vendor_dir, force=False) -> dict:
+    """Run the vendored `openspec init` in a scratch project first and compare what it writes
+    under .claude/ with the project's files. A project file that differs is a refusal (nothing
+    written) unless `force`. openspec/ itself is the project's own data: init keeps an existing
+    openspec/config.yaml, so it is not compared."""
+    cmd = openspec_command(root, pins, vendor_dir)
+    work = tempfile.mkdtemp(prefix="alpaca-openspec-init-")
+    try:
+        stage = os.path.join(work, "stage")
+        os.makedirs(stage)
+        _run_openspec_init(cmd, stage, os.path.join(work, "stage-home"), force=False)
+        conflicts = []
+        for rel in _walk_files(stage, [os.path.join(stage, ".claude")]):
+            target = os.path.join(root, *rel.split("/"))
+            if os.path.islink(target) or (os.path.exists(target) and not os.path.isfile(target)):
+                conflicts.append(rel)
+            elif os.path.isfile(target) and \
+                    sha256_file(target) != sha256_file(os.path.join(stage, *rel.split("/"))):
+                conflicts.append(rel)
+        conflicts.sort()
+        if conflicts and not force:
+            raise KitError("%d file(s) differ from what the vendored OpenSpec writes; rerun with "
+                           "--force to replace them" % len(conflicts), blocked=True, detail=conflicts)
+        before = _digests(root, _openspec_files(root))
+        p = _run_openspec_init(cmd, root, os.path.join(work, "home"), force=force)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    after_list = _openspec_files(root)
+    after = _digests(root, after_list)
+    return {"written": [f for f in after_list if f not in before],
+            "replaced": sorted(f for f in before if f in after and after[f] != before[f]),
+            "removed": sorted(f for f in before if f not in after),
+            "unchanged": sorted(f for f in before if after.get(f) == before[f]),
+            "present": after_list, "cli": "bin/openspec",
+            "init_output": p.stdout.strip().splitlines()[-12:]}
 
 
 # ------------------------------------------------------------------------------------ verbs
@@ -460,7 +593,8 @@ def init(root, kit, force=False, vendor_dir=None) -> dict:
     pins = load_pins(vendor_dir)
     other = [k for k in KITS if k != kit][0]
     present = detect(root)
-    rec = recorded(root)
+    rec = _read_yaml(root).get("spec")          # a project.yaml that does not parse stops here
+    rec = rec if isinstance(rec, dict) else {}
     clash = list(present[other])
     if rec.get("kit") == other:
         clash.insert(0, "project.yaml spec.kit: %s" % other)

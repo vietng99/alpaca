@@ -193,32 +193,18 @@
 <h2>First chat and onboarding</h2>
 <p>On the first session the SessionStart hook prints <code>RESUME.md</code> into the chat. On a generic unconfigured project there is nothing to resume yet, so the first thing to do is onboard.</p>
 <ul>
-<li><code>alpaca onboard</code> senses the repository, proposes an identity, and seeds the record. It writes</li>
+<li><code>alpaca onboard</code> senses the repository, proposes an identity, and seeds the record. It writes <code>project.yaml</code> (the project identity, the default autodrive level, the plain-writing preset choice) and opens the record. It is a sense-then-propose step: it reads the repository and proposes, and you confirm, rather than guessing silently.</li>
+<li><code>alpaca doctor</code> then checks that the installation and the record are consistent. Run it once right after onboarding.</li>
 </ul>
-<p><code>project.yaml</code> (the project identity, the default autodrive level, the plain-writing preset choice) and opens the record. It is a sense-then-propose step: it reads the repository and proposes, and you confirm, rather than guessing silently.</p>
-<ul>
-<li><code>alpaca doctor</code> then checks that the installation and the record are consistent. Run it once right</li>
-</ul>
-<p>after onboarding.</p>
 <p>Onboarding asks who is working on the project, what is being worked on, what the open tasks are, and whether to turn on the plain-writing preset. Answer those, run <code>alpaca onboard</code>, then <code>alpaca doctor</code>.</p>
 <h2>Daily use</h2>
 <p>The everyday loop is four surfaces over the one record.</p>
 <ul>
-<li>The landing pad. <code>alpaca status</code> renders the landing pad: the open ops, the open tasks, the last</li>
+<li>The landing pad. <code>alpaca status</code> renders the landing pad: the open ops, the open tasks, the last event, whether the project is onboarded. <code>alpaca status --json</code> prints the same shape for a machine; the op index rides on it. The rendered pad also lands in <code>RESUME.md</code>, which the SessionStart hook prints when a session opens or resumes. <code>RESUME.md</code> is a projection of the record, never a source you hand-edit.</li>
+<li>The board. <code>alpaca board</code> shows the board and moves a row between lanes. When a claim lease expires, the row returns to the board on its own, so no work is stranded under a lease that went stale.</li>
+<li>The verbs. <code>alpaca op</code> opens, lists and closes an op (the unit of work). <code>alpaca task</code> adds, claims and moves a task; a task is done only with a sealed proof report, so the closing move is <code>alpaca proof new &lt;id&gt;</code>, write the report, <code>alpaca proof seal &lt;id&gt;</code>, then <code>alpaca task move &lt;id&gt; done --proof local:&lt;report&gt;</code>. <code>alpaca msg</code> posts and reads messages between agents working one op. <code>alpaca decide</code> records a decision the level cannot auto-advance. <code>alpaca ask</code> and <code>alpaca answer</code> bank and clear a question that pauses work until it is answered. <code>alpaca phase</code> enters a phase or adjudicates a phase boundary door.</li>
+<li>Resume. When you come back to a project, read the pad first. Do not race ahead of it: <code>alpaca status</code> tells you the open work and the last event, and the record is the truth behind both. Pick up the first open task, claim it, and move it when its proof exists.</li>
 </ul>
-<p>event, whether the project is onboarded. <code>alpaca status --json</code> prints the same shape for a machine; the op index rides on it. The rendered pad also lands in <code>RESUME.md</code>, which the SessionStart hook prints when a session opens or resumes. <code>RESUME.md</code> is a projection of the record, never a source you hand-edit.</p>
-<ul>
-<li>The board. <code>alpaca board</code> shows the board and moves a row between lanes. When a claim lease expires,</li>
-</ul>
-<p>the row returns to the board on its own, so no work is stranded under a lease that went stale.</p>
-<ul>
-<li>The verbs. <code>alpaca op</code> opens, lists and closes an op (the unit of work). <code>alpaca task</code> adds, claims and</li>
-</ul>
-<p>moves a task; a task is done only with a sealed proof report, so the closing move is <code>alpaca proof new &lt;id&gt;</code>, write the report, <code>alpaca proof seal &lt;id&gt;</code>, then <code>alpaca task move &lt;id&gt; done --proof local:&lt;report&gt;</code>. <code>alpaca msg</code> posts and reads messages between agents working one op. <code>alpaca decide</code> records a decision the level cannot auto-advance. <code>alpaca ask</code> and <code>alpaca answer</code> bank and clear a question that pauses work until it is answered. <code>alpaca phase</code> enters a phase or adjudicates a phase boundary door.</p>
-<ul>
-<li>Resume. When you come back to a project, read the pad first. Do not race ahead of it: <code>alpaca status</code></li>
-</ul>
-<p>tells you the open work and the last event, and the record is the truth behind both. Pick up the first open task, claim it, and move it when its proof exists.</p>
 <h2>The autodrive levels and what each one asks of you</h2>
 <p>Autonomy is one ladder of named rungs from attended to pre-authorised. The level in force is a recorded decision every gate reads. You may drop to a safer rung at any time; you never raise your own. A raise is one human decision. The project-local session command sets the level; the reason the ladder exists lives in <code>doctrine/leaves/autodrive-levels.md</code>, and the band is enforced by <code>alpaca/posture/level.py</code>. A fresh install runs at L2.</p>
 <div class="scroll-x"><table><thead><tr><th>Level</th><th>Name</th><th>What it asks of you</th></tr></thead><tbody><tr><td>L1</td><td>Assist</td><td>The agent investigates and hands over ready-to-run changes; it writes nothing itself. You apply every change.</td></tr><tr><td>L2</td><td>Partial</td><td>The agent makes single bounded edits, one at a time, and confirms each. You approve each edit.</td></tr><tr><td>L3</td><td>Conditional</td><td>The agent runs a task end to end but hands control back at every fork or irreversible step. You decide at the forks.</td></tr><tr><td>L4</td><td>High</td><td>The agent is autonomous inside one declared scope and self-verifies; it stops at the scope edge or a hard blocker. You set the scope.</td></tr><tr><td>L5</td><td>Full</td><td>The agent plans and runs the whole task, routes around a wall, and surfaces what it could not finish once at the end. You read the end report.</td></tr><tr><td>L6</td><td>Never-defer</td><td>The agent pursues the goal without deferring mid-run; it stops only when the goal marker is written or you stop it. You set the goal and can stop it.</td></tr></tbody></table></div>
@@ -227,10 +213,7 @@
 <p>A formation is a shape for the work: how many agents, who checks whom. The manifests live under <code>formations/</code>.</p>
 <ul>
 <li><code>formations/solo.md</code> - one agent, the default for a bounded task.</li>
-<li><code>formations/builder-verifier.md</code> - one builds, a second verifies, when a change needs an</li>
-</ul>
-<p>independent check.</p>
-<ul>
+<li><code>formations/builder-verifier.md</code> - one builds, a second verifies, when a change needs an independent check.</li>
 <li><code>formations/fan-out.md</code> - several agents on independent rows of one op, when the work parallelises.</li>
 <li><code>formations/bug-loop.md</code> - a reproduce-fix-verify loop, when chasing a defect.</li>
 <li><code>formations/nuclear.md</code> - the depth-first adversarial audit and fix, for a narrow high-stakes call.</li>
@@ -249,51 +232,32 @@
 <h2>The rules that survive</h2>
 <p>These hold in every session, at every level.</p>
 <ul>
-<li>The record is the only truth. <code>.alpaca/alpaca.db</code> is the source; <code>RESUME.md</code>, <code>analytics/index.html</code>,</li>
-</ul>
-<p><code>board.json</code> and <code>data.json</code> are projections, rendered and never hand-edited.</p>
-<ul>
+<li>The record is the only truth. <code>.alpaca/alpaca.db</code> is the source; <code>RESUME.md</code>, <code>analytics/index.html</code>, <code>board.json</code> and <code>data.json</code> are projections, rendered and never hand-edited.</li>
 <li>The record is append-only, with a hash chain <code>alpaca verify</code> recomputes. <code>alpaca</code> is the sole writer.</li>
-<li>A task is done only with a sealed proof report: <code>alpaca proof new</code>, write it, <code>alpaca proof seal</code>,</li>
-</ul>
-<p>then <code>--proof local:&lt;report&gt;</code>. No sealed report, not done.</p>
-<ul>
+<li>A task is done only with a sealed proof report: <code>alpaca proof new</code>, write it, <code>alpaca proof seal</code>, then <code>--proof local:&lt;report&gt;</code>. No sealed report, not done.</li>
 <li>Every claim carries a pointer to a file, a command output, or a record row.</li>
 <li>Ship and irreversible external actions are human decisions at every autodrive level.</li>
 <li>Never leave the project root, and never hand-edit a projection.</li>
-<li>The authority surface (<code>contracts/</code>, <code>project.yaml</code>, <code>doctrine/</code>, the boot block in <code>CLAUDE.md</code>)</li>
+<li>The authority surface (<code>contracts/</code>, <code>project.yaml</code>, <code>doctrine/</code>, the boot block in <code>CLAUDE.md</code>) is human-owned; below L5 an agent write there is a review card.</li>
 </ul>
-<p>is human-owned; below L5 an agent write there is a review card.</p>
 <h2>Spec tools</h2>
 <p>Alpaca carries two upstream spec tools at pinned versions, with their MIT notices, and uses them as they ship. A project uses one of them, so they never overlap:</p>
 <ul>
-<li>spec-kit (github/spec-kit) for a new thing: from a raw idea to a first spec, with the clarify</li>
+<li>spec-kit (github/spec-kit) for a new thing: from a raw idea to a first spec, with the clarify questions and answers. <code>alpaca spec init --kit spec-kit</code> writes its Claude Code skills (/speckit-specify, /speckit-clarify, /speckit-plan, /speckit-tasks, /speckit-implement and the rest) and its templates and scripts under .specify in the project. The spec-kit constitution is replaced by <code>vendor/spec-kit/constitution.md</code>, which points at <code>CLAUDE.md</code> and <code>doctrine/</code> and says Alpaca's rules win; it is not a second rulebook.</li>
+<li>OpenSpec (Fission-AI/OpenSpec) for changes to something that exists: living specs plus change deltas. <code>alpaca spec init --kit openspec</code> runs the vendored <code>openspec init --tools claude</code>, which writes the openspec folder and the /opsx:propose, /opsx:apply and /opsx:archive commands with their skills. <code>bin/openspec</code> runs the vendored CLI (<code>new change</code>, <code>validate</code>, <code>archive</code>, <code>list</code>, <code>show</code>) with the host node (20.19.0 or later); the first run unpacks the pinned packages under .alpaca/tools after checking each sha256. At session start the hook puts the project's bin folder on PATH for Claude Code, so the commands find <code>openspec</code>. Telemetry stays off. <code>openspec init</code> keeps a global config (profile, delivery, workflows); the install runs it with a scratch config dir that it removes afterwards, so your own OpenSpec config under XDG_CONFIG_HOME (or ~/.config/openspec) is not written and does not change what gets installed. Other <code>bin/openspec</code> commands read that user config as upstream does.</li>
 </ul>
-<p>questions and answers. <code>alpaca spec init --kit spec-kit</code> writes its Claude Code skills (/speckit-specify, /speckit-clarify, /speckit-plan, /speckit-tasks, /speckit-implement and the rest) and its templates and scripts under .specify in the project. The spec-kit constitution is replaced by <code>vendor/spec-kit/constitution.md</code>, which points at <code>CLAUDE.md</code> and <code>doctrine/</code> and says Alpaca's rules win; it is not a second rulebook.</p>
-<ul>
-<li>OpenSpec (Fission-AI/OpenSpec) for changes to something that exists: living specs plus change</li>
-</ul>
-<p>deltas. <code>alpaca spec init --kit openspec</code> runs the vendored <code>openspec init --tools claude</code>, which writes the openspec folder and the /opsx:propose, /opsx:apply and /opsx:archive commands with their skills. <code>bin/openspec</code> runs the vendored CLI (<code>new change</code>, <code>validate</code>, <code>archive</code>, <code>list</code>, <code>show</code>) with the host node (20.19.0 or later); the first run unpacks the pinned packages under .alpaca/tools after checking each sha256. At session start the hook puts the project's bin folder on PATH for Claude Code, so the commands find <code>openspec</code>. Telemetry stays off.</p>
-<p><code>alpaca spec init</code> refuses the second kit when the project already has the other one (its files, or the <code>spec:</code> entry it records in <code>project.yaml</code>), and refuses to replace a file that differs from the vendored copy; <code>--force</code> overrides both. <code>alpaca spec status</code> shows the recorded kit, the kits found on disk and the pins; <code>alpaca spec verify</code> checks every vendored archive against <code>vendor/VENDOR.json</code>. Nothing here uses the network. <code>setup/vendor_spec_kits.py</code> rebuilds the vendored copies from the upstream releases (maintainers only, needs the network).</p>
+<p><code>alpaca spec init</code> refuses the second kit when the project already has the other one (its files, or the <code>spec:</code> entry it records in <code>project.yaml</code>), and refuses to replace a file that differs from what the kit would write (for OpenSpec it first runs <code>openspec init</code> in a scratch directory and compares the skills and commands, so a refusal writes nothing); <code>--force</code> overrides both, and the output lists the files it replaced. A rerun that changes nothing leaves <code>project.yaml</code> as it was. <code>alpaca spec status</code> shows the recorded kit, the kits found on disk and the pins; <code>alpaca spec verify</code> checks every vendored archive against <code>vendor/VENDOR.json</code>. Nothing here uses the network. <code>setup/vendor_spec_kits.py</code> rebuilds the vendored copies from the upstream releases (maintainers only, needs the network).</p>
 <h2>This manual and its gate</h2>
 <p>This file is <code>MANUAL.md</code>. <code>setup/build_manual_html.py</code> renders it into <code>docs/manual.html</code>, a phone-safe page you can open over a file link. The manual gate checks that every command, path, verb, hook and file named here resolves in the shipped tree, that <code>docs/manual.html</code> is pure ASCII and parses, and that the page carries the charset and viewport metas and both theme blocks. A release candidate whose manual gate fails does not package. <code>setup/boot-check.py</code> composes the gate with the rest of the instruments. The boot read-order and the router live in <code>MAP.md</code>, and the work an op opens from lives in <code>intents/queue.md</code>.</p>
 <h2>Durable observability and recovery</h2>
 <ul>
-<li><code>alpaca collect</code> registers expected sources, ingests bounded batches, runs independent</li>
+<li><code>alpaca collect</code> registers expected sources, ingests bounded batches, runs independent projection consumers, and reports coverage, cursor backlog and retry state. <code>collect once</code> is a bounded repair pass; <code>collect watch --interval 15</code> is the supervised service. <code>collect enable</code> moves expensive native-hook snapshots and wiki/export work to that service.</li>
+<li><code>alpaca artifact</code> preserves approved result bytes, catalogs older archive availability, pins evidence, and previews retention. <code>artifact retention-dry-run</code> never deletes bytes.</li>
+<li><code>alpaca backup</code> creates and verifies coordinated SQLite snapshots plus replayable files, reports recorded verification, and restores only into an empty isolated destination. A structurally valid backup can still contain explicitly declared historical evidence gaps.</li>
 </ul>
-<p>projection consumers, and reports coverage, cursor backlog and retry state. <code>collect once</code> is a bounded repair pass; <code>collect watch --interval 15</code> is the supervised service. <code>collect enable</code> moves expensive native-hook snapshots and wiki/export work to that service.</p>
 <ul>
-<li><code>alpaca artifact</code> preserves approved result bytes, catalogs older archive availability,</li>
+<li><code>alpaca workspace</code> registers this instance in the host workspace registry (<code>add</code>, <code>list</code>, <code>remove</code>) and renders one combined cloudflared config for every registered hostname (<code>render-ingress</code>), which the owner applies. See <code>docs/workspaces.md</code> for the pathway from a local root to a cockpit on localhost and on a public hostname.</li>
 </ul>
-<p>pins evidence, and previews retention. <code>artifact retention-dry-run</code> never deletes bytes.</p>
-<ul>
-<li><code>alpaca backup</code> creates and verifies coordinated SQLite snapshots plus replayable files,</li>
-</ul>
-<p>reports recorded verification, and restores only into an empty isolated destination. A structurally valid backup can still contain explicitly declared historical evidence gaps.</p>
-<ul>
-<li><code>alpaca workspace</code> registers this instance in the host workspace registry (<code>add</code>, <code>list</code>,</li>
-</ul>
-<p><code>remove</code>) and renders one combined cloudflared config for every registered hostname (<code>render-ingress</code>), which the owner applies. See <code>docs/workspaces.md</code> for the pathway from a local root to a cockpit on localhost and on a public hostname.</p>
 <p>See <code>docs/observability-operations.md</code> for collection contracts, service setup, failure recovery, retention budgets and the restore rehearsal. The optional project SQLite runtime is described in <code>setup/sqlite-runtime.md</code>. Raw native reasoning is excluded from new analytical capture.</p>
 </main>
 <footer>

@@ -234,10 +234,16 @@ they ship. A project uses one of them, so they never overlap:
   `show`) with the host node (20.19.0 or later); the first run unpacks the pinned packages under
   .alpaca/tools after checking each sha256. At session start the hook puts the project's bin
   folder on PATH for Claude Code, so the commands find `openspec`. Telemetry stays off.
+  `openspec init` keeps a global config (profile, delivery, workflows); the install runs it with
+  a scratch config dir that it removes afterwards, so your own OpenSpec config under
+  XDG_CONFIG_HOME (or ~/.config/openspec) is not written and does not change what gets installed.
+  Other `bin/openspec` commands read that user config as upstream does.
 
 `alpaca spec init` refuses the second kit when the project already has the other one (its files,
 or the `spec:` entry it records in `project.yaml`), and refuses to replace a file that differs from
-the vendored copy; `--force` overrides both. `alpaca spec status` shows the recorded kit, the kits
+what the kit would write (for OpenSpec it first runs `openspec init` in a scratch directory and
+compares the skills and commands, so a refusal writes nothing); `--force` overrides both, and the
+output lists the files it replaced. A rerun that changes nothing leaves `project.yaml` as it was. `alpaca spec status` shows the recorded kit, the kits
 found on disk and the pins; `alpaca spec verify` checks every vendored archive against
 `vendor/VENDOR.json`. Nothing here uses the network. `setup/vendor_spec_kits.py` rebuilds the
 vendored copies from the upstream releases (maintainers only, needs the network).
