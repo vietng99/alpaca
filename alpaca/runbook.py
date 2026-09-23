@@ -74,7 +74,7 @@ ERROR_CODES = (
     "SPEC-MISSING", "SPEC-EMPTY", "SPEC-MIXED", "SPEC-UNCOVERED", "COVERS-UNKNOWN",
     "COVERS-AMBIGUOUS",
 )
-WARNING_CODES = ("FR-UNCOVERED", "SPEC-CLARIFY", "COVERS-WITHOUT-SPEC")
+WARNING_CODES = ("FR-UNCOVERED", "SPEC-CLARIFY", "COVERS-WITHOUT-SPEC", "SPEC-UNPARSED")
 
 #: words people reach for, mapped to the field that means it (used only for the "did you mean" hint)
 ALIASES = {"command": "run", "cmd": "run", "depends_on": "needs", "depends": "needs",
@@ -544,6 +544,9 @@ class _Checker:
                 self.r.error("VALUE-NOT-NUMBER", at, "op %s compares numbers, and knob %s is a %s knob"
                              % (op, ref.group(1), knob.get("type")))
             return
+        if isinstance(value, str) and VAR.search(value):
+            # text with a ${NAME} inside ("v${RELEASE}"): the name must exist; evaluate replaces it
+            self.variables(value, at)
         if isinstance(value, (dict, list)) or value is None:
             self.r.error("FIELD-TYPE", at, "`value` is a number, text, true/false or a ${KNOB} reference")
         elif op in ("<", "<=", ">", ">=") and not _is_number(value):
@@ -669,7 +672,14 @@ def _norm(text):
 _REQUIREMENT = re.compile(r"^\s{0,3}###\s+Requirement:\s*(.+?)\s*$", re.I)
 _SCENARIO = re.compile(r"^\s{0,3}####\s+(.+?)\s*$")
 _SECTION = re.compile(r"^\s{0,3}##\s+(.+?)\s*$")
-_KIT_ITEM = re.compile(r"^\s*[-*]\s+\*\*((?:SC|FR)-\d+)\*\*\s*:?\s*(.*)$")
+# spec-kit item lines. The template writes `- **SC-001**: ...`; people also write the colon inside
+# the bold, a numbered list, no bullet, no bold (`SC-001: ...`), a heading, or a table row.
+_KIT_LEAD = r"^\s*(?:[-*+]\s+|\d{1,9}[.)]\s+|#{1,6}\s+)?"
+_KIT_ITEM = re.compile(_KIT_LEAD + r"(?:\*\*|__)((?:SC|FR)-\d+)\s*:?\s*(?:\*\*|__)\s*:?\s*(.*)$")
+_KIT_BARE = re.compile(_KIT_LEAD + r"((?:SC|FR)-\d+)\s*:\s*(.*)$")
+_KIT_ROW = re.compile(r"^\s*\|\s*(?:\*\*|__)?((?:SC|FR)-\d+)(?:\*\*|__)?\s*\|(.*)$")
+_KIT_ID = re.compile(r"\b(?:SC|FR)-\d+\b")
+_INLINE_COMMENT = re.compile(r"<!--.*?-->")
 
 
 def _openspec_items(lines, capability=None):
@@ -700,17 +710,42 @@ def _openspec_items(lines, capability=None):
     return items
 
 
+def _kit_item(line):
+    """(id, text) when the line states a spec-kit item in a shape this reader knows, else None."""
+    m = _KIT_ROW.match(line)
+    if m:
+        cells = [c.strip() for c in m.group(2).split("|")]
+        return m.group(1), " ".join(c for c in cells if c)
+    m = _KIT_ITEM.match(line) or _KIT_BARE.match(line)
+    if m:
+        return m.group(1), m.group(2).strip()
+    return None
+
+
 def _speckit_items(lines):
-    items, clarify = [], 0
-    for line, masked in zip(lines, _fence_mask(lines)):
+    """Items from the known line shapes first; then any SC-nnn or FR-nnn id that appears only in
+    some other line is still an item (an SC is still required), marked `loose` with its line
+    number, so a criterion written in an odd shape can never drop out of coverage unseen."""
+    items, clarify, seen = [], 0, set()
+    open_lines = []
+    for n, (line, masked) in enumerate(zip(lines, _fence_mask(lines)), 1):
         if masked:
             continue
+        line = _INLINE_COMMENT.sub(" ", line)
+        open_lines.append((n, line))
         clarify += line.count("[NEEDS CLARIFICATION")
-        m = _KIT_ITEM.match(line)
-        if m:
-            ident = m.group(1).upper()
-            items.append({"id": ident, "kind": ident[:2], "text": m.group(2).strip(),
+        found = _kit_item(line)
+        if found and found[0] not in seen:
+            ident = found[0]
+            seen.add(ident)
+            items.append({"id": ident, "kind": ident[:2], "text": found[1], "line": n,
                           "required": ident.startswith("SC-")})
+    for n, line in open_lines:
+        for ident in _KIT_ID.findall(line):
+            if ident not in seen:
+                seen.add(ident)
+                items.append({"id": ident, "kind": ident[:2], "text": line.strip(), "line": n,
+                              "required": ident.startswith("SC-"), "loose": True})
     items.sort(key=lambda i: (not i["required"], i["id"]))
     return items, clarify
 
@@ -825,6 +860,13 @@ def coverage(data, spec, report):
         if not item["required"] and item["kind"] == "FR" and item["id"] not in covered:
             report.warn("FR-UNCOVERED", item["id"], "no check covers %s (a warning: only success criteria "
                         "must be covered)" % item["id"])
+    for item in spec["items"]:
+        if item.get("loose"):
+            report.warn("SPEC-UNPARSED", item["id"], "%s appears at line %d of %s in a shape this reader "
+                        "does not know (%r); it is counted as %s anyway. Write it as `- **%s**: ...`"
+                        % (item["id"], item["line"], spec["path"], item["text"][:80],
+                           "a required success criterion" if item["required"] else
+                           "a functional requirement", item["id"]))
     if spec.get("clarifications"):
         report.warn("SPEC-CLARIFY", spec["path"], "the spec still has %d [NEEDS CLARIFICATION] marker(s)"
                     % spec["clarifications"])
@@ -900,9 +942,20 @@ def _field(doc, dotted):
     return cur
 
 
+def _inside(path, folder):
+    path, folder = os.path.abspath(path), os.path.abspath(folder)
+    return os.path.commonpath([path, folder]) == folder
+
+
 def _compare(left, op, right):
     if op in ("==", "!="):
-        same = left == right if not (_is_number(left) and _is_number(right)) else float(left) == float(right)
+        if isinstance(left, bool) or isinstance(right, bool):
+            # Python reads true as 1 and false as 0; a check does not: a bool equals only a bool
+            same = isinstance(left, bool) and isinstance(right, bool) and left == right
+        elif _is_number(left) and _is_number(right):
+            same = float(left) == float(right)
+        else:
+            same = left == right
         return same if op == "==" else not same
     return {"<": left < right, "<=": left <= right, ">": left > right, ">=": left >= right}[op]
 
@@ -927,7 +980,12 @@ def evaluate(chk, *, workdir, runbook_dir=None, exit_code=None, knobs=None, stag
         return verdict.FAIL, "exit %d, expected %d" % (exit_code, want)
     if kind in ("file-exists", "regex-in-file", "json-field"):
         rel = substitute(chk["path"], values)
-        path = os.path.join(workdir, rel)
+        path = os.path.normpath(os.path.join(workdir, rel))
+        # the schema checks the path as written; a ${NAME} is known only now, so check again
+        if not (_inside(path, runbook_dir) or (
+                evidence_dir and chk["path"].startswith("${EVIDENCE_DIR}") and _inside(path, evidence_dir))):
+            return verdict.BLOCKED, ("%s resolves to %s, outside the runbook folder%s" % (
+                chk["path"], path, " and the evidence folder" if evidence_dir else ""))
     if kind == "file-exists":
         if not os.path.isfile(path):
             return verdict.FAIL, "%s does not exist" % rel
@@ -957,8 +1015,10 @@ def evaluate(chk, *, workdir, runbook_dir=None, exit_code=None, knobs=None, stag
         except KeyError:
             return verdict.FAIL, "%s has no field %s" % (rel, chk["field"])
         want, op = chk["value"], chk["op"]
-        if isinstance(want, str) and VAR.fullmatch(want):
-            want = values.get(VAR.fullmatch(want).group(1), want)
+        if isinstance(want, str) and VAR.search(want):
+            whole = VAR.fullmatch(want)
+            # a whole ${KNOB} keeps the knob's type; a ${NAME} inside text is replaced as text
+            want = values.get(whole.group(1), want) if whole else substitute(want, values)
         if op in ("<", "<=", ">", ">="):
             if not _is_number(got):
                 return verdict.FAIL, "%s %s is %r, not a finite number" % (rel, chk["field"], got)
@@ -1058,11 +1118,33 @@ def _print(result):
     print(verdict.gate_line("alpaca-runbook-check", result["code"]))
 
 
+def _from_caller(path):
+    """A command-line path, read from the folder the command was run in.
+
+    bin/alpaca-python changes to the install root before Python starts, and passes the folder it
+    was called from as ALPACA_CALLER_CWD. A relative path is joined to that folder, but only when
+    Python is running in the install root (the wrapper's doing); `python -m alpaca` run elsewhere
+    reads it from its own folder as usual."""
+    caller = os.environ.get("ALPACA_CALLER_CWD", "")
+    if not path or os.path.isabs(path) or not os.path.isabs(caller):
+        return path
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    try:
+        in_root = os.path.samefile(os.getcwd(), root)
+    except OSError:
+        in_root = False
+    return os.path.join(caller, path) if in_root else path
+
+
 def cmd_runbook(args):
     if getattr(args, "runbook_verb", None) != "check" or not getattr(args, "file", None):
         print("usage: alpaca runbook check <file> [--spec <path>] [--json]", file=sys.stderr)
         return verdict.USAGE
-    result = check(args.file, spec_path=args.spec, check_files=not args.no_files)
+    result = check(_from_caller(args.file), spec_path=_from_caller(args.spec), check_files=not args.no_files)
+    # show the paths as the person typed them; messages keep the full path that was read
+    result["runbook"] = args.file
+    if args.spec and result.get("spec"):
+        result["spec"]["path"] = args.spec
     if args.json:
         print(json.dumps({k: result[k] for k in ("verdict", "runbook", "spec", "errors", "warnings",
                                                   "coverage")}, indent=2, sort_keys=True))

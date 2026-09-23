@@ -55,7 +55,11 @@ such a key as true or false (the check reports it and names the field you meant)
 | `stages` | yes | the stages, in run order; at least one |
 
 Every path in a runbook (`spec`, `workdir`, check `path`, plugin `script`) is relative, and may
-not climb out of the runbook folder with `..`.
+not climb out of the runbook folder with `..`. The check reads a path as written, before any
+`${NAME}` in it is replaced. When a check runs, its `path` is checked again after the
+replacement: it must still lead inside the runbook folder, or, when it starts with
+`${EVIDENCE_DIR}`, inside the evidence folder. A path that leads anywhere else makes the check
+BLOCKED, whatever a knob or variable held.
 
 ## Knobs
 
@@ -153,9 +157,13 @@ PASS when the status equals `expect`, FAIL otherwise, BLOCKED when the command d
 | field | required | meaning |
 |---|---|---|
 | `path` | yes | the file to search |
-| `pattern` | yes | a Python regular expression, searched line by line (`^` and `$` match at each line) |
+| `pattern` | yes | a Python regular expression, searched once over the whole file; `^` and `$` match at each line |
 | `absent` | no | `true` passes when the pattern does NOT match (default `false`) |
 | `ignore_case` | no | `true` ignores case |
+
+Because the whole file is searched at once, `\s` and a class such as `[^x]` also match a line
+break, so a pattern can span lines (`total\s+12` matches `total` at the end of one line and `12`
+at the start of the next). Write `[ \t]` or `[^x\n]` to stay on one line.
 
 A file that cannot be read fails the check, whether or not `absent` is set: absence cannot be
 shown from a missing file.
@@ -173,6 +181,13 @@ Compares one field of a JSON file with a threshold.
 
 `<`, `<=`, `>` and `>=` compare numbers only: a missing field, a value that is not a finite
 number (text, `NaN`, `Infinity`, an object) fails the check. Quote the op in YAML (`op: "<="`).
+
+`==` and `!=` compare numbers as numbers (`1` equals `1.0`), and true/false only with
+true/false: `true` does not equal `1` and `false` does not equal `0`.
+
+A `value` that is exactly `${KNOB}` takes the knob's value with its type (a number stays a
+number). A `${NAME}` inside other text (`"v${RELEASE}"`) is replaced as text. Either way the name
+must be a knob or a built-in variable (`VAR-UNKNOWN`).
 
 ### `plugin`
 
@@ -216,6 +231,15 @@ id: `covers: [SC-001]`. A functional requirement without a check is a warning
 (`FR-UNCOVERED`), not a failure. `[NEEDS CLARIFICATION: ...]` markers left in the spec are
 reported as a warning (`SPEC-CLARIFY`).
 
+The template's shape is `- **SC-001**: ...`. These shapes are read the same way: the colon inside
+the bold (`- **SC-001:** ...`), a `*` or `+` bullet, a numbered list (`1. **SC-001**: ...`,
+`1) SC-001: ...`), no bullet (`**SC-001**: ...`), no bold (`- SC-001: ...`, `SC-001: ...`), a
+heading (`### SC-001: ...`), and a table row whose first cell is the id (`| SC-001 | ... |`).
+An `SC-nnn` or `FR-nnn` id that appears anywhere else in the spec, outside those shapes, still
+counts: an `SC` id is a required item and an `FR` id a functional requirement, and the check
+warns (`SPEC-UNPARSED`, with the line number) so the line can be rewritten in the template's
+shape. A criterion therefore never drops out of coverage because of how it was written.
+
 **OpenSpec.** The items are the scenarios: every `#### ` heading under a `### Requirement:`
 block, named without its `Scenario:` prefix. Write `<requirement>/<scenario>`:
 
@@ -230,7 +254,7 @@ folder) to read every `<capability>/spec.md` in it; the items are then
 `<capability>/<requirement>/<scenario>`, and the short form `<requirement>/<scenario>` is
 accepted when only one capability has it (`COVERS-AMBIGUOUS` otherwise).
 
-Headings inside fenced code blocks and HTML comments are not items, in either format.
+Headings and ids inside fenced code blocks and HTML comments are not items, in either format.
 
 **Owner gates cover too.** Some criteria can only be judged by a person (for example "a new
 team member can start the service in under 10 minutes"). Put those in the `covers` list of the
@@ -298,6 +322,10 @@ alpaca runbook check <file> [--spec <path>] [--no-files] [--json]
   checked (and `covers` lists get a `COVERS-WITHOUT-SPEC` warning).
 - `--no-files` skips the plugin script look-ups, for a runbook written before its scripts.
 - `--json` prints `verdict`, `runbook`, `spec`, `errors`, `warnings` and `coverage` as JSON.
+- A relative `<file>` or `--spec` path is read from the folder you run the command in, also
+  through `bin/alpaca` (which starts Python in the install root; `bin/alpaca-python` passes the
+  folder it was called from as `ALPACA_CALLER_CWD`). So `alpaca runbook check runbook.yaml
+  --spec spec.md` works from the folder that holds both files.
 - Exit status: 0 PASS, 1 FAIL (malformed, or an item uncovered), 2 BLOCKED (the runbook file
   cannot be read), 64 usage error.
 
@@ -348,7 +376,8 @@ Every error is reported at once, one per line: `ERROR <code> <where>: <message>`
 | `COVERS-AMBIGUOUS` | a short OpenSpec key matches scenarios in more than one capability |
 
 Warnings (`WARN <code> <where>: <message>`) do not change the verdict: `FR-UNCOVERED`,
-`SPEC-CLARIFY` and `COVERS-WITHOUT-SPEC`.
+`SPEC-CLARIFY`, `COVERS-WITHOUT-SPEC` and `SPEC-UNPARSED` (an id found outside the known item
+shapes; it is still counted, see "Linking checks to the spec").
 
 ## What intake takes from a runbook
 

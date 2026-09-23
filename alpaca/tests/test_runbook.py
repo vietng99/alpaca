@@ -832,7 +832,7 @@ def test_format_doc_names_every_field_and_check_type():
         assert "`%s`" % kind in doc, kind
         for key in keys:
             assert "`%s`" % key in doc, (kind, key)
-    for code in runbook.ERROR_CODES:
+    for code in runbook.ERROR_CODES + runbook.WARNING_CODES:
         assert "`%s`" % code in doc, code
 
 

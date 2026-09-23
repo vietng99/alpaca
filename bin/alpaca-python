@@ -3,6 +3,9 @@
 set -euo pipefail
 ALPACA_INSTALL_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 unset ALPACA_ROOT
+# The folder this was called from: a verb that takes a relative path on the command line
+# (alpaca runbook check) reads it from there, not from the install root.
+export ALPACA_CALLER_CWD="${PWD:-}"
 cd "$ALPACA_INSTALL_ROOT"
 # An explicit project selector enables the verified local SQLite build for this
 # process and descendants. A clean shipment has no selector and uses host SQLite.

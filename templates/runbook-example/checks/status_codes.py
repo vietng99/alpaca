@@ -7,8 +7,8 @@ The result file holds {"status": {"<code>": <count>, ...}}. The check passes whe
 response was counted and every counted response has <status>.
 
 It follows the plugin check contract in docs/runbook-format.md: exit 0 PASS, 1 FAIL,
-2 BLOCKED (the result file is missing or unreadable, so there is nothing to judge), and the last
-line printed to stdout is the reason.
+2 BLOCKED (the result file is missing or unreadable, or a count is not a whole number, so there
+is nothing to judge), and the last line printed to stdout is the reason.
 """
 import json
 import sys
@@ -28,7 +28,12 @@ def main(argv):
     if not isinstance(counts, dict):
         print("%s has no status object" % path)
         return 2
-    total = sum(int(n) for n in counts.values() if isinstance(n, int) and n > 0)
+    for code, n in sorted(counts.items()):
+        if isinstance(n, bool) or not isinstance(n, int) or n < 0:
+            # a count this script cannot read is nothing to judge: BLOCKED, never a FAIL or a PASS
+            print("%s: the count for status %s is %r, not a whole number of 0 or more" % (path, code, n))
+            return 2
+    total = sum(counts.values())
     if total == 0:
         print("%s counted no responses" % path)
         return 1

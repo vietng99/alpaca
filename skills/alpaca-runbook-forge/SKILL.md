@@ -29,8 +29,9 @@ neither does.
 
 ## Step 1: list what must be covered
 
-Write a first draft that holds only the top-level fields and one placeholder stage, then let the
-checker list the items for you:
+Write a first draft that holds only the top-level fields and one placeholder stage, next to the
+spec, then let the checker list the items for you. Run it from the folder that holds both files:
+a relative path is read from the folder you run the command in.
 
 ```
 alpaca runbook check runbook.yaml --spec spec.md
@@ -43,7 +44,9 @@ row per item:
 |---|---|---|---|---|
 
 `FR-UNCOVERED` warnings are functional requirements: cover them where a check already shows
-them, but they do not block.
+them, but they do not block. A `SPEC-UNPARSED` warning is an `SC` or `FR` id written in a shape
+the checker does not know; it still counts, and the line it names is worth rewriting as
+`- **SC-001**: ...` in the spec.
 
 ## Step 2: fill the table from the spec and the repo
 
@@ -107,6 +110,8 @@ Write `runbook.yaml` next to the spec (or in the domain folder), following the f
 Set `spec:` to the spec path so a later check needs no flag.
 
 ## Step 5: check until it passes
+
+From the same folder:
 
 ```
 alpaca runbook check runbook.yaml --spec spec.md
