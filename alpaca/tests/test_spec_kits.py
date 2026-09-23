@@ -411,6 +411,10 @@ def test_openspec_install_leaves_the_user_config_alone(project, tmp_path, monkey
 
     spec_kits.init(project, "openspec")
     assert user_files() == {}, "the install wrote into the user's config, data or home dir"
+    # a rerun finds the installed workflows; upstream then migrates the user's global config to a
+    # custom profile, which must land in the scratch dir, not in the user's config
+    spec_kits.init(project, "openspec")
+    assert user_files() == {}, "the rerun wrote into the user's config, data or home dir"
     cfg = dirs["XDG_CONFIG_HOME"] / "openspec"
     cfg.mkdir()
     (cfg / "config.json").write_text('{"profile": "core", "delivery": "skills"}\n', encoding="utf-8")
