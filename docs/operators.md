@@ -121,6 +121,15 @@ invalid session operation, exit 64 is command usage, and exit 67 is an internal
 failure. Keep the JSON result and command exit status together when assessing a
 lifecycle step.
 
+## Alpaca's own skills
+
+`.claude/skills/` holds Alpaca's own skills: `alpaca-first-chat` (the first chat before
+onboarding), `alpaca-onboard`, `alpaca-op`, `alpaca-from-notes` and `alpaca-runbook-forge`. They are
+Claude Code project skills and mechanism paths in `ALPACA-MANIFEST`, so a clone, a copy, a release
+and `alpaca upgrade` all carry them and Claude Code offers each as a `/command` with nothing to
+install. The rest of `.claude/skills/` (the spec-kit and OpenSpec skills `alpaca spec init` writes,
+and any skill of your own) belongs to the project. Codex reads the same SKILL.md files directly.
+
 ## Optional bundled skills
 
 The root lifecycle adapters do not require a plugin installation. To load the optional bundled skills in Claude Code, launch from the project root with `ALPACA_ROOT="$PWD" claude --plugin-dir ./plugin/alpaca`. Codex may read the relevant bundled SKILL.md files directly. No global plugin or agent configuration is installed by bootstrap.

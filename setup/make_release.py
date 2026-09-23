@@ -7,7 +7,7 @@ run `alpaca init` and `alpaca onboard`, and the harness boots as a fresh project
 
 This is the fresh-INSTALL companion to package_candidate.py, which refreshes only the manifest
 mechanism class in place (an upgrade). A full install also needs the git-tracked support trees the
-manifest does not enumerate as bare mechanism paths (doctrine/, MAP.md, plugin/, skills/,
+manifest does not enumerate as bare mechanism paths (doctrine/, MAP.md, plugin/, .claude/skills/,
 formations/, agents/, setup/), so the source set is the whole TRACKED tree.
 
 The tracked set is the boundary because it is the one line that already excludes every runtime

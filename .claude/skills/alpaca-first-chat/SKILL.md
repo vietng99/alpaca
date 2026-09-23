@@ -1,16 +1,17 @@
 ---
-name: alpaca-intake
+name: alpaca-first-chat
 description: >-
-  First-chat intake for an Alpaca project. Use at the very start of work on a repo
-  that runs under Alpaca and is not onboarded yet: it asks who is working, what is
-  being worked on, the open tasks, and whether to enable the plain-writing preset,
-  then hands off to alpaca-onboard. Triggers on "/alpaca-intake", "start alpaca", "set up the
-  harness", or a SessionStart that reports the project is not onboarded.
+  First chat on an Alpaca project that is not onboarded yet. Use at the very start of work on
+  a repo that runs under Alpaca: it asks who is working, what is being worked on, the open
+  tasks, and whether to enable the plain-writing preset, then hands off to alpaca-onboard.
+  Triggers on "/alpaca-first-chat", "start alpaca", "set up the harness", or a SessionStart
+  that reports the project is not onboarded. (Not the `alpaca intake` verb, which turns a spec
+  and a runbook into checklist rows.)
 ---
 
-# alpaca-intake
+# alpaca-first-chat
 
-The intake door. Alpaca never opens an op on its own and never guesses who is at the
+The first-chat door. Alpaca never opens an op on its own and never guesses who is at the
 keyboard. This skill gathers the four facts the record needs before any work is
 claimed, then hands off to `alpaca-onboard` to write them once.
 
@@ -18,7 +19,7 @@ claimed, then hands off to `alpaca-onboard` to write them once.
 
 - A fresh Alpaca checkout whose `RESUME.md` or SessionStart hook reports it is not
   onboarded.
-- The owner types `/alpaca-intake` or asks to set the harness up.
+- The owner types `/alpaca-first-chat` or asks to set the harness up.
 
 ## What it asks
 

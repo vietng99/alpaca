@@ -1,7 +1,7 @@
 """alpaca start: the one entry point from raw notes to intake.
 
 It picks the spec tool, prepares the project for it, and prints the steps that take the notes to a
-spec, the spec to a runbook, and the runbook to intake. The skill `skills/alpaca-from-notes/`
+spec, the spec to a runbook, and the runbook to intake. The skill `.claude/skills/alpaca-from-notes/`
 walks a person through those steps in Claude Code; this verb is its small helper and works the
 same from a shell.
 
@@ -219,7 +219,7 @@ def steps(kit, mode, notes_label, has_op):
             {"step": "clarify", "do": "answer the open questions until no [NEEDS CLARIFICATION] is left",
              "command": "/speckit-clarify"},
             {"step": "runbook", "do": "write runbook.yaml next to the spec; every SC-nnn gets a check or an owner gate",
-             "command": "the runbook forge skill (skills/alpaca-runbook-forge/SKILL.md), then alpaca runbook check <runbook> --spec <spec.md>"},
+             "command": "the runbook forge skill (/alpaca-runbook-forge, .claude/skills/alpaca-runbook-forge/SKILL.md), then alpaca runbook check <runbook> --spec <spec.md>"},
         ]
         spec = "specs/<NNN-name>/spec.md"
     else:
@@ -229,7 +229,7 @@ def steps(kit, mode, notes_label, has_op):
             {"step": "validate", "do": "check the change",
              "command": "bin/openspec validate <id> --strict"},
             {"step": "runbook", "do": "update the runbook: cover every new and changed scenario",
-             "command": "the runbook forge skill (skills/alpaca-runbook-forge/SKILL.md), then alpaca runbook check <runbook> --spec openspec/changes/<id>"},
+             "command": "the runbook forge skill (/alpaca-runbook-forge, .claude/skills/alpaca-runbook-forge/SKILL.md), then alpaca runbook check <runbook> --spec openspec/changes/<id>"},
         ]
         spec = "openspec/changes/<id>"
     if not has_op:

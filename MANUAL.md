@@ -61,7 +61,7 @@ The everyday operating verbs. Small on purpose.
 
 - `alpaca runbook` - `alpaca runbook check <file> [--spec <path>]` refuses a malformed runbook and, with a spec-kit or OpenSpec spec, fails when a success criterion or scenario has no check. Read-only; see `docs/runbook-format.md`.
 - `alpaca intake` - `alpaca intake <spec> <runbook> [--op <op>] [--dry-run]` checks the runbook against a spec-kit or OpenSpec spec, then gives the op one checklist row per success criterion or scenario, one task contract per runbook stage and per owner gate, and the profile stages. A rerun after a spec change supersedes only the rows whose criterion changed, withdraws removed ones, adds new ones and keeps the rest with their verdicts. See `docs/intake.md`.
-- `alpaca start` - `alpaca start <notes> [--kit spec-kit|openspec] [--prepare]` is the one entry point from raw notes: it picks spec-kit for a new thing or OpenSpec for a change, prepares the project, and prints the steps to a spec, a runbook and intake. The skill `skills/alpaca-from-notes/SKILL.md` walks them.
+- `alpaca start` - `alpaca start <notes> [--kit spec-kit|openspec] [--prepare]` is the one entry point from raw notes: it picks spec-kit for a new thing or OpenSpec for a change, prepares the project, and prints the steps to a spec, a runbook and intake. The skill `/alpaca-from-notes` (`.claude/skills/alpaca-from-notes/SKILL.md`) walks them.
 
 ### Knowledge
 

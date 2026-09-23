@@ -38,7 +38,7 @@ def test_a_new_thing_goes_to_spec_kit(project, capsys):
     names = [s["step"] for s in out["steps"]]
     assert names == ["prepare", "spec", "clarify", "runbook", "op", "intake"]
     commands = " ".join(s["command"] for s in out["steps"])
-    assert "/speckit-specify" in commands and "skills/alpaca-runbook-forge/SKILL.md" in commands
+    assert "/speckit-specify" in commands and ".claude/skills/alpaca-runbook-forge/SKILL.md" in commands
     assert "alpaca intake specs/<NNN-name>/spec.md" in commands
     assert out["prepared"] == []           # without --prepare it only reads
 

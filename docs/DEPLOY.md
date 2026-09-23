@@ -62,7 +62,7 @@ work, `alpaca verify` recomputes the hash chain.
 - no member is under the memory class, version control, a byte cache, the projections, the worktrees
   dir or the output dir, and `project.yaml` is absent in template mode;
 - every support tree the harness boots from is present (`bin/alpaca`, `ALPACA-MANIFEST`, `MAP.md`,
-  `doctrine/`, `plugin/alpaca`, `skills/`, `setup/`, `contracts/`, `alpaca/`);
+  `doctrine/`, `plugin/alpaca`, `.claude/skills/alpaca-*`, `setup/`, `contracts/`, `alpaca/`);
 - the build is byte-for-byte reproducible and its receipt attests its bytes;
 - a fresh extract into a differently named directory runs `alpaca init`, `alpaca onboard`, `alpaca doctor`
   (no ERROR) and `alpaca verify` (PASS), and the written `project.yaml` carries the new name and no em

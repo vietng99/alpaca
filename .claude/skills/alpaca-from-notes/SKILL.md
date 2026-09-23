@@ -14,10 +14,9 @@ The one entry point from raw notes to intake. It chains tools Alpaca already has
 spec, runbook or row by hand. `alpaca start` is its helper: it picks the kit, prepares the
 project and prints the same steps as below. `docs/intake.md` is the reference.
 
-The Alpaca skills live in `skills/`. Claude Code offers a project skill as a `/command` when its
-folder is under `.claude/skills/`; the kit installs put the `/speckit-*` and `/opsx:*` ones there.
-For `skills/alpaca-runbook-forge/SKILL.md` and this file, read the file and follow it, or copy the
-folder into `.claude/skills/` first.
+The Alpaca skills ship in `.claude/skills/` (this one, `alpaca-runbook-forge`, `alpaca-first-chat`,
+`alpaca-onboard` and `alpaca-op`), so Claude Code offers each as a `/command` in any clone of the
+project; the kit installs put the `/speckit-*` and `/opsx:*` ones next to them.
 
 ```
 raw notes -> spec (spec-kit or OpenSpec) -> runbook (alpaca-runbook-forge) -> alpaca intake -> rows, tasks, profile
@@ -78,7 +77,7 @@ once.
 
 ## Step 3: the runbook
 
-Run the runbook forge skill (`skills/alpaca-runbook-forge/SKILL.md`) with the spec from step 2. For a new
+Run the runbook forge skill (`/alpaca-runbook-forge`, `.claude/skills/alpaca-runbook-forge/SKILL.md`) with the spec from step 2. For a new
 thing it writes `runbook.yaml` next to the spec; for a change it updates the existing runbook so
 every new or changed scenario has a check and nothing covers a removed one. A threshold that the
 change moves (a latency bar) is an `owner_only` knob: change the knob's `default`, not the check.

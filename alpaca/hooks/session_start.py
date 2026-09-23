@@ -130,7 +130,7 @@ def handle(payload):
     if bundled:
         pass                    # the profile's lines above say how to start; nothing to onboard
     elif fork_state == adopt.FRESH:
-        head.append("FIRST CHAT: this project is not onboarded. Ask, in this order, then run the verb once:")
+        head.append("FIRST CHAT: this project is not onboarded (the /alpaca-first-chat skill walks this). Ask, in this order, then run the verb once:")
         head.append("  1) who is working on this (names and roles)  2) what is being worked on (one paragraph)")
         head.append("  3) the open tasks as a list (no goals)  4) enable the plain-writing preset? (y/n)")
         head.append("  then: bin/alpaca onboard --name <n> --who <a:role,b:role> --what \"...\" --task \"...\" [--preset plain-writing]; then bin/alpaca doctor")

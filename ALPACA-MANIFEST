@@ -48,7 +48,11 @@ step-models/
 templates/
 vendor/
 plugin/alpaca/
-skills/
+.claude/skills/alpaca-first-chat/
+.claude/skills/alpaca-onboard/
+.claude/skills/alpaca-op/
+.claude/skills/alpaca-from-notes/
+.claude/skills/alpaca-runbook-forge/
 docs/manual.html
 docs/projection-ruling.md
 docs/spec-shape.md

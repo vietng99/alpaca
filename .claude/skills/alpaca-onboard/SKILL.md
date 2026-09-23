@@ -1,21 +1,21 @@
 ---
 name: alpaca-onboard
 description: >-
-  Onboard an Alpaca project once, writing the intake facts into the record. Use
-  after alpaca-intake has gathered who is working, what is being worked on, the open
+  Onboard an Alpaca project once, writing the first-chat facts into the record. Use
+  after alpaca-first-chat has gathered who is working, what is being worked on, the open
   tasks, and the plain-writing choice. It runs "alpaca onboard ..." exactly once, then
   "alpaca doctor". Triggers on "/alpaca-onboard", "onboard this repo", or a hand-off from
-  alpaca-intake.
+  alpaca-first-chat.
 ---
 
 # alpaca-onboard
 
-The one-time write that turns intake answers into the first record rows. It is the
+The one-time write that turns the first-chat answers into the first record rows. It is the
 only place `alpaca onboard` is run.
 
 ## Preconditions
 
-- `alpaca-intake` has gathered the four facts: actor, the work line, known open tasks,
+- `alpaca-first-chat` has gathered the four facts: actor, the work line, known open tasks,
   and the plain-writing preset choice.
 - The project is not already onboarded (a second run is refused by the record).
 

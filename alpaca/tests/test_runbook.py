@@ -854,7 +854,7 @@ def test_format_doc_ships():
 
 
 def test_forge_skill_ships():
-    path = os.path.join(REPO, "skills", "alpaca-runbook-forge", "SKILL.md")
+    path = os.path.join(REPO, ".claude", "skills", "alpaca-runbook-forge", "SKILL.md")
     with open(path, encoding="utf-8") as fh:
         text = fh.read()
     assert text.startswith("---\nname: alpaca-runbook-forge\n")
@@ -864,7 +864,7 @@ def test_forge_skill_ships():
 
 def test_added_files_are_ascii_and_free_of_em_dash():
     paths = [os.path.join(REPO, "docs", "runbook-format.md"),
-             os.path.join(REPO, "skills", "alpaca-runbook-forge", "SKILL.md"),
+             os.path.join(REPO, ".claude", "skills", "alpaca-runbook-forge", "SKILL.md"),
              os.path.join(REPO, "alpaca", "runbook.py")]
     for base, _dirs, names in os.walk(EXAMPLE):
         paths += [os.path.join(base, n) for n in names if not n.endswith(".pyc")]
