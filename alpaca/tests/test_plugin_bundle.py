@@ -17,7 +17,8 @@ Proof test for the Done-when (P-010 spec:911, spec 5.12:590-592, section 6 row 7
     is traceable back to each hook's upstream path;
   * the plugin hooks are registered under the M1.5 fail-open and timeout contract;
   * the bundle contains no skill not named in P-010 or section 6 row 716;
-  * the three Alpaca-native skills alpaca-intake, alpaca-onboard, alpaca-op ship under skills/.
+  * the four Alpaca-native skills alpaca-intake, alpaca-onboard, alpaca-op and
+    alpaca-runbook-forge ship under skills/.
 
 Every control asserts the POSITIVE and the NEGATIVE path, so none is a tautological pass.
 """
@@ -268,8 +269,8 @@ def test_plugin_json_is_valid():
 
 # ---------------------------------------------------------------- native skills
 
-def test_three_alpaca_native_skills_ship():
-    for name in ("alpaca-intake", "alpaca-onboard", "alpaca-op"):
+def test_alpaca_native_skills_ship():
+    for name in ("alpaca-intake", "alpaca-onboard", "alpaca-op", "alpaca-runbook-forge"):
         p = os.path.join(REPO, "skills", name, "SKILL.md")
         # positive: each Alpaca-native skill ships a SKILL.md.
         assert os.path.isfile(p), "Alpaca-native skill missing: %s" % name

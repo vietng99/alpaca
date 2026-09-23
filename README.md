@@ -36,6 +36,7 @@ Claude Code has native lifecycle hooks. Codex follows AGENTS.md and uses explici
 - `MANUAL.md` and `docs/manual.html`: command reference and phone-readable manual.
 - `doctrine/`, `MAP.md`, `contracts/`, `formations/`: the rules, the boot router, and the work shapes.
 - `plugin/alpaca/` and `skills/`: optional bundled skills.
+- `docs/runbook-format.md`, `templates/runbook-example/` and `skills/alpaca-runbook-forge/`: the runbook format (a domain's stages, checks, knobs, retry rules and owner gates), a worked example, and the skill that writes a runbook from a spec. `alpaca runbook check` checks one.
 
 See `docs/DESIGN.md` for architecture, and `docs/operators.md`, `docs/operations-hub.md`, `docs/observability-operations.md`, and `docs/shipping.md` for operation details.
 

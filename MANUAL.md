@@ -57,6 +57,10 @@ The everyday operating verbs. Small on purpose.
 - `alpaca review` - list and move the review-card rows a formation produces.
 - `alpaca barrier` - the outbound push barrier and the tier rule at the push boundary.
 
+### Specs and runbooks
+
+- `alpaca runbook` - `alpaca runbook check <file> [--spec <path>]` refuses a malformed runbook and, with a spec-kit or OpenSpec spec, fails when a success criterion or scenario has no check. Read-only; see `docs/runbook-format.md`.
+
 ### Knowledge
 
 - `alpaca sort` - drain the session and sort notes into their op timelines or the unsorted bucket.
