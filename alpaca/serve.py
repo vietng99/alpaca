@@ -734,6 +734,8 @@ def files_read(root, rel):
 
 #: Files the public sign-in page and the workspace hub may load before a session exists.
 LOGIN_ASSETS = {"vault.css": "text/css; charset=utf-8", "vault.js": "text/javascript; charset=utf-8",
+                "vault-globe.js": "text/javascript; charset=utf-8",
+                "countries-110m.json": "application/json",
                 "vendor/plex-sans.woff2": "font/woff2", "vendor/plex-sans-medium.woff2": "font/woff2",
                 "vendor/plex-mono.woff2": "font/woff2"}
 

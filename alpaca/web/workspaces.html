@@ -11,18 +11,38 @@
 </head>
 <body data-page="hub">
 <div class="screen scroll">
-  <div class="corner">
-    <button type="button" class="chip-btn" data-vault-theme aria-label="Toggle color theme">Theme</button>
-    <button type="button" class="chip-btn" id="signout" aria-label="Sign out">Sign out</button>
+  <div class="fx" aria-hidden="true">
+    <canvas id="backdrop" class="canvas-fill"></canvas>
+    <div class="screenVeil"></div>
+    <span class="scanline"></span>
+    <span class="gridGlow"></span>
   </div>
+
+  <div class="corner">
+    <button type="button" class="chip-btn" data-vault-theme aria-label="Toggle color theme">
+      <svg class="theme-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.2 14.6A8.4 8.4 0 0 1 9.4 3.8a8.4 8.4 0 1 0 10.8 10.8z"/></svg>
+      <svg class="theme-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>
+      Theme
+    </button>
+    <button type="button" class="chip-btn" id="signout" aria-label="Sign out">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 16l-4-4 4-4M6 12h10"/></svg>
+      Sign out
+    </button>
+  </div>
+
   <main class="hub">
-    <div class="brand">
-      <div class="wordmark"><span class="wmAccent">Alpaca</span> Hub</div>
-      <div class="brandSub"><span id="count">Loading workspaces</span></div>
+    <div class="hub-head">
+      <div>
+        <div class="brand">
+          <div class="wordmark"><span class="wmAccent">Alpaca</span> Hub</div>
+          <div class="brandSub"><span class="brandPulse" aria-hidden="true"></span>Alpaca &middot; <span id="count">Loading workspaces</span></div>
+        </div>
+        <h1 class="hub-title">Select an operations workspace</h1>
+        <p class="hub-sub">Each tile is one project's cockpit, with a live summary read from its record. Open a tile to enter its workspace.</p>
+      </div>
     </div>
-    <h1 class="hub-title">Select a workspace</h1>
-    <p class="hub-sub">Each tile is one project's cockpit, with a live summary read from its record.</p>
     <div class="grid" id="grid" aria-live="polite"></div>
+    <div class="syslog" id="syslog" aria-hidden="true"></div>
   </main>
 </div>
 </body>
