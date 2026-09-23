@@ -329,6 +329,7 @@ def test_b5_a_dangling_list_link_refuses(repo):
     root, _bare = repo
     _cfg(root)
     os.makedirs(os.path.join(root, ".alpaca"), exist_ok=True)
+    os.remove(os.path.join(root, ".alpaca", "sealed-terms.txt"))
     os.symlink(os.path.join(root, "no-such-dir", "forbidden.txt"),
                os.path.join(root, ".alpaca", "sealed-terms.txt"))
     _commit(root, "src/app.py", "print('ok')\n", "add app")
@@ -356,8 +357,10 @@ def test_b5_the_gate_line_says_the_terms_were_not_checked(repo):
     _commit(root, "src/app.py", "print('ok')\n", "add app")
     r = _push(root, "main")
     assert r.returncode == 0, r.stdout + r.stderr
-    gate = [ln for ln in (r.stdout + r.stderr).splitlines() if ln.startswith("GATE outbound-barrier")]
-    assert gate and "NOT checked" in gate[-1]
+    lines = (r.stdout + r.stderr).splitlines()
+    at = [i for i, ln in enumerate(lines) if ln.startswith("GATE outbound-barrier")]
+    assert at and "PASS" in lines[at[-1]]
+    assert "NOT checked" in lines[at[-1] + 1]            # the gate's own reason line
 
 
 def test_b5_a_push_from_a_linked_worktree_uses_the_main_list(repo, tmp_path):
@@ -498,7 +501,7 @@ def test_b8_a_checkout_config_without_terms_does_not_switch_the_terms_off(repo):
         fh.write("name: work\ntier: public\n")             # an older project.yaml, no barrier block
     _commit(root, "notes.md", "the value is " + TERM + "\n", "add notes")
     r = _refused(root, bare, before)
-    assert "differs" in (r.stdout + r.stderr)
+    assert "differ from the installed ones" in (r.stdout + r.stderr)
 
 
 def test_b8_a_pinned_copy_that_was_changed_refuses(repo):

@@ -7,6 +7,8 @@ CHECKLIST.md
 board.json
 data.json
 .venv/
+# A .venv that is a link to a shared environment: `.venv/` matches a folder only.
+.venv
 .pytest_cache/
 .claude/settings.local.json
 .claude/worktrees/
