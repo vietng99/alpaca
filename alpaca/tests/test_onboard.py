@@ -58,3 +58,76 @@ def test_onboard_record_writes_are_one_transaction(project, monkeypatch):
     assert db.rows(conn, "ops", "id=?", ("op-0",)) == []
     assert len(db.events(conn)) == n_before
     assert db.verify_chain(conn)[0] is True
+
+
+# t-002: onboarding a fresh copy of the distribution merges the answers into the shipped template
+# project.yaml. It used to rebuild a subset from scratch and drop the template's other keys
+# (skin, operators, wiki_providers, budget, concurrency, kicker_grace_seconds, retention, barrier).
+import shutil
+import yaml
+
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def _template():
+    with open(os.path.join(REPO, "project.yaml"), encoding="utf-8") as fh:
+        return yaml.safe_load(fh)
+
+
+def _raw(project):
+    with open(os.path.join(project, "project.yaml"), encoding="utf-8") as fh:
+        return yaml.safe_load(fh)
+
+
+def test_shipped_project_yaml_is_a_template():
+    tpl = _template()
+    assert tpl.get("template") is True
+    # the keys the old onboarding dropped are part of the shipped template
+    for key in ("skin", "operators", "wiki_providers", "budget", "concurrency",
+                "kicker_grace_seconds", "retention", "barrier"):
+        assert key in tpl, key
+
+
+def test_onboard_keeps_every_template_key(project):
+    shutil.copy(os.path.join(REPO, "project.yaml"), os.path.join(project, "project.yaml"))
+    tpl = _template()
+    cli.main(["init"])
+    rc = cli.main(["onboard", "--name", "demo", "--who", "alex:owner,robin:engineer",
+                   "--what", "A tiny CLI", "--tier", "on-prem", "--preset", "plain-writing"])
+    assert rc == 0
+    cfg = _raw(project)
+    # every template key survives except the template marker itself
+    missing = [k for k in tpl if k != "template" and k not in cfg]
+    assert missing == []
+    assert "template" not in cfg
+    # template key order is kept
+    assert [k for k in cfg if k in tpl] == [k for k in tpl if k != "template"]
+    # the values the person gave are applied
+    assert cfg["name"] == "demo" and cfg["what"] == "A tiny CLI" and cfg["tier"] == "on-prem"
+    assert cfg["people"] == [{"name": "alex", "role": "owner"}, {"name": "robin", "role": "engineer"}]
+    assert cfg["style"]["presets"] == ["plain-writing"]
+    assert cfg["style"]["banned"] == tpl["style"]["banned"]
+    assert cfg["project_id"] != tpl["project_id"] and cfg["cwd_history"] == [project]
+    # values nobody answered stay as the template shipped them
+    for key in ("skin", "operators", "wiki_providers", "budget", "concurrency",
+                "kicker_grace_seconds", "retention", "barrier", "non_adoptions", "paths",
+                "phases", "boundary_rules", "fingerprint", "oracle_classes", "default_level"):
+        assert cfg[key] == tpl[key], key
+    # the result reads as onboarded and still passes the schema
+    assert proj.validate(project) == (True, [])
+    from alpaca import adopt
+    assert adopt.detect(project) == adopt.POPULATED
+
+
+def test_onboard_template_sensed_commands_still_win(project):
+    shutil.copy(os.path.join(REPO, "project.yaml"), os.path.join(project, "project.yaml"))
+    open(os.path.join(project, "Makefile"), "w", encoding="utf-8").write("test:\n\tpytest\n")
+    cli.main(["init"])
+    assert cli.main(["onboard", "--name", "d", "--who", "a:owner", "--what", "w"]) == 0
+    cfg = _raw(project)
+    tpl = _template()
+    assert cfg["commands"]["test"] == "make test"
+    # commands no file implied keep the template's value
+    assert cfg["commands"]["build"] == tpl["commands"]["build"]
+    # no --tier and no --preset: the template's values stay
+    assert cfg["tier"] == tpl["tier"] and cfg["style"] == tpl["style"]

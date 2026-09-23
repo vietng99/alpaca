@@ -6,12 +6,26 @@ A standalone engineering harness for Claude Code and Codex. Every session record
 
 Alpaca is domain-neutral. Domain work plugs in as a profile: a project names its profile with a `profile:` key in `project.yaml`, and the profile supplies that domain's stages and acceptance cards. Without a profile, Alpaca runs as the generic harness.
 
-## Start on another machine
+## Quickstart
+
+From a git clone (Python 3.10 or newer with venv support):
+
+```sh
+git clone <repository-url> my-project
+cd my-project
+bash setup/bootstrap.sh
+bin/alpaca onboard --name my-project --who alex:owner --what "One line on what this project builds"
+bin/alpaca doctor
+```
+
+`--who` takes `name:role` pairs separated by commas. Add `--task "..."` once per open task and `--preset plain-writing` to turn on the plain-writing rules. Onboarding writes these answers into the shipped `project.yaml` and keeps every other key of it. After onboarding, `bin/alpaca doctor` prints no ERROR line; the WARN "no transcript dir yet" clears after the first Claude Code session.
+
+## Start from a release archive
 
 1. Extract the release archive and enter its directory. The directory may be renamed.
 2. Run `bash setup/bootstrap.sh`. This creates a local Python environment inside this copy and installs nothing else. Python 3.10 or newer with venv support is required.
 3. Open Claude Code or Codex in that directory. For a shell check, run `bin/alpaca --help`, then `bin/alpaca doctor`.
-4. The first chat runs onboarding: answer the questions, run `bin/alpaca onboard ...` once, then `bin/alpaca doctor`.
+4. The first chat runs onboarding: answer the questions, run `bin/alpaca onboard ...` once (flags as in the Quickstart), then `bin/alpaca doctor`.
 
 Claude Code has native lifecycle hooks. Codex follows AGENTS.md and uses explicit lifecycle commands. Both write one local Alpaca record. No global agent configuration is modified.
 
