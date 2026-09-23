@@ -33,6 +33,7 @@ requirements.txt
 .codex/config.toml
 bin/alpaca
 bin/alpaca-python
+bin/openspec
 alpaca/
 setup/
 contracts/
@@ -45,6 +46,7 @@ doctrine/
 formations/
 step-models/
 templates/
+vendor/
 plugin/alpaca/
 skills/
 docs/manual.html
