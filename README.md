@@ -43,6 +43,16 @@ Claude Code has native lifecycle hooks. Codex follows AGENTS.md and uses explici
 
 See `docs/DESIGN.md` for architecture, and `docs/operators.md`, `docs/operations-hub.md`, `docs/host-hub.md`, `docs/observability-operations.md`, and `docs/shipping.md` for operation details.
 
+## Choices kept on purpose
+
+- The wiki's generic marking rules keep their Vietnamese text. `alpaca/wiki/ingest/firewall.py`
+  matches classification markings in several languages (Chinese, Russian and Vietnamese next to the
+  English ones), and `alpaca/wiki/engine/echo.py` reads Vietnamese attribution cues next to the
+  English ones. The text is there so those markings and cues are caught; it is not a leftover.
+- There is no migration path from an install of the earlier internal harness that Alpaca grew
+  from. Start a project from a fresh clone of Alpaca and onboard it; a record from that earlier
+  install is not converted.
+
 ## Development and shipment
 
 Run `bin/alpaca-python -m pytest` for the regression suite. Use `bin/alpaca-python setup/ship.py --help` for clean packaging. Never ship a live directory with cp -r. The exporter excludes sessions, evidence, tool installs, caches, local settings and worktrees; third-party notices travel with the package.
