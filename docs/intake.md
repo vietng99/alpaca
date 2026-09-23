@@ -15,7 +15,8 @@ The spec tools are described in `MANUAL.md` (Spec tools), the runbook in `docs/r
 
 ## The guided flow
 
-In Claude Code, run the skill `/alpaca-from-notes` with the notes. From a shell, `alpaca start`
+In Claude Code, ask Claude to follow `skills/alpaca-from-notes/SKILL.md` with the notes (or copy
+the folder into `.claude/skills/` and run `/alpaca-from-notes`). From a shell, `alpaca start`
 prints the same steps:
 
 ```
@@ -39,9 +40,10 @@ The pick:
 | records OpenSpec, or has `openspec/specs/` | OpenSpec | change (or a new capability as an OpenSpec change) |
 
 The steps it prints, for a new thing: `/speckit-specify <notes>`, `/speckit-clarify`,
-`/alpaca-runbook-forge`, `alpaca runbook check`, `alpaca op new` when no op is open, then
+the runbook forge skill (`skills/alpaca-runbook-forge/SKILL.md`), `alpaca runbook check`,
+`alpaca op new` when no op is open, then
 `alpaca intake <spec> <runbook> --dry-run` and the same without `--dry-run`. For a change:
-`/opsx:propose <notes>`, `bin/openspec validate <id> --strict`, `/alpaca-runbook-forge` to update
+`/opsx:propose <notes>`, `bin/openspec validate <id> --strict`, the runbook forge skill to update
 the runbook, intake of the change folder, and after the work is proven `/opsx:archive <id>`
 followed by `alpaca intake openspec/specs <runbook>`, which then has nothing to change.
 
