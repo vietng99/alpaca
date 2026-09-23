@@ -1,12 +1,12 @@
 """M1.8 - project.yaml schema (alpaca/project_schema.py).
 
-The required key set (spec 5.11:545-566): name, project id, tier, commands
+The required key set: name, project id, tier, commands
 (build, test, lint, run), paths (product tree, artifacts, spec dir), phases used,
 oracle classes, forbidden literals, resource class, boundary rules, non-adoptions,
 fingerprint command and its frozen expected value.
 
 The schema check produces a clear error per missing or malformed required key. The
-oracle taxonomy is DATA here, never code (spec:245-247): the check verifies the shape
+oracle taxonomy is DATA here, never code: the check verifies the shape
 of the list, never its members. The skin adapter seam and the eight-op map are also
 proved here.
 """

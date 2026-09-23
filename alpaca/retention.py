@@ -1,8 +1,8 @@
 """Store retention, compaction, and the mandatory snapshot note (M4.7).
 
-Sources: P10:109 and spec 5.1:218 (snapshot-out before any non-idempotent act); spec section 11
-risks (spec:862-871); absorb-gap AG-M18 (retention and compaction policy), AG-A8 (naming
-convention, mandatory note, not a promote source). The doctrine leaf is
+A snapshot goes out before any non-idempotent act. The module holds the retention and compaction
+policy and the snapshot naming convention; the snapshot note is mandatory, and a snapshot is never
+a promote source. The doctrine leaf is
 `doctrine/leaves/operate-in-place.md`: the code is the mechanism, the leaf is the reason, so the
 two never drift.
 

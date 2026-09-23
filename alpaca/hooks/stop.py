@@ -6,7 +6,7 @@ this hook does not own, and the hard hook deadline is a BaseException. Anything 
 could be cut off before it ran. See the comment at the call site.
 
 M3.4: at the full-autodrive level the Stop hook refuses a top-level stop while a done marker is
-genuinely absent (spec 5.6:415), and NOT while a thread is halted -- a halt is a bounded terminal
+genuinely absent, and NOT while a thread is halted -- a halt is a bounded terminal
 state, already surfaced by the stuck report, so forcing the run onward past it would be the
 unbounded loop the retry bound exists to prevent. The refusal is a `{"decision": "block"}` line
 on stdout; the hook still exits 0 (fail-open)."""

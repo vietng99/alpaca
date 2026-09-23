@@ -3,7 +3,7 @@
 # This is a schema-complete config for the tiny "greet CLI" sample: it passes
 # alpaca/project_schema.validate and declares exactly the oracle classes the sample SPEC.md
 # uses (unit, integration, behavioral, review), so the fidelity instrument (M1.12) reads
-# a real taxonomy rather than a vacuous one. Everything here is DATA (spec:245-247); the
+# a real taxonomy rather than a vacuous one. Everything here is DATA; the
 # schema only checks presence and shape, never a particular member. Pure ASCII, no em dash.
 name: sample-greet
 project_id: 5a3e0c11d2f4
@@ -21,7 +21,7 @@ phases:
   - verify
   - release
 commands:
-  # build/test/lint/run are the required seam commands (spec 5.11, project_schema). Kept
+  # build/test/lint/run are the required seam commands (alpaca/project_schema.py). Kept
   # colon-free so this plain-scalar YAML parses without quoting gymnastics.
   build: python3 -m compileall -q .
   test: python3 -m pytest

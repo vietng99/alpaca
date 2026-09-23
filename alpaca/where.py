@@ -1,13 +1,13 @@
 """Honest WHERE derivation (M4.10).
 
 An event's project is the nearest ancestor of the TARGET that carries a project marker
-(the manifest), never the shell cwd (absorb-gap AG-M16, spec 5.1:204-209). A tool call whose
+(the manifest), never the shell cwd. A tool call whose
 target lies outside the project stamps the project of the target rather than the directory the
 shell happens to sit in; a session opened one level above the root still attributes an event
 that touches a file inside the root to the root. A command string or a URL is display, never an
 attribution source, and a target with no marker above it attributes nothing rather than guessing.
 
-Interfaces (spec 5.14:616-618, 634-635; consumed by the heartbeat writer and the analytics):
+Interfaces (consumed by the heartbeat writer and the analytics):
 
   derive(target_path)  -> project_root | None     walk up from the target to the marker
   attribute(event)     -> project_id | None        the id of the project owning the target
@@ -19,7 +19,7 @@ from alpaca import paths, project
 
 # The fields of a tool call that name a real filesystem target and so may carry attribution.
 # Read in this fixed order, so a call carrying both a file_path and a cwd attributes to the
-# file, not the shell. `cwd` is deliberately absent: AG-M16 is "never the shell cwd".
+# file, not the shell. `cwd` is deliberately absent: the rule is "never the shell cwd".
 TARGET_FIELDS = ("file_path", "path", "notebook_path", "target")
 
 # The fields that are display only. A command string, a URL, a search pattern or a query is
@@ -54,7 +54,7 @@ def project_id(root):
     """The stable id of the project rooted at `root`: the `project_id` stamped in its
     `project.yaml`, or the root's absolute path when the file carries none. None when `root` is
     None. The stamped id is what lets a renamed folder keep its earlier sessions: the id
-    survives a rename, the path does not (spec 5.14:634-635)."""
+    survives a rename, the path does not."""
     if not root:
         return None
     try:

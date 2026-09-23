@@ -1,9 +1,8 @@
 """Standing authority: the lifecycle of an authority to act with no one watching (M3.2).
 
-Sources: D16 (spec:164), Q13 (spec:179), Q18 (spec:188), spec 5.6:389-401; section 6 DROP row 88
-drops the grant files and re-homes their obligation here; absorb-gap AG-M4 (expiry, revocation,
-supersession, re-verification, scope implies level), AG-A7, AG-A20 (authority bound to the unit
-of work).
+There are no grant files: their obligation lives here. A standing authority has an expiry, can be
+revoked, superseded and re-verified, its scope implies a level, and it is bound to one unit of
+work (`doctrine/leaves/autodrive-levels.md`).
 
 Name the two instruments apart. The autodrive LEVEL (M3.1, alpaca.posture.level) says how much the
 agent decides in THIS session. An AUTHORITY here says whether a loop may act with no one watching,
@@ -51,7 +50,7 @@ GRANT_KIND = "authority-grant"
 REVOKE_KIND = "authority-revoke"
 BIND_KIND = "authority-bind"
 
-#: the autodrive ladder band (L1-L6, spec 5.6:390). The top level is what a wide scope requires.
+#: the autodrive ladder band (L1-L6). The top level is what a wide scope requires.
 MIN_LEVEL, MAX_LEVEL = 1, 6
 TOP_LEVEL = MAX_LEVEL
 

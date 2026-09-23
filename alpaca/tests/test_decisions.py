@@ -1,7 +1,7 @@
 """M2.6 -- decisions table, decision pages, and the `why` resolution.
 
-Proof test for the Done-when (spec 5.7:463-465, row schema `why` spec:287, Q15 spec:181,
-5.9 page kinds spec:513-514):
+Proof test for the Done-when (decisions, the row schema `why`, a gate skip or level change as
+one decision event, the decision page):
 
   * every row's `why` resolves to a decision page that EXISTS and carries all four fields
     (context, options, choice, consequence);

@@ -1,8 +1,8 @@
 """M1.16 proof - the tag oracle and the derived `tag` column.
 
 The maturity tag of an obligation row is DERIVED from the evidence its verdict rows carry,
-never typed by hand (spec:290 the `tag` column, spec:329 the verify-phase default, rule 1
-spec:804 "No unbuilt work is ever tagged Verified. Tags are derived, never typed."). The
+never typed by hand (the `tag` column; the verify-phase default; "No unbuilt work is ever tagged
+Verified. Tags are derived, never typed.", `doctrine/leaves/test-or-UNTESTED.md`). The
 evidence counter points at the row's verdict rows and their pointers (M1.16 Step 2).
 
 Asserts the Done-when on BOTH the positive and the negative path:
@@ -130,7 +130,7 @@ def test_verified_is_refused_without_a_behavioral_probe(project):
     ev = _write(project, "build.log")
     verdict_row.discharge(conn, r["id"], r["content_hash"], instrument="static-check",
                           verdict=vc.PASS, evidence=[ev], level="L2", session="s1")
-    # a static-check PASS reaches Built, never Verified (spec:329, the verify-phase default).
+    # a static-check PASS reaches Built, never Verified (the verify-phase default).
     assert oracle.derive(conn, r["id"]) == oracle.BUILT
     # hand-type Verified into the column: derivation OVERWRITES it back to Built ...
     before = len(_tag_events(conn))

@@ -24,7 +24,7 @@ discarded at the next rank. No "I remember reading something".
 ## C3 - Pointer returns and re-read from disk
 
 A return message carries a verdict plus a pointer to a board row or a message, never the
-load-bearing content itself (the native channel rule, spec 7.3). The consuming rank RE-READS the
+load-bearing content itself (the native channel rule, `doctrine/leaves/file-as-truth.md`). The consuming rank RE-READS the
 cited file from disk. A dossier saves exploration; it never substitutes for it.
 
 ## C4 - Specced, Built and Verified are three different things

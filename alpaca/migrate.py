@@ -1,6 +1,6 @@
 """Schema version, additive migration, fail-closed legacy refusal, append-only guards.
 
-M2.1 (spec:579). The record evolves only additively: a new column is an ALTER TABLE ADD
+M2.1. The record evolves only additively: a new column is an ALTER TABLE ADD
 COLUMN, a new table is a CREATE ... IF NOT EXISTS, and a value that a new column should
 have carried is backfilled from the data already in the store. There are no numbered
 migration files; the current shape is alpaca/schema.sql plus the column map and backfills here.
@@ -18,7 +18,7 @@ Three guarantees this module owns, consumed by db.connect and alpaca doctor:
     for a managed record (a root carrying ALPACA-MANIFEST); an ad-hoc store opened outside a
     project stays raw, which is what the property fuzzer needs to model out-of-band access.
 
-The optional head anchor (KEEP opt-in, section 6 row 69) is carried here off by default:
+The optional head anchor (kept as an opt-in) is carried here off by default:
 `anchor_head` writes nothing unless explicitly enabled, and `test_migrate.py` asserts the
 off state.
 """
@@ -35,7 +35,7 @@ CURRENT_SCHEMA_VERSION = 4
 _SCHEMA_KEY = "schema_version"
 _ANCHOR_KEY = "head_anchor"
 
-# The head anchor is opt-in and off by default (section 6 KEEP opt-in row 69).
+# The head anchor is opt-in and off by default.
 HEAD_ANCHOR_DEFAULT = False
 
 

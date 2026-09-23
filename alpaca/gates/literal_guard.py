@@ -5,7 +5,7 @@ scans the core `*.py` files under the declared scan dirs for a set of FORBIDDEN 
 FAILs, bound to the exact `<file>:<line>` and the literal, when one appears. What changes for Alpaca
 is the SOURCE of the forbidden list: it is DATA, read from `project.yaml` and `style/banned.txt`,
 NEVER hardcoded in code (there is no domain default). This is the M1 banned-words rule read as an
-instrument (the ban list is a projection input, spec:29), and the same generic seam the earlier harness built.
+instrument (the ban list is a projection input), and the same generic seam the earlier harness built.
 
   * a forbidden literal in a core `*.py`   -> LITERAL-GUARD-HIT (FAIL, bound to file:line)
   * no core `*.py` to scan at all          -> LITERAL-GUARD-NO-POPULATION (BLOCKED; the floor)

@@ -43,7 +43,7 @@ def _write_manifest(root, mechanism):
 
 ALL_LEVELS = (2, 4, 5, 6)
 
-# The four human-owned surfaces (rule 7 / spec 5.6:402-409), one representative path each.
+# The four human-owned surfaces (CLAUDE.md boot rule 6), one representative path each.
 HUMAN_OWNED_PATHS = (
     "contracts/phase-build.md",
     "project.yaml",

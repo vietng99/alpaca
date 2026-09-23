@@ -1,12 +1,12 @@
 """Review cards, the review budget, and curation by exception (M3.5).
 
-Sources: spec 5.7:466-470 (the review card), Q18 (spec:188), the 7.4 table (spec:775-786), rule 8
-(spec:816-817); absorb-gap AG-M15 (a human-review budget with a conservation law and curation by
-exception). Alpaca-native (no vendoring); the model is built here against the M2/M3 pieces.
+A human-review budget with a conservation law and curation by exception. The rule is
+`doctrine/leaves/hitl-decision-gate.md` and CLAUDE.md boot rule 3. Alpaca-native (no vendoring);
+the model is built here against the M2/M3 pieces.
 
 A review card is raised when, and only when, something needs a HUMAN decision. A card is not a
 routine notification: it exists BY EXCEPTION. The four card classes the plan names are the four
-things that stay human decisions at every level (7.4, rule 8):
+things that stay human decisions at every level (boot rule 3):
 
   * `ship`               -- the ship / deploy boundary: publishing outside the box.
   * `irreversible-external` -- an irreversible external action (push a shared remote, spend money).
@@ -46,7 +46,7 @@ from alpaca.gates import verdict as vc
 KIND_CARD = "review-card"          # the record channel that raises a card
 KIND_MOVE = "review-move"          # the record channel that resolves a card
 
-#: the four card classes (7.4, rule 8). Each is one of the four things that stays a human decision
+#: the four card classes (boot rule 3). Each is one of the four things that stays a human decision
 #: at every autodrive level; a card of an unnamed kind is refused (the floor is a floor).
 SHIP = "ship"
 IRREVERSIBLE = "irreversible-external"

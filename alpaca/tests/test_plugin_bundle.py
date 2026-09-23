@@ -1,6 +1,6 @@
 """M3.10 -- the skills plugin bundled from the canonical shared source.
 
-Proof test for the Done-when (P-010 spec:911, spec 5.12:590-592, section 6 row 716):
+Proof test for the Done-when (the fifteen skills of the plugin bundle):
 
   * all fifteen skills named by P-010 are present in the bundle at the entry-point
     path the plan table records for each: SKILL.md at the skill root for eleven of
@@ -16,7 +16,7 @@ Proof test for the Done-when (P-010 spec:911, spec 5.12:590-592, section 6 row 7
   * the eleven hook locations are flattened into one plugin/alpaca/hooks/ and the flattening
     is traceable back to each hook's upstream path;
   * the plugin hooks are registered under the M1.5 fail-open and timeout contract;
-  * the bundle contains no skill not named in P-010 or section 6 row 716;
+  * the bundle contains no skill beyond those fifteen;
   * the five Alpaca-native skills alpaca-first-chat, alpaca-onboard, alpaca-op,
     alpaca-runbook-forge and alpaca-from-notes ship under .claude/skills/.
 

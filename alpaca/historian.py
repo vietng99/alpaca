@@ -14,10 +14,10 @@ historian is the COMPLETENESS layer over that record:
   * `day(conn, date)` regenerates a per-project daily digest. It is a VIEW over the record and
     never a source: it writes nothing, so a re-render under a fixed clock is byte-identical.
 
-Sources: spec 5.9 (dumb capture then agentic sort), P-008 (`alpaca day` / `alpaca sort`); absorb-gap
-AG-M24 (cadence, completeness surfacing, the never-drop unsorted bucket with a reason), AG-A1
-(capture may never judge, the code-level refusal), AG-A2 (the per-op record model, the choices
-log, the per-op cursor, provenance fields), AG-A18 (the day roll-up is a regenerable view).
+What it holds to: capture is dumb and the sort is agentic (`alpaca day` / `alpaca sort`); a set
+cadence with completeness surfacing and a never-drop unsorted bucket with a reason; capture never
+judges (a code-level refusal); a per-op record model (the choices log, the per-op cursor,
+provenance fields); the day roll-up is a regenerable view.
 
 Cadence (Step 2), stated here and in `doctrine/leaves/dumb-capture-agentic-sort.md` so the two
 never drift: `alpaca sort` runs at session end and on demand, never as a background classifier. A day
@@ -56,7 +56,7 @@ def _known_ops(conn):
 
 
 def timeline(conn, op) -> dict:
-    """The per-op record model for `op` (AG-A2). A pure derivation over the record: intent, done
+    """The per-op record model for `op`. A pure derivation over the record: intent, done
     bar, authority, judgment basis and the choices log, each field with a pointer to its note.
 
     `choices` is the op's notes in timeline order (ts then id, deterministic under a fixed clock),
@@ -115,7 +115,7 @@ def timeline(conn, op) -> dict:
 
 
 def unsorted(conn, day=None) -> list:
-    """The never-drop unsorted bucket (AG-M24). Every raw note whose timestamp appears in no
+    """The never-drop unsorted bucket. Every raw note whose timestamp appears in no
     timeline, surfaced by name with a reason. Optionally restricted to notes stamped on `day`
     (YYYY-MM-DD). Together with the timelines this partitions the record: placed notes plus
     unsorted notes are every note, so nothing is dropped.
@@ -145,7 +145,7 @@ def unsorted(conn, day=None) -> list:
 
 
 def day(conn, date) -> dict:
-    """The per-project daily digest for `date` (YYYY-MM-DD) (AG-A18). A pure VIEW over the record:
+    """The per-project daily digest for `date` (YYYY-MM-DD). A pure VIEW over the record:
     it writes nothing, so it is a projection and never a source. Reports the op activity of the day
     and the never-drop unsorted bucket for the day. `render_day` turns it into byte-stable text."""
     evs = [e for e in _events(conn) if (e.get("ts") or "")[:10] == date]

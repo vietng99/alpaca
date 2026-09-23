@@ -3,7 +3,7 @@
 Ported from the earlier harness gates/wiring_audit.py and re-based onto Alpaca. The earlier harness audited two
 populations (drop-in reference artifacts and gates/ops instruments); the reference half was a
 SystemVerilog-campaign domain concept and is dropped here. What remains is the generic,
-load-bearing half the spec names (spec:300-307, spec:39): every instrument that is PRESENT must
+load-bearing half: every instrument that is PRESENT must
 have an INDEPENDENT caller, or it is dead weight that only looks installed.
 
 This gate folds the `instrument_census` into a verdict:

@@ -1,8 +1,7 @@
 """Neutralisation of externally sourced values at render time (M4.9).
 
-Sources: spec 5.7:453-465 (cards carry product-tree and message values), 5.10:536-539,
-5.14:626-629, Q10 (spec:176); absorb-gap AG-M30 (an externally sourced value is neutralised
-before it enters a rendered surface).
+Review cards carry values from the product tree and from messages, and every rendered surface
+shows them, so an externally sourced value is neutralised before it enters a rendered surface.
 
 A rendered surface (RESUME.md, board.json, data.json, the analytics page) carries values that
 did NOT come from the harness: an op intent, a task statement, a message body, a project name.

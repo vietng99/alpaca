@@ -1,4 +1,4 @@
-"""Injectable clock so the record is deterministic under test (AG-M21).
+"""Injectable clock so the record is deterministic under test.
 
 Real runs stamp wall-clock local time with its offset; tests inject a FixedClock so the
 hash-chain ts and every rendered projection are reproducible. Time is a stamp source, never a

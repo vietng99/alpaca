@@ -1,6 +1,6 @@
 """M3.7 -- the formation manifest loader, its registry, and the blind-pair rule.
 
-Proof test for the Done-when (spec 5.8:480-492, D7 spec:156, section 6 KEEP rows 12, 97-105):
+Proof test for the Done-when (the formation manifest, agent briefs and blind pairs):
 
   * dropping a manifest file into `formations/` registers the formation in BOTH
     directions -- name -> formation and formation-file -> name -- with no code change;

@@ -84,7 +84,7 @@ def test_stop_refreshes_and_rebuilds_the_page_on_tenth_stop(project):
     assert p.returncode == 0, p.stderr
     # Read folds no longer write a second JSON cache; explicit build publishes the page.
     assert not os.path.isfile(os.path.join(project, ".alpaca", "analytics", "sessions", "s1.json"))
-    # the tenth stop also builds the merged page, so a long session shows before it ends (spec 5.14)
+    # the tenth stop also builds the merged page, so a long session shows before it ends
     idx = os.path.join(project, "analytics", "index.html")
     assert os.path.isfile(idx)
     with open(idx, encoding="utf-8") as fh:

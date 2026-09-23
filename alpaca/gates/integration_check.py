@@ -2,8 +2,7 @@
 
 Ported from the earlier harness gates/integration_check.py and re-based onto Alpaca. The earlier harness drove a signing
 lifecycle (open a row, two operators sign, the row reaches SIGNED). Alpaca has no signing; the
-equivalent end-to-end seam is the DISCHARGE flow (spec section 6 REBUILD row 43: sign rows became
-verdict rows). So this gate replaces the signing flow with a discharge flow and drives it across
+equivalent end-to-end seam is the DISCHARGE flow (sign rows became verdict rows). So this gate replaces the signing flow with a discharge flow and drives it across
 several instruments in a THROWAWAY tempdir, each hop hard-asserted:
 
     parse an acceptance artifact  (alpaca.checklist.artifact)

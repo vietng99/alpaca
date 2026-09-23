@@ -175,7 +175,7 @@ def verdict_of(findings) -> int:
 RULING_KIND = "projection-ruling"
 _RULING_CONTEXT = (
     "The wiki store (.alpaca/alpaca.db) and the markdown rendered under .alpaca/wiki/ can disagree: one is a "
-    "store, the other a projection. Q10 and spec 5.1:210-212 settle which is truth."
+    "store, the other a projection. docs/projection-ruling.md settles which is truth."
 )
 _RULING_CHOICE = (
     "The store is truth. RESUME.md, CHECKLIST.md, board.json, data.json and the wiki markdown "

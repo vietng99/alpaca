@@ -1,6 +1,6 @@
 """M2.15 proof: `alpaca wiki extract` emits a portable, standalone Rune-2 vault.
 
-Done-when (spec:911): the extract opens as a standalone vault with its own schema and ledger,
+Done-when: the extract opens as a standalone vault with its own schema and ledger,
 carries no path or identifier tied to this machine, excludes every row whose label is not public,
 and is byte-identical across two runs under a fixed clock. Every property below is proved on BOTH a
 positive and a negative path.

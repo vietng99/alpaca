@@ -362,7 +362,7 @@ def cmd_apply(args):
 
 # ---- retention: snapshot-out before a non-idempotent act, and compact the store (M4.7)
 def snapshot_out(root, path, change_tag, note, *, now=None):
-    """Snapshot-out before a non-idempotent act (spec 5.1:218): take the file's pre-image with a
+    """Snapshot-out before a non-idempotent act (`doctrine/leaves/operate-in-place.md`): take the file's pre-image with a
     mandatory note before a verb mutates it in place. A thin, importable wrapper over
     alpaca.retention.snapshot so the guarded verbs share one entry point; the note is required, so a
     caller that omits it is refused. Additive: opens no new op and changes no existing verb."""

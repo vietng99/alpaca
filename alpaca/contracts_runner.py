@@ -1,7 +1,7 @@
 """contracts/ runner (M1.8).
 
 `contracts/` holds human-owned executable checks, one script per check, one directory per
-phase (spec 5.11). Agents read and run them; they never write them (the two-change-class
+phase. Agents read and run them; they never write them (the two-change-class
 enforcement is task M3.3). This module runs them: for a given phase it executes every
 executable under `contracts/<phase>/` and folds their exit codes with the verdict fold
 `worst()` (BLOCKED > FAIL > PAUSED > PASS).

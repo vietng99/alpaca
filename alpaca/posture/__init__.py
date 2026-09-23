@@ -1,4 +1,4 @@
-"""Posture: how much the agent decides alone, mirrored into the record (spec 5.6:389-401).
+"""Posture: how much the agent decides alone, mirrored into the record (`doctrine/leaves/autodrive-levels.md`).
 
 M3 splits the session posture into instruments that this package builds one at a time:
 

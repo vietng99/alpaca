@@ -1,4 +1,4 @@
-"""The verbatim journal (M3.6). Ported from the earlier harness capture.py, section 6 ADAPT row 94.
+"""The verbatim journal (M3.6). Ported from the earlier harness capture.py.
 
 What this is
 ------------

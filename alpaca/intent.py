@@ -1,8 +1,9 @@
 """Intent record and the done-bar (M3.6).
 
-Sources: spec 5.5:362-366 (flare, intent record), 3:131-132 (intent IS the done-bar), Q13
-(spec:179), 7.4 (spec:777, 785); absorb-gap AG-A3 (the intent-label and the done_when are split,
-who authors each is recorded, close records the judgment basis).
+What it holds to: the intent record is the done-bar; the intent label and the done_when are
+split, who authors each is recorded, and a close records its judgment basis
+(`doctrine/leaves/intent-is-the-done-bar.md`; the autodrive level decides which boundaries run on
+their own, `doctrine/leaves/level-gated-advance.md`).
 
 The split this module makes structural:
 
@@ -52,8 +53,7 @@ AGENT_ROLE = "agent"
 OWNER_ROLE = "owner"
 
 #: the level at or above which an agent-authored bar is "lax" without an owner artifact to trace to
-#: (spec 7.4:777, 785: at L5 the boundary is auto, so a bar authored there needs the owner behind
-#: it). Below it a drafted bar is a review-card matter, not a refusal here.
+#: (at L5 the boundary is automatic, so a bar authored there needs the owner behind it). Below it a drafted bar is a review-card matter, not a refusal here.
 LAX_LEVEL = 5
 
 #: the owner artifact a queue-derived intent traces to: the queue file the owner wrote.

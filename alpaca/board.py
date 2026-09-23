@@ -1,6 +1,6 @@
 """The board: a kanban view derived purely over obligation rows (M2.3).
 
-Spec 5.7:453-459. The board is a VIEW, never a store. Every column is DERIVED, latest-wins,
+The board is a VIEW, never a store (`doctrine/leaves/board-is-truth.md`). Every column is DERIVED, latest-wins,
 from two sources and nothing else:
 
   * the row's folded status (`verdict_row.status_fold`, itself a fold of the row's verdict
@@ -76,7 +76,7 @@ def _all_rows(conn) -> list:
 
 def _head(conn, row_id) -> dict:
     """The authoritative (head-of-supersession) obligation row for `row_id`, or HALT when the id
-    was never committed (absence blocks, spec:807)."""
+    was never committed (absence blocks)."""
     current = supersession.head(_all_rows(conn), row_id)
     if current is None:
         raise Halt(vc.BLOCKED, R_NO_SUCH_ROW, "no obligation row with id=%r" % row_id)

@@ -4,7 +4,7 @@ Proved on BOTH paths:
   1. POSITIVE: an intent note and a result note that share an op and a pairing key are PAIRED, and
      the assertion carries pointers back to both notes;
   2. NEGATIVE (the never-drop rule): an intent with no matching result is SURFACED as an unpaired
-     assertion, not dropped (spec 5.9; absorb-gap AG-A1);
+     assertion, not dropped (capture may never judge);
   3. grouping is per-op: two ops sort into two independent buckets;
   4. sort is idempotent: a second pass replaces its own assertions rather than duplicating them;
   5. `alpaca sort` writes its judgment (capture stays dumb; sort is the only pass that judges).

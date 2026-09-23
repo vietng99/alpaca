@@ -1,7 +1,7 @@
 # The store-versus-projection ruling
 
-Sources: Q10 (spec:176), spec 5.1:210-212 (the markdown store file becomes a projection),
-5.9:513-514; absorb-gap AG-A15 (wiki as store versus wiki as projection). Owning task: M2.17.
+The question: is the wiki a store or a projection of the record? This page records the answer and
+why. The gate that enforces it is `alpaca/freshness.py`.
 
 ## The contradiction
 

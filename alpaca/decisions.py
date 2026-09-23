@@ -1,8 +1,7 @@
 """Decisions: the table, the decision page, and the `why` resolution (M2.6).
 
-Sources: spec 5.7:463-465 (decisions), the row schema `why` (spec:287), Q15 (spec:181, "a
-gate skip or a level change is one decision event, no separate override ledger"), and the 5.9
-page kinds (spec:513-514, the decision page).
+A row's `why` points at a decision page; a gate skip or a level change is one decision event, with
+no separate override ledger (`doctrine/leaves/hitl-decision-gate.md`).
 
 The shape, de-signed for Alpaca:
 
@@ -20,10 +19,10 @@ The shape, de-signed for Alpaca:
     BLOCKs the boundary; every row resolving is a PASS; an empty universe is a vacuous PASS
     (the door's own discharge link is what refuses an empty phase).
 
-Owner decisions (Q, spec 5.7): intent, done_when, go, ship, level change are decisions that
+Owner decisions: intent, done_when, go, ship, level change are decisions that
 carry the OWNER's verbatim journal pointer, so the record points back at what the owner
 actually wrote, not a paraphrase. Recording one of these kinds without a non-empty `pointer`
-is refused fail-closed. A gate skip and a level change are themselves decision events (Q15):
+is refused fail-closed. A gate skip and a level change are themselves decision events:
 there is no separate override ledger, so the skip or the change lives on the board forever as
 the one decision event this module appends.
 
@@ -46,7 +45,7 @@ SCHEMA_ID = "decision-page/1"
 #: the pointer form a row's `why` takes: a decision-page reference addressed by id.
 WHY_PREFIX = "decision:"
 
-#: owner decisions that must carry the owner's verbatim journal pointer (spec 5.7:463-465).
+#: owner decisions that must carry the owner's verbatim journal pointer.
 OWNER_KINDS = frozenset({"intent", "done_when", "go", "ship", "level_change"})
 
 # reason tokens -- controls bind to these exact strings.

@@ -1,8 +1,7 @@
 """M2.5 proof: claims, leases, expiry and takeover, keyed on the worker.
 
 Asserts the Done-when on BOTH the positive and the negative path, with a FixedClock driving
-every lease and staleness instant (spec 5.7:460-462, 5.4:352-354; M2 "a lease expires and the
-row returns"):
+every lease and staleness instant (M2 "a lease expires and the row returns"):
 
   * a claim makes the row live and the board derives `doing`; the claim event and the first
     heartbeat land BEFORE the current-state mutation, so a session peeking in the gap sees a

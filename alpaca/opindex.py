@@ -1,7 +1,6 @@
 """The op index: a lifecycle state and a resume cursor for every op (M2.7).
 
-Spec 5.1:207 (`ops`), 5.4:339-341 (the pad), spec:715 (the op index in the Alpaca operator row);
-absorb-gap AG-A10 (op index with cursors and lifecycle states).
+It reads the `ops` table and feeds the resume pad (RESUME.md); `alpaca op list` shows it.
 
 The index is a pure DERIVATION over ops, rows, claims and events; nothing here is a stored
 column. Every op folds to exactly one state from the closed set:
@@ -177,7 +176,7 @@ def cursor(conn, op):
 def set_cursor(conn, op, row_id, *, session=None, actor="alpaca") -> dict:
     """Pin `op`'s resume cursor to `row_id`, one recorded event. The row is not required to
     exist: a pin that names a missing row is deliberately allowed so `dangling_cursors` can
-    report it (absence blocks, spec:807, is surfaced here as a report, not a silent follow)."""
+    report it (a missing target blocks; it is surfaced here as a report, not a silent follow)."""
     return db.append_event(conn, session=session or "alpaca", actor=actor, kind=CURSOR_KIND,
                            op=op, ref=row_id, data={"row_id": row_id})
 

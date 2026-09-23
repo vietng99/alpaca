@@ -2,8 +2,8 @@
 
 A discharge is not a status-column flip; it is a machine-authored VERDICT ROW appended to
 the record (the events table), binding a verdict to the exact frozen content of one
-obligation row. This is section 6 REBUILD row 43, sign_row -> verdict rows: the earlier harness sign
-fields and signature guards are gone, the freeze witness the sign row carried is kept.
+obligation row. Sign rows became verdict rows: the earlier harness sign fields and signature
+guards are gone, the freeze witness the sign row carried is kept.
 
 A verdict CITES the obligation's `content_hash`. If that hash is stale (the obligation was
 superseded or otherwise drifted since the instrument ran) the discharge HALTs with the

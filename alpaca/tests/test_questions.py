@@ -197,7 +197,7 @@ def test_phase_signout_blocks_on_a_dropped_owner_question_then_passes(project):
 
 # ---------------------------------------------------------------- the decision-required gate
 def test_a_decision_required_gate_row_pauses_others_pass():
-    # opt-in per gate row (spec 5.3): a decision-required-and-undecided gate row PAUSES.
+    # opt-in per gate row: a decision-required-and-undecided gate row PAUSES.
     assert questions.decision_gate("g", decision_required=True, decided=False) == vc.PAUSED
     # NEGATIVE controls: a decided gate row, or one not marked decision-required, PASSes.
     assert questions.decision_gate("g", decision_required=True, decided=True) == vc.PASS

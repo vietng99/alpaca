@@ -1,7 +1,7 @@
 """M1.17 proof - instrument census, wiring audit, integration, regression, literal guard,
 structural conformance.
 
-Section 5.3 (spec:303-312): "present != wired". An instrument on disk is a self-description;
+The rule: "present != wired". An instrument on disk is a self-description;
 whether anything reaches it is a separate fact only a scan of the rest of the tree can settle.
 This module drives the Done-when on BOTH the positive and the negative path, on OWN fixtures:
 

@@ -1,7 +1,7 @@
 """One composed door per phase boundary (M1.15).
 
-Ported from the earlier harness door shape (`steps/spec-to-step1.py`) and de-signed for Alpaca. The TD
-finding the door shape fixes: a door that composed only ONE link and printed OPEN off a bare
+Ported from the earlier harness door shape (`steps/spec-to-step1.py`) and de-signed for Alpaca. The
+earlier finding the door shape fixes: a door that composed only ONE link and printed OPEN off a bare
 exit code, while the completeness gates lived in an unbuilt caller -- an invisible bypass. This
 door composes the whole chain and OPENs iff every link PASSes.
 
@@ -12,12 +12,12 @@ door composes the whole chain and OPENs iff every link PASSes.
   2. the phase's generic-defaults instrument set -- here, the discharge fold over the phase's
      obligation rows: every `item` row for (op, phase) must fold to `discharged` or `waived`
      (an empty universe is a vacuous universal, never a pass -> BLOCKED);
-  3. the project's own checks under `contracts/<phase>/`, when present (spec 5.3: "a project
-     adds its own checks in contracts/").
+  3. the project's own checks under `contracts/<phase>/`, when present (a project adds its own
+     checks in contracts/).
 
 The links fold with `contract.worst()` (BLOCKED > FAIL > PAUSED > PASS). The door OPENs only on
 an all-PASS fold; NO flag opens it past a failing link. Whether an open door advances
-automatically or PAUSES for a recorded human "go" is read off the 7.4 table by the level in
+automatically or PAUSES for a recorded human "go" is read off the human-decision table by the level in
 force (`defaults.boundary_decision`). Every advance and every pause is recorded as an event.
 """
 from __future__ import annotations
@@ -111,7 +111,7 @@ def run(conn, op, boundary, *, level=None, root=None, tmp_prefixes=None, force=F
 
     The links fold with worst(). If the fold is not PASS the door is CLOSED and the fold verdict
     is returned -- NO flag opens a door past a failing link, so `force` is accepted (a caller may
-    try it) but never opens a failed door. On an all-PASS fold the 7.4 table decides: at a level
+    try it) but never opens a failed door. On an all-PASS fold the human-decision table decides: at a level
     where the boundary is automatic the door advances (a `phase-advance` event lands); at a lower
     level it PAUSES and records a pending human decision (a `phase-pause` event), unless a human
     "go" is already in hand (`human_go=True`), which advances it. Human decisions stay human:

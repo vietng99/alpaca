@@ -1,7 +1,7 @@
 """M2.1 proof: schema version, additive migration, fail-closed legacy refusal,
 append-only triggers, and the off-by-default head anchor.
 
-The three Done-when cases (spec:579):
+The three Done-when cases:
   (A) an M0-era database opens, migrates additively with its backfills and verifies
       its chain;
   (B) a database missing a required NOT NULL or CHECK constraint is refused

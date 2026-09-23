@@ -21,7 +21,7 @@ The model this enforces (autonomy-model.md s3):
   * a banked owner-owed question that is silently dropped (never resolved, never surfaced)
                                       -> a phase may not sign out while it is open.
 
-The class table is DATA (spec 5.3 / M1.18 Step 3): the routing of each class name is read from
+The class table is DATA: the routing of each class name is read from
 `project.yaml` under the additive key `question_classes` (a map of class-name -> "owner" |
 "harness"). When that key is absent the table below is the default, and the routing is NOT
 hardcoded past that default -- a project that declares the key overrides it. (project.yaml did
@@ -351,7 +351,7 @@ def phase_signout(conn, phase) -> int:
 
 # --------------------------------------------------------------------- the HITL decision gate
 def decision_gate(gate, *, decision_required, decided) -> int:
-    """The hitl-decision-gate (spec 5.3): opt-in per gate row. A gate row marked
+    """The hitl-decision-gate (`doctrine/leaves/hitl-decision-gate.md`): opt-in per gate row. A gate row marked
     decision-required and not yet decided returns PAUSED (exit 3, PAUSED-FOR-DECISION); a decided
     row, or one not marked decision-required, returns PASS. `gate` is the boundary name for the
     caller's message; the verdict is the contract's own PAUSED / PASS code, never a private one."""

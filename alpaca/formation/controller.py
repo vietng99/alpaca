@@ -1,7 +1,7 @@
 """The controller sequencer with crash-only replay from events (M3.8).
 
-Ported from the earlier harness `ops/controller.py` campaign SEQUENCER (section 6 ADAPT row 84; the earlier harness
-inventory row 84), MINUS the two-human phase sign-off, and adapted to Alpaca: the state store is the
+Ported from the earlier harness `ops/controller.py` campaign SEQUENCER, MINUS the two-human phase
+sign-off, and adapted to Alpaca: the state store is the
 Alpaca record itself, not a private `war-log.jsonl`.
 
 WHY A PROGRAM, NOT A PROMPT. The thing that decides WHEN each step runs is a program, not an agent

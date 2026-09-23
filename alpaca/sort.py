@@ -4,7 +4,7 @@ The drain (alpaca.wiki.ingest.drain) captures dumbly - every session event becom
 mechanical role label and zero judgment. `alpaca sort` is the ONE pass that judges: it groups the raw
 layer by op and pairs each intent note with its result note, writing that judgment as assertions
 that carry pointers back to the notes. An intent with no result is SURFACED as an unpaired
-assertion, never dropped (spec 5.9; absorb-gap AG-A1 "capture may never judge").
+assertion, never dropped (capture may never judge: `doctrine/leaves/dumb-capture-agentic-sort.md`).
 
 Cadence and the never-drop unsorted bucket are M4.6's completeness proof; this task ships the
 mechanism and a manual `alpaca sort` invocation.
