@@ -1,0 +1,17 @@
+# Memory class (see ALPACA-MANIFEST): this project's runtime state. Never committed, never copied to
+# another project. These entries are fed from the [memory] class so the two never drift.
+.alpaca/
+RESUME.md
+CHECKLIST.md
+/analytics/
+board.json
+data.json
+.venv/
+.pytest_cache/
+.claude/settings.local.json
+.claude/worktrees/
+# Release output: never committed, never shipped.
+dist/
+# Runtime caches.
+__pycache__/
+*.pyc

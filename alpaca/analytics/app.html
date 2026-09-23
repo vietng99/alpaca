@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpaca session analytics</title>
+<style>
+:root{--bg:#F2F4F6;--panel:#FFFFFF;--ink:#171B21;--muted:#5B6470;--line:#D5DAE0;--accent:#0E6E74;--bar:#4FB3BA;--code:#EEF1F4;--ok:#12683A;--warn:#7A4A00;--bad:#9A1C2B;--shadow:rgba(20,23,28,.16)}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#0F1418;--panel:#161C22;--ink:#E6E9EC;--muted:#9AA4B2;--line:#2A333C;--accent:#4FB3BA;--bar:#2E8A90;--code:#1D252D;--ok:#7FE0A6;--warn:#FFD27A;--bad:#FF9AA6;--shadow:rgba(0,0,0,.5)}}
+:root[data-theme=dark]{--bg:#0F1418;--panel:#161C22;--ink:#E6E9EC;--muted:#9AA4B2;--line:#2A333C;--accent:#4FB3BA;--bar:#2E8A90;--code:#1D252D;--ok:#7FE0A6;--warn:#FFD27A;--bad:#FF9AA6;--shadow:rgba(0,0,0,.5)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 "IBM Plex Sans","Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding-inline:16px;padding-block:0 40px}
+.top{display:flex;flex-wrap:wrap;gap:12px;align-items:baseline;padding-block:18px 10px;border-bottom:1px solid var(--line)}
+h1{font-size:20px;margin:0}.muted{color:var(--muted)}.mono{font-family:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;font-size:12px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted);display:inline-block;margin-right:5px;vertical-align:middle}
+.tabs{display:flex;gap:4px;margin-block:12px 0}
+.tab{background:transparent;border:1px solid var(--line);border-bottom:none;border-radius:6px 6px 0 0;color:var(--muted);padding:7px 14px;cursor:pointer;font-weight:600;font-size:13px}
+.tab.on{background:var(--panel);color:var(--ink);border-color:var(--line)}
+.tab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.view{border-top:1px solid var(--line);padding-top:14px}.view[hidden]{display:none}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-block:14px}
+.tile{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:10px 12px}.tile b{display:block;font-size:20px;font-variant-numeric:tabular-nums}
+.tile span{color:var(--muted);font-size:12px}
+.layout{display:grid;grid-template-columns:280px 1fr;gap:16px}@media(max-width:760px){.layout{grid-template-columns:1fr}}
+.side{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px;max-height:78vh;overflow:auto}
+.side input{width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--ink);margin-bottom:6px}
+.s{padding:6px 8px;border-radius:4px;cursor:pointer;border:1px solid transparent}.s:hover{background:var(--bg)}.s.on{border-color:var(--accent);background:var(--bg)}
+.s:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.s .t{font-weight:600;font-size:13px;word-break:break-word}.s .m{color:var(--muted);font-size:12px}
+.pill{display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:1px 5px;border-radius:3px;border:1px solid var(--line);color:var(--muted)}
+.pill.html{color:#b4530a;border-color:#b4530a55}.pill.md{color:var(--accent);border-color:var(--accent)}
+.main{min-width:0}section{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px 14px;margin-bottom:12px}
+h2{font-size:15px;margin:0 0 8px}h3{font-size:13px;margin:12px 0 6px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.bars{display:flex;gap:3px;align-items:flex-end;height:80px;overflow-x:auto}.bar{flex:0 0 12px;background:var(--bar);border-radius:2px 2px 0 0;position:relative}
+.bar:hover::after{content:attr(data-l);position:absolute;bottom:100%;left:0;background:var(--ink);color:var(--bg);padding:2px 6px;border-radius:3px;white-space:nowrap;font-size:11px;z-index:5}
+table{border-collapse:collapse;width:100%;font-size:13px}th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--muted);font-weight:600;font-size:12px}
+td.n{text-align:right;font-variant-numeric:tabular-nums}.prompt{padding:6px 8px;border-left:3px solid var(--accent);margin:6px 0;background:var(--code);border-radius:0 4px 4px 0;white-space:pre-wrap;word-break:break-word}
+.tbl{overflow-x:auto}button{background:var(--code);border:1px solid var(--line);color:var(--ink);border-radius:4px;padding:4px 8px;cursor:pointer}
+.rdhead{display:flex;flex-wrap:wrap;gap:10px;align-items:baseline;margin-bottom:8px}.rdhead a{color:var(--accent)}
+.reader{background:var(--panel);border:1px solid var(--line);border-radius:6px;min-height:60vh;padding:0}
+.reader .doc{padding:14px 18px;max-width:80ch}.reader .doc h1,.reader .doc h2,.reader .doc h3{color:var(--ink)}
+.reader .doc pre.cb{background:var(--code);padding:10px 12px;border-radius:5px;overflow-x:auto;font-family:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;font-size:12.5px}
+.reader .doc code{background:var(--code);padding:1px 4px;border-radius:3px;font-family:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;font-size:12.5px}
+.reader .doc pre.cb code{background:none;padding:0}
+.reader .doc blockquote{border-left:3px solid var(--line);margin:8px 0;padding:2px 12px;color:var(--muted)}
+.reader iframe{width:100%;height:78vh;border:0;border-radius:6px;background:#fff}
+.empty{color:var(--muted);padding:24px;text-align:center}
+.themebtn{background:var(--panel);border:1px solid var(--line);color:var(--ink);border-radius:4px;padding:4px 10px;cursor:pointer;font-size:12px}
+.themebtn:hover{border-color:var(--accent)}.themebtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.intro{max-width:70ch;color:var(--muted);font-size:13px;margin:12px 0 0}
+.sum{margin-top:8px;padding:6px 8px;border:1px dashed var(--line);border-radius:4px;color:var(--muted);font-size:12px}
+.sum b{color:var(--ink)}
+.foot{margin-top:8px;padding-top:6px;border-top:1px solid var(--line);color:var(--muted);font-size:11px;word-break:break-word}
+/* The live badge says out loud whether this page is still being fed: `live` while the event
+   stream is open, `polling` while the 4 s timer carries it, `offline since HH:MM:SS` once a
+   fetch fails. The seconds-ago text is repainted by a 1 s timer that asks the server nothing. */
+.livebadge{position:fixed;left:12px;bottom:12px;z-index:60;display:flex;gap:6px;align-items:center;max-width:92vw;padding:4px 10px;font-size:11px;border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--muted);box-shadow:0 1px 4px var(--shadow)}
+.livebadge .dot{width:8px;height:8px;border-radius:50%;background:var(--muted);margin:0;flex:0 0 auto}
+.livebadge.is-live{color:var(--ok);border-color:var(--ok)}
+.livebadge.is-live .dot{background:var(--ok);animation:livepulse 2s infinite}
+.livebadge.is-poll{color:var(--warn);border-color:var(--warn)}
+.livebadge.is-poll .dot{background:var(--warn)}
+.livebadge.is-off{color:var(--bad);border-color:var(--bad)}
+.livebadge.is-off .dot{background:var(--bad)}
+@keyframes livepulse{0%{opacity:1}50%{opacity:.3}100%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.livebadge.is-live .dot{animation:none}}
+</style>
+</head>
+<body>
+<div class="top">
+  <h1>Alpaca session analytics</h1>
+  <span class="muted" id="proj"></span>
+  <span class="muted mono" id="gen"></span>
+  <a class="muted" id="cockpit-link" href="/" hidden>Cockpit</a>
+  <button class="themebtn" id="theme-toggle" type="button" style="margin-left:auto" aria-label="Toggle light and dark theme">Theme</button>
+</div>
+<div class="tabs">
+  <button class="tab on" id="tab-a" type="button" aria-controls="view-a">Analytics</button>
+  <button class="tab" id="tab-l" type="button" aria-controls="view-l" hidden>Library</button>
+</div>
+
+<div class="view" id="view-a">
+  <p class="intro">This page reads the chat transcripts: how long each working session ran, how
+  many turns it took, which tools it called, which files it touched and what you typed. The
+  cockpit is the other page, and it reads the record of the work itself, so it answers what is done,
+  what is blocked and what happens next. Come here to see how the work was carried out; open the
+  cockpit to see where it stands.</p>
+  <div class="grid" id="tiles"></div>
+  <div class="layout">
+    <aside class="side"><input id="q" placeholder="search sessions" aria-label="search sessions"><div id="list"></div><div id="probes"></div><div id="svc"></div></aside>
+    <div class="main">
+      <section id="overview"><h2>Project overall</h2><h3>Daily activity (turns)</h3><div class="bars" id="daily"></div><h3>Tools</h3><div class="tbl" id="tools"></div></section>
+      <section id="session" hidden></section>
+    </div>
+  </div>
+</div>
+
+<div class="view" id="view-l" hidden>
+  <div class="layout">
+    <aside class="side"><input id="lq" placeholder="search reports" aria-label="search reports"><div id="llist"></div></aside>
+    <div class="main">
+      <div class="rdhead" id="rdhead"></div>
+      <div class="reader" id="reader"><div class="empty">Pick a report on the left to read it.</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="livebadge" id="livebadge" role="status" aria-live="polite" hidden><span class="dot"></span><span id="livetext">connecting</span></div>
+
+<script id="data" type="application/json">__DATA__</script>
+<script>
+/* ---- theme ----
+   The palette is a token set, so light and dark are one swap. The toggle writes data-theme on
+   the root element and remembers the choice; with nothing remembered the OS preference decides.
+   Storage can be blocked or empty in a private window, so every access is wrapped. */
+(function(){
+  var root=document.documentElement;
+  function save(v){try{localStorage.setItem('alpaca-theme',v)}catch(e){}}
+  function saved(){try{return localStorage.getItem('alpaca-theme')}catch(e){return null}}
+  var was=saved();
+  if(was==='dark'||was==='light'){root.setAttribute('data-theme',was)}
+  var b=document.getElementById('theme-toggle');
+  if(b){b.addEventListener('click',function(){
+    var cur=root.getAttribute('data-theme');
+    var dark=cur==='dark';
+    if(!cur){dark=!!(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)}
+    var next=dark?'light':'dark';
+    root.setAttribute('data-theme',next);
+    save(next);
+  })}
+}());
+var EMB=JSON.parse(document.getElementById('data').textContent);
+var LIVE=(EMB===null);
+var D=EMB||{project:{},daily:[],tools:[],sessions:[]};
+var LIB=[];
+var SEL=null, Q='', LREL=null, LQ='';
+var revData='', revLib='';
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function n(x){return x===null?'unavailable':(x||0).toLocaleString('en-US')}
+function money(x){return x==null?'unavailable':'$'+n(x)}
+function tile(v,l){return '<div class="tile"><b>'+esc(v)+'</b><span>'+esc(l)+'</span></div>'}
+function setHTML(el,html){if(!el)return;if(el.__h===html)return;el.__h=html;el.innerHTML=html}
+function setText(el,t){if(!el)return;if(el.textContent!==t)el.textContent=t}
+
+/* ---- analytics ----
+   The desktop app opens a fresh session every few minutes only to read usage, and those probes
+   used to flood this list. The fold labels each session: `work` is one a person drove, `probe` is
+   one of those usage checks, `service` is an id a tool writes under. Only work sessions are
+   listed; probes are one summary row and service ids are one footer line. A payload written
+   before the labels existed carries none, and then every session reads as work. */
+function klass(s){return String((s&&s['class'])||'work')}
+function workSessions(){
+  return (D.sessions||[]).filter(function(s){return klass(s)==='work'})
+    .sort(function(a,b){return String(b.last||b.first||'').localeCompare(String(a.last||a.first||''))});
+}
+function serviceSessions(){return (D.sessions||[]).filter(function(s){return klass(s)==='service'})}
+function hhmm(t){t=String(t||'');return t.length>=16?t.slice(11,16):(t||'unknown')}
+
+function render(nd){
+  D=nd;var P=D.project||{};
+  var W=workSessions();
+  var pr=D.probes||{};
+  var probes=(P.probe_sessions===undefined||P.probe_sessions===null)?(pr.count||0):P.probe_sessions;
+  setText(document.getElementById('proj'),P.name||'');
+  setText(document.getElementById('gen'),P.generated?('generated '+P.generated):'');
+  setHTML(document.getElementById('tiles'),
+    tile(n(P.sessions===undefined||P.sessions===null?W.length:P.sessions),'working sessions')+tile(n(probes),'usage probes, not listed')+tile(n(P.turns),'assistant turns')+tile(n(P.tool_calls),'tool calls')+tile(n(P.prompts),'human prompts')+tile(n(P.events),'record events')+tile(money(P.cost_reported_usd),'reported cost')+tile(money(P.cost_notional_usd),'unversioned estimate')+tile(n((P.tasks||{}).done),'tasks done')+tile(n((P.ops||{}).open),'ops open'));
+  var mx=Math.max.apply(null,(D.daily||[]).map(function(d){return d.turns}).concat([1]));
+  setHTML(document.getElementById('daily'),(D.daily||[]).map(function(d){return '<div class="bar" style="height:'+Math.max(2,Math.round(76*d.turns/mx))+'px" data-l="'+esc(d.day+': '+d.turns+' turns, '+d.tools+' tools, '+d.sessions+' sessions')+'"></div>'}).join(''));
+  setHTML(document.getElementById('tools'),'<table><tr><th>tool</th><th>calls</th></tr>'+(D.tools||[]).map(function(t){return '<tr><td>'+esc(t.name)+'</td><td class="n">'+n(t.n)+'</td></tr>'}).join('')+'</table>');
+  list(Q);
+  probeRow(pr,probes);
+  serviceRow();
+  if(SEL&&(D.sessions||[]).some(function(x){return x.sid===SEL}))show(SEL,false);
+  else{SEL=null;document.getElementById('session').hidden=true}
+}
+function probeRow(pr,count){
+  var el=document.getElementById('probes');
+  if(!el)return;
+  if(!count){setHTML(el,'');return}
+  setHTML(el,'<div class="sum"><b>'+esc(n(count))+' usage probes</b><div>'+esc(hhmm(pr.first))+' to '+esc(hhmm(pr.last))+' &middot; desktop app usage checks, 1 to 3 s each. Not listed above.</div></div>');
+}
+function serviceRow(){
+  var el=document.getElementById('svc');
+  if(!el)return;
+  var S=serviceSessions();
+  if(!S.length){setHTML(el,'');return}
+  setHTML(el,'<div class="foot">Ids that write without a person behind them: '+S.map(function(s){return esc(s.sid)+' ('+n(((s.record||{}).events)||0)+' events)'}).join(', ')+'</div>');
+}
+function list(f){
+  Q=f||'';var q=Q.toLowerCase();var el=document.getElementById('list');var top=el.scrollTop;
+  var rows=workSessions().filter(function(s){return !q||(s.sid+' '+(s.title||'')+' '+(s.human_prompts||[]).map(function(p){return p.text}).join(' ')).toLowerCase().indexOf(q)>=0}).map(function(s){
+    var sub=Number(s.subagents)||0;
+    return '<div class="s" data-sid="'+esc(s.sid)+'" tabindex="0" role="button"><div class="t">'+esc(s.title||s.sid.slice(0,8))+'</div><div class="m">'+esc(String(s.last||s.first||'').slice(0,16).replace('T',' '))+' &middot; '+n(s.turns)+' turns &middot; '+n(s.tool_calls)+' tools'+(s.record&&s.record.level?' &middot; '+esc(s.record.level):'')+'</div>'+(sub?'<div class="m">'+n(sub)+' subagent'+(sub===1?'':'s')+' under this session</div>':'')+'</div>'}).join('');
+  setHTML(el,rows||'<div class="empty">No working session matches.</div>');
+  el.scrollTop=top;
+  Array.prototype.forEach.call(el.querySelectorAll('.s'),function(e){e.classList.toggle('on',e.getAttribute('data-sid')===SEL)});
+}
+function show(sid,userClick){
+  var s=(D.sessions||[]).filter(function(x){return x.sid===sid})[0];if(!s)return;SEL=sid;
+  var el=document.getElementById('session');el.hidden=false;
+  var tk=s.tokens||{},r=s.record||{};var h=Object.keys(s.hourly||{}).sort();var hm=Math.max.apply(null,h.map(function(k){return s.hourly[k].turns}).concat([1]));
+  var html='<h2>'+esc(s.title||s.sid)+' <span class="mono muted">'+esc(s.sid.slice(0,8))+'</span></h2>'
+  +(s.capture==='explicit-record'?'<p class="muted">Explicit session record. Transcript, token usage, and unreported actions are unavailable.</p>':'')
+  +'<div class="grid">'+tile(n(s.turns),'turns')+tile(n(s.tool_calls),s.capture==='explicit-record'?'reported tool actions':'tool calls')+tile(n((s.human_prompts||[]).length),'prompts')+tile(Math.round((s.span_s||0)/60)+' min','span')+tile(n(tk.output),'output tokens')+tile(money(s.cost_reported_usd),'reported cost')+tile(money(s.cost_notional_usd),'unversioned estimate')+tile(n(r.heartbeats),'heartbeats')+tile(n(r.hook_runtime_ms),'hook runtime ms')+tile(n(r.tasks_moved),'task moves')+'</div>'
+  +'<h3>Hourly (turns)</h3><div class="bars">'+h.map(function(k){var v=s.hourly[k];return '<div class="bar" style="height:'+Math.max(2,Math.round(76*v.turns/hm))+'px" data-l="'+esc(k+': '+v.turns+' turns, '+v.tools+' tools, '+v.prompts+' prompts')+'"></div>'}).join('')+'</div>'
+  +'<h3>Tools</h3><div class="tbl"><table><tr><th>tool</th><th>calls</th></tr>'+Object.keys(s.tools||{}).sort(function(a,b){return s.tools[b]-s.tools[a]}).map(function(k){return '<tr><td>'+esc(k)+'</td><td class="n">'+n(s.tools[k])+'</td></tr>'}).join('')+'</table></div>'
+  +'<h3>Files edited</h3><div class="tbl"><table>'+Object.keys(s.files||{}).map(function(k){return '<tr><td class="mono">'+esc(k)+'</td><td class="n">'+n(s.files[k])+'</td></tr>'}).join('')+'</table></div>'
+  +'<h3>Human prompts ('+(s.human_prompts||[]).length+')</h3>'+(s.human_prompts||[]).map(function(p){return '<div class="prompt"><span class="mono muted">'+esc((p.ts||'').slice(11,16))+(p.queued?' queued':'')+'</span>  '+esc(p.text)+'</div>'}).join('')
+  +'<h3>Record</h3><div class="mono">events '+n(r.events)+' &middot; ops opened '+n(r.ops_opened)+' &middot; ops closed '+n(r.ops_closed)+' &middot; messages '+n(r.msgs)+' &middot; hook runs '+n(r.hook_runs)+' &middot; level '+esc(r.level||'-')+' &middot; last beat '+esc(r.last_beat||'-')+'</div>';
+  setHTML(el,html);
+  Array.prototype.forEach.call(document.querySelectorAll('#list .s'),function(e){e.classList.toggle('on',e.getAttribute('data-sid')===sid)});
+  if(userClick)el.scrollIntoView({block:'start'});
+}
+
+/* ---- library ---- */
+function mdInline(s){
+  s=esc(s);
+  s=s.replace(/`([^`]+)`/g,function(_,c){return '<code>'+c+'</code>'});
+  s=s.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
+  s=s.replace(/\b_([^_]+)_\b/g,'<em>$1</em>');
+  s=s.replace(/\*([^*]+)\*/g,'<em>$1</em>');
+  s=s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g,function(_,t,u){return '<a href="'+esc(u)+'" target="_blank" rel="noopener">'+t+'</a>'});
+  return s;
+}
+function md(src){
+  var L=String(src).replace(/\r\n/g,'\n').split('\n'),out=[],i=0;
+  while(i<L.length){var ln=L[i];
+    if(/^```/.test(ln)){var buf=[];i++;while(i<L.length&&!/^```/.test(L[i])){buf.push(L[i]);i++}i++;out.push('<pre class="cb"><code>'+esc(buf.join('\n'))+'</code></pre>');continue}
+    var hm=ln.match(/^(#{1,6})\s+(.*)$/);if(hm){out.push('<h'+hm[1].length+'>'+mdInline(hm[2])+'</h'+hm[1].length+'>');i++;continue}
+    if(/^\s*([-*_])(\s*\1){2,}\s*$/.test(ln)){out.push('<hr>');i++;continue}
+    if(/^\s*[-*+]\s+/.test(ln)){var it=[];while(i<L.length&&/^\s*[-*+]\s+/.test(L[i])){it.push('<li>'+mdInline(L[i].replace(/^\s*[-*+]\s+/,''))+'</li>');i++}out.push('<ul>'+it.join('')+'</ul>');continue}
+    if(/^\s*\d+\.\s+/.test(ln)){var io=[];while(i<L.length&&/^\s*\d+\.\s+/.test(L[i])){io.push('<li>'+mdInline(L[i].replace(/^\s*\d+\.\s+/,''))+'</li>');i++}out.push('<ol>'+io.join('')+'</ol>');continue}
+    if(/^\s*>\s?/.test(ln)){var q=[];while(i<L.length&&/^\s*>\s?/.test(L[i])){q.push(mdInline(L[i].replace(/^\s*>\s?/,'')));i++}out.push('<blockquote>'+q.join('<br>')+'</blockquote>');continue}
+    if(/^\s*$/.test(ln)){i++;continue}
+    var para=[];while(i<L.length&&!/^\s*$/.test(L[i])&&!/^(#{1,6}\s|```|\s*[-*+]\s|\s*\d+\.\s|\s*>\s)/.test(L[i])){para.push(mdInline(L[i]));i++}out.push('<p>'+para.join('<br>')+'</p>');
+  }
+  return out.join('\n');
+}
+function fmtSize(b){if(b<1024)return b+' B';if(b<1048576)return (b/1024).toFixed(1)+' KB';return (b/1048576).toFixed(1)+' MB'}
+function fmtTime(t){try{return new Date(t*1000).toISOString().slice(0,16).replace('T',' ')}catch(e){return ''}}
+function renderLib(items){
+  LIB=items||[];
+  var q=LQ.toLowerCase();var el=document.getElementById('llist');var top=el.scrollTop;
+  var f=LIB.filter(function(x){return !q||x.rel.toLowerCase().indexOf(q)>=0});
+  var groups={};f.forEach(function(x){(groups[x.dir]=groups[x.dir]||[]).push(x)});
+  var keys=Object.keys(groups).sort();
+  var html=keys.map(function(k){return '<div class="m" style="margin:8px 4px 2px;font-weight:700">'+esc(k)+'/</div>'+groups[k].map(function(x){return '<div class="s" data-rel="'+esc(x.rel)+'" tabindex="0" role="button"><div class="t"><span class="pill '+esc(x.ext)+'">'+esc(x.ext)+'</span> '+esc(x.name)+'</div><div class="m">'+esc(fmtTime(x.mtime))+' &middot; '+esc(fmtSize(x.size))+'</div></div>'}).join('')}).join('');
+  setHTML(el,html||'<div class="empty">No reports yet.</div>');
+  el.scrollTop=top;
+  Array.prototype.forEach.call(el.querySelectorAll('.s'),function(e){e.classList.toggle('on',e.getAttribute('data-rel')===LREL)});
+}
+/* One plain line saying what the open file is, so a reader meets a report knowing what it is
+   and what it stands for before the raw markdown or html. Keyed off the path alone. */
+function reportKind(rel){
+  var r=String(rel||'');
+  if(/(^|\/)proofs\//.test(r))return 'Sealed proof report: the engineer writeup a task carries to close. It records what was done, how, where, the result, any deviations, how to reproduce it, and the evidence list. A sealed report is the only thing that moves a task to done.';
+  if(/RUNBOOK/i.test(r))return 'Runbook: the step-by-step procedure this flow is qualified against.';
+  if(/acceptance/i.test(r))return 'Acceptance spec: the rows a stage must discharge to pass.';
+  if(/\.html$/.test(r))return 'Rendered HTML report.';
+  if(/\.md$/.test(r))return 'Markdown note from the record.';
+  return '';
+}
+function openFile(rel){
+  LREL=rel;var it=LIB.filter(function(x){return x.rel===rel})[0];if(!it)return;
+  Array.prototype.forEach.call(document.querySelectorAll('#llist .s'),function(e){e.classList.toggle('on',e.getAttribute('data-rel')===rel)});
+  var url='/file?path='+encodeURIComponent(rel);
+  var desc=reportKind(rel);
+  document.getElementById('rdhead').innerHTML='<b class="mono">'+esc(rel)+'</b><a class="mono" href="'+url+'" target="_blank" rel="noopener">open raw</a>'+(desc?'<div class="muted" style="flex-basis:100%;font-size:12px">'+esc(desc)+'</div>':'');
+  var rd=document.getElementById('reader');
+  if(it.ext==='html'){rd.__h=null;rd.innerHTML='<iframe sandbox="allow-scripts allow-popups allow-forms" src="'+url+'"></iframe>';return}
+  rd.__h=null;rd.innerHTML='<div class="empty">Loading&hellip;</div>';
+  fetch(url).then(function(r){return r.text()}).then(function(t){rd.innerHTML='<div class="doc">'+md(t)+'</div>'}).catch(function(){rd.innerHTML='<div class="empty">Could not load '+esc(rel)+'</div>'});
+}
+
+/* ---- tabs ---- */
+function tab(which){
+  document.getElementById('tab-a').classList.toggle('on',which==='a');
+  document.getElementById('tab-l').classList.toggle('on',which==='l');
+  document.getElementById('view-a').hidden=(which!=='a');
+  document.getElementById('view-l').hidden=(which!=='l');
+}
+document.getElementById('tab-a').addEventListener('click',function(){tab('a')});
+document.getElementById('tab-l').addEventListener('click',function(){tab('l')});
+
+/* ---- wiring ---- */
+document.getElementById('list').addEventListener('click',function(e){var t=e.target.closest('.s');if(t)show(t.getAttribute('data-sid'),true)});
+document.getElementById('list').addEventListener('keydown',function(e){var t=e.target.closest('.s');if(t&&(e.key==='Enter'||e.key===' ')){e.preventDefault();show(t.getAttribute('data-sid'),true)}});
+document.getElementById('q').addEventListener('input',function(e){list(e.target.value)});
+document.getElementById('llist').addEventListener('click',function(e){var t=e.target.closest('.s');if(t)openFile(t.getAttribute('data-rel'))});
+document.getElementById('llist').addEventListener('keydown',function(e){var t=e.target.closest('.s');if(t&&(e.key==='Enter'||e.key===' ')){e.preventDefault();openFile(t.getAttribute('data-rel'))}});
+document.getElementById('lq').addEventListener('input',function(e){LQ=e.target.value;renderLib(LIB)});
+
+/* ---- live ----
+   Three states and nothing in between. `live`: the event stream is open, and the badge says how
+   long ago the server pushed and when this page last read new data. `polling`: the stream would
+   not open, so a 4 s timer carries the page. `offline since HH:MM:SS`: the last fetch failed, and
+   the page keeps retrying with the wait doubling to a 30 s ceiling. The seconds-ago text is
+   repainted by a 1 s timer that asks the server for nothing, and every timer stops while the tab
+   is out of sight so a forgotten tab is not counted as a viewer. */
+var LIVEON=false,MODE='connecting',LASTPUSH=0,LASTDATA=0,FAILAT=0,RETRYAT=0;
+var BACKOFF=1000,BACKOFF_CAP=30000,badgeTimer=null,retryTimer=null,pollTimer=null;
+function two(v){return (v<10?'0':'')+v}
+function clockText(ms){if(!ms)return 'not yet';var d=new Date(ms);return two(d.getHours())+':'+two(d.getMinutes())+':'+two(d.getSeconds())}
+function ago(ms){if(!ms)return 'not yet';return Math.max(0,Math.round((Date.now()-ms)/1000))+' s ago'}
+function liveState(){if(FAILAT)return 'offline';if(MODE==='streaming')return 'live';if(MODE==='polling')return 'polling';return 'connecting'}
+function paintLive(){
+  if(!LIVEON)return;
+  var box=document.getElementById('livebadge');if(!box)return;
+  var st=liveState(),text='connecting',kind='';
+  if(st==='offline'){kind='is-off';text='offline since '+clockText(FAILAT)+', retry in '+Math.max(0,Math.round((RETRYAT-Date.now())/1000))+' s'}
+  else if(st==='live'){kind='is-live';text='live, server pushed '+ago(LASTPUSH)+', data read '+clockText(LASTDATA)}
+  else if(st==='polling'){kind='is-poll';text='polling every 4 s, data read '+clockText(LASTDATA)}
+  box.hidden=false;
+  box.className='livebadge'+(kind?' '+kind:'');
+  setText(document.getElementById('livetext'),text);
+}
+function tickOn(){if(badgeTimer||document.hidden||!LIVEON)return;badgeTimer=setInterval(paintLive,1000);paintLive()}
+function tickOff(){if(badgeTimer){clearInterval(badgeTimer);badgeTimer=null}if(retryTimer){clearTimeout(retryTimer);retryTimer=null}}
+function fetchWorked(){LASTDATA=Date.now();FAILAT=0;RETRYAT=0;BACKOFF=1000;paintLive()}
+function fetchFailed(){
+  if(!FAILAT)FAILAT=Date.now();
+  if(!retryTimer&&!document.hidden&&LIVEON){
+    RETRYAT=Date.now()+BACKOFF;
+    var wait=BACKOFF;
+    BACKOFF=Math.min(BACKOFF_CAP,BACKOFF*2);
+    retryTimer=setTimeout(function(){retryTimer=null;fetchData()},wait);
+  }
+  paintLive();
+}
+function startPoll(){if(pollTimer)return;MODE='polling';paintLive();if(document.hidden)return;pollTimer=setInterval(function(){fetchData();fetchLib()},4000)}
+function stopPoll(){if(pollTimer){clearInterval(pollTimer);pollTimer=null}MODE='streaming';paintLive()}
+function timersOff(){if(pollTimer){clearInterval(pollTimer);pollTimer=null}tickOff()}
+function timersOn(){if(document.hidden)return;if(MODE==='polling')startPoll();tickOn()}
+function fetchData(){return fetch('/data.json',{cache:'no-cache'}).then(function(r){if(!r.ok)throw new Error('status '+r.status);return r.json()}).then(function(d){render(d);fetchWorked()}).catch(fetchFailed)}
+function fetchLib(){fetch('/library.json').then(function(r){if(!r.ok)throw 0;return r.json()}).then(function(items){document.getElementById('tab-l').hidden=false;renderLib(items);if(location.hash==='#lib'||location.hash==='#library'){tab('l')}}).catch(function(){document.getElementById('tab-l').hidden=true})}
+function sse(){
+  if(!window.EventSource){startPoll();return}
+  var es;try{es=new EventSource('/events')}catch(e){startPoll();return}
+  es.addEventListener('rev',function(ev){LASTPUSH=Date.now();paintLive();var r;try{r=JSON.parse(ev.data)}catch(e){return}
+    if(r.data&&r.data!==revData){revData=r.data;fetchData()}
+    if(r.lib&&r.lib!==revLib){revLib=r.lib;fetchLib()}});
+  es.onopen=function(){LASTPUSH=Date.now();stopPoll()};
+  es.onerror=function(){startPoll()};
+}
+window.addEventListener('pagehide',timersOff);
+document.addEventListener('visibilitychange',function(){if(document.hidden)timersOff();else timersOn()});
+if(LIVE){
+  /* Served by alpaca serve: the cockpit link is absolute. A static copy opened from disk shows no
+     cockpit link (the cockpit needs the server). */
+  var cl=document.getElementById('cockpit-link');if(cl){cl.setAttribute('href','/');cl.hidden=false}
+  LIVEON=true;tickOn();fetchData();fetchLib();sse()
+}
+else{render(EMB);fetchLib()}
+</script>
+</body>
+</html>

@@ -1,0 +1,37 @@
+{
+  "model_id": "verify",
+  "phase": "verify",
+  "artifact_kinds": {
+    "acceptance-table": {"key_column_any_of": ["item", "id"]}
+  },
+  "steps": [
+    {
+      "key": "discharge",
+      "name": "Discharge by instrument",
+      "ordinal": 1,
+      "witness": "docs/spec-shape.md#verify-phase",
+      "consumes": ["acceptance-table"],
+      "obligation": "{item} is discharged by the oracle class it named, with an evidence pointer",
+      "report_back": {
+        "proof": "the verdict row bound to {item} and its content hash",
+        "where": "the record, verdict rows for {item}",
+        "how": "confirm the instrument ran and the evidence pointer resolves",
+        "when": "at verify, before release closes {item}"
+      }
+    },
+    {
+      "key": "no-drift",
+      "name": "Hold the freeze witness",
+      "ordinal": 2,
+      "witness": "docs/spec-shape.md#verify-phase",
+      "consumes": ["acceptance-table"],
+      "obligation": "{item} is proven against the same content hash it was synthesized from",
+      "report_back": {
+        "proof": "the content hash on the verdict row for {item}",
+        "where": "the record, verdict row binds for {item}",
+        "how": "recompute the artifact hash and confirm it matches the frozen witness",
+        "when": "at verify"
+      }
+    }
+  ]
+}

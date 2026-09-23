@@ -1,0 +1,37 @@
+{
+  "model_id": "release",
+  "phase": "release",
+  "artifact_kinds": {
+    "acceptance-table": {"key_column_any_of": ["item", "id"]}
+  },
+  "steps": [
+    {
+      "key": "reconcile",
+      "name": "Reconcile the store",
+      "ordinal": 1,
+      "witness": "docs/spec-shape.md#release-phase",
+      "consumes": ["acceptance-table"],
+      "obligation": "{item} is discharged or waived, with no more rows claimed back than are proven",
+      "report_back": {
+        "proof": "the reconcile report line for {item}",
+        "where": "the record, state reconcile over the row store",
+        "how": "confirm the store status of {item} folds from its verdict rows, not a flipped column",
+        "when": "at release, before the close decision"
+      }
+    },
+    {
+      "key": "countersign",
+      "name": "Record the human close",
+      "ordinal": 2,
+      "witness": "docs/spec-shape.md#release-phase",
+      "consumes": ["acceptance-table"],
+      "obligation": "{item} is covered by a recorded human close decision, never auto-advanced",
+      "report_back": {
+        "proof": "the decision row that closes the op covering {item}",
+        "where": "the record, decision rows for the release op",
+        "how": "confirm a human close decision exists and cites {item} among what it releases",
+        "when": "at release close, the last gate before the op is done"
+      }
+    }
+  ]
+}

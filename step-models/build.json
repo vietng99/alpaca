@@ -1,0 +1,37 @@
+{
+  "model_id": "build",
+  "phase": "build",
+  "artifact_kinds": {
+    "acceptance-table": {"key_column_any_of": ["item", "id"]}
+  },
+  "steps": [
+    {
+      "key": "implement",
+      "name": "Implement to the interface",
+      "ordinal": 1,
+      "witness": "docs/spec-shape.md#build-phase",
+      "consumes": ["acceptance-table"],
+      "obligation": "{item} has an implementation behind the interface fixed for it in design",
+      "report_back": {
+        "proof": "the source file and symbol that implement {item}",
+        "where": "the tree, at the path recorded on the build row for {item}",
+        "how": "confirm the symbol exists and matches the design interface for {item}",
+        "when": "on build, before the verify phase claims {item}"
+      }
+    },
+    {
+      "key": "caller",
+      "name": "Wire an independent caller",
+      "ordinal": 2,
+      "witness": "docs/spec-shape.md#build-phase",
+      "consumes": ["acceptance-table"],
+      "obligation": "{item} is reached by at least one caller that is not its own test",
+      "report_back": {
+        "proof": "the calling site of {item}",
+        "where": "the tree, at the caller path recorded for {item}",
+        "how": "confirm the caller invokes {item} and would fail the wiring audit if removed",
+        "when": "on build"
+      }
+    }
+  ]
+}

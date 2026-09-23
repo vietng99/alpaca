@@ -1,0 +1,51 @@
+{
+  "model_id": "requirement",
+  "phase": "requirement",
+  "artifact_kinds": {
+    "acceptance-table": {"key_column_any_of": ["item", "id"]}
+  },
+  "steps": [
+    {
+      "key": "state",
+      "name": "State the obligation",
+      "ordinal": 1,
+      "witness": "docs/spec-shape.md#acceptance-table",
+      "consumes": ["acceptance-table"],
+      "obligation": "{item} is stated as one testable acceptance obligation, not a wish",
+      "report_back": {
+        "proof": "the acceptance row for {item} in the spec artifact",
+        "where": "the acceptance table of the spec file",
+        "how": "read the statement cell back and confirm it is a single testable claim",
+        "when": "on requirement synthesis, before any design row derives from it"
+      }
+    },
+    {
+      "key": "oracle",
+      "name": "Name the oracle class",
+      "ordinal": 2,
+      "witness": "docs/spec-shape.md#acceptance-table",
+      "consumes": ["acceptance-table"],
+      "obligation": "{item} names an oracle class declared in project.yaml, never an ad-hoc check",
+      "report_back": {
+        "proof": "the oracle-class cell of {item}",
+        "where": "the acceptance table, oracle class column",
+        "how": "match the cell against the taxonomy in project.yaml",
+        "when": "on requirement synthesis"
+      }
+    },
+    {
+      "key": "proof-kind",
+      "name": "Name the proof kind",
+      "ordinal": 3,
+      "witness": "docs/spec-shape.md#acceptance-table",
+      "consumes": ["acceptance-table"],
+      "obligation": "{item} names the proof kind that will discharge it (test, run, review)",
+      "report_back": {
+        "proof": "the proof-kind cell of {item}",
+        "where": "the acceptance table, proof kind column",
+        "how": "confirm the named kind is one the harness can produce an evidence pointer for",
+        "when": "on requirement synthesis"
+      }
+    }
+  ]
+}

@@ -1,0 +1,70 @@
+# Paths the harness owns inside this project root. Anything not listed is the product.
+#
+# Two classes, and the rule they exist for:
+#   [mechanism] = committed with the project and shipped. The harness code, its boot files, its
+#                 contracts, its self-tests (under alpaca/, at alpaca/tests/), pytest.ini and project.yaml.
+#                 A copy or an upgrade refreshes these; they are identical in every copied project.
+#                 setup/ship.py stages exactly this list, so it is also the shipment allowlist.
+#   [memory]    = runtime state, gitignored. The record (.alpaca/), the rendered RESUME.md, the
+#                 analytics/ projection and the local environment. This is one project's own state.
+#
+# The contamination rule: the memory class must never travel to another project. It is this
+# project's own runtime state, which is why a used copy is never the copy source. Copying the
+# harness into an existing repo surfaces every colliding mechanism path to the owner instead of
+# writing over it (see alpaca/manifest.py collisions); the memory class is never a collision and
+# never a copy source.
+#
+# P-001 keeps project.yaml in [mechanism] (human-owned, carries the project id analytics keys on).
+# P-002 moves the self-tests under alpaca/tests/ (so they cannot collide with a product's own tests/)
+# and takes design/ and docs/ out of the mechanism class as whole directories; the operating
+# guides under docs/ are listed one by one below, and design/ stays in the repo as prose only.
+[mechanism]
+.gitignore
+AGENTS.md
+CLAUDE.md
+ALPACA-MANIFEST
+THIRD-PARTY-NOTICES.md
+LICENSE
+README.md
+MANUAL.md
+MAP.md
+requirements.txt
+.claude/settings.json
+.codex/config.toml
+bin/alpaca
+bin/alpaca-python
+alpaca/
+setup/
+contracts/
+style/
+intents/
+pytest.ini
+project.yaml
+agents/
+doctrine/
+formations/
+step-models/
+templates/
+plugin/alpaca/
+skills/
+docs/manual.html
+docs/projection-ruling.md
+docs/spec-shape.md
+docs/operators.md
+docs/operations-hub.md
+docs/observability-operations.md
+docs/workspaces.md
+docs/shipping.md
+docs/DESIGN.md
+[memory]
+.alpaca/
+RESUME.md
+CHECKLIST.md
+analytics/
+board.json
+data.json
+.venv/
+.pytest_cache/
+.claude/settings.local.json
+.claude/worktrees/
+dist/

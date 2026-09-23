@@ -1,0 +1,37 @@
+{
+  "model_id": "design",
+  "phase": "design",
+  "artifact_kinds": {
+    "acceptance-table": {"key_column_any_of": ["item", "id"]}
+  },
+  "steps": [
+    {
+      "key": "approach",
+      "name": "Choose the approach",
+      "ordinal": 1,
+      "witness": "docs/spec-shape.md#design-phase",
+      "consumes": ["acceptance-table"],
+      "obligation": "{item} has a chosen approach recorded on a decision page it can cite",
+      "report_back": {
+        "proof": "the decision-page pointer filled into the why field of {item}",
+        "where": "the row store, why column for {item}",
+        "how": "resolve the pointer and confirm it names {item} and its chosen approach",
+        "when": "at design close, before build derives from {item}"
+      }
+    },
+    {
+      "key": "interface",
+      "name": "Fix the interface",
+      "ordinal": 2,
+      "witness": "docs/spec-shape.md#design-phase",
+      "consumes": ["acceptance-table"],
+      "obligation": "{item} names the interface it lands behind, so a caller can be written to it",
+      "report_back": {
+        "proof": "the interface signature recorded for {item}",
+        "where": "the decision page cited by {item}",
+        "how": "read the signature back and confirm an independent caller could bind to it",
+        "when": "at design close"
+      }
+    }
+  ]
+}

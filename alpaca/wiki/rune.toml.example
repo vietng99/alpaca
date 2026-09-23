@@ -1,0 +1,21 @@
+# Copy to `rune.toml` in your vault dir. All keys optional; shown values are the template defaults.
+
+# --- model seams (see rune2/providers/registry.py) ---
+embedder      = "deterministic"      # -> HashEmbedder; swap for a real CPU sentence embedder
+reranker      = "identity"           # or "lexical"; swap for mxbai-rerank-v2 (0.5B CPU)
+entailer      = "structural"         # swap for the HHEM/MiniCheck/Paladin ensemble
+llm_extractor = "off"                # deterministic-first; keep "off" for an LLM-free build
+
+# --- behaviour ---
+dream_armed   = false                # Dream stays disarmed until proven (ADR-043)
+use_git       = false                # must remain false; ledger and private derived state stay local
+refine_budget = 3                    # DECODE refine iterations before ABSTAIN
+
+# --- deterministic knobs mirrored into the DB `meta` table at pour ---
+[meta]
+embed_dim   = "64"
+ppr_alpha   = "0.15"
+ppr_iters   = "40"
+ppr_epsilon = "1e-6"
+rrf_k       = "60"
+retrieval_profile = "narrow"        # narrow | hybrid | full; Phase-0 selected narrow

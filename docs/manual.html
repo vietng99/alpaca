@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpaca operations</title>
+<style>
+    :root {
+      --bg: #ffffff;
+      --fg: #1a1d21;
+      --muted: #5a636e;
+      --border: #e2e6ea;
+      --card: #f7f9fb;
+      --accent: #1f6feb;
+      --accent-fg: #ffffff;
+      --code-bg: #f2f4f7;
+      --code-fg: #0b2447;
+      --link: #0b5bd3;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+      --bg: #0f1115;
+      --fg: #e6e8eb;
+      --muted: #9aa4b2;
+      --border: #2a2f37;
+      --card: #171b21;
+      --accent: #4a90ff;
+      --accent-fg: #0b1220;
+      --code-bg: #1b2027;
+      --code-fg: #cfe3ff;
+      --link: #7cb0ff;
+      }
+    }
+    :root[data-theme="dark"] {
+      --bg: #0f1115;
+      --fg: #e6e8eb;
+      --muted: #9aa4b2;
+      --border: #2a2f37;
+      --card: #171b21;
+      --accent: #4a90ff;
+      --accent-fg: #0b1220;
+      --code-bg: #1b2027;
+      --code-fg: #cfe3ff;
+      --link: #7cb0ff;
+    }
+    :root[data-theme="light"] {
+      --bg: #ffffff;
+      --fg: #1a1d21;
+      --muted: #5a636e;
+      --border: #e2e6ea;
+      --card: #f7f9fb;
+      --accent: #1f6feb;
+      --accent-fg: #ffffff;
+      --code-bg: #f2f4f7;
+      --code-fg: #0b2447;
+      --link: #0b5bd3;
+    }
+    * { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      padding: 0 16px calc(48px + env(safe-area-inset-bottom, 0px));
+    }
+    .wrap { max-width: 760px; margin: 0 auto; }
+    header.top {
+      position: sticky; top: 0; z-index: 5;
+      background: var(--bg);
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border);
+    }
+    header.top h1 { font-size: 1.15rem; margin: 0; }
+    #theme-toggle {
+      appearance: none; cursor: pointer;
+      background: var(--card); color: var(--fg);
+      border: 1px solid var(--border); border-radius: 8px;
+      padding: 8px 12px; font: inherit; font-size: 0.9rem;
+      min-height: 40px;
+    }
+    #theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    main { padding-top: 8px; }
+    h2 { font-size: 1.3rem; margin: 1.8em 0 0.4em; padding-top: 0.3em; border-top: 1px solid var(--border); }
+    h3 { font-size: 1.08rem; margin: 1.3em 0 0.3em; }
+    p { margin: 0.6em 0; }
+    a { color: var(--link); }
+    ul { margin: 0.5em 0; padding-left: 1.3em; }
+    li { margin: 0.25em 0; }
+    strong { font-weight: 650; }
+    code {
+      background: var(--code-bg); color: var(--code-fg);
+      padding: 0.1em 0.35em; border-radius: 5px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.88em; word-break: break-word;
+    }
+    img { max-width: 100%; height: auto; }
+    pre {
+      max-width: 100%; overflow-x: auto;
+      background: var(--code-bg); color: var(--code-fg);
+      padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border);
+      line-height: 1.45;
+    }
+    pre code { background: none; padding: 0; color: inherit; }
+    .scroll-x { max-width: 100%; overflow-x: auto; }
+    table {
+      max-width: 100%; overflow-x: auto; display: block;
+      border-collapse: collapse; width: auto; margin: 0.6em 0;
+    }
+    th, td { border: 1px solid var(--border); padding: 7px 10px; text-align: left; vertical-align: top; }
+    th { background: var(--card); }
+    footer { margin-top: 2.5em; padding-top: 1em; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.9rem; }
+    @media (prefers-reduced-motion: no-preference) {
+      html { scroll-behavior: smooth; }
+      #theme-toggle { transition: background 120ms ease, border-color 120ms ease; }
+    }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="top">
+<h1>Alpaca operations</h1>
+<button id="theme-toggle" type="button" aria-pressed="false">Dark mode</button>
+</header>
+<main>
+<h1>Alpaca operations</h1>
+<p>The engineering harness. It is ready to use after bootstrap and onboarding. Domain work plugs in as a profile named by the <code>profile:</code> key in <code>project.yaml</code>; the value is a dotted module path importable from the project root, and the profile supplies that domain's stages, acceptance cards, extra verbs and web pages. A project without the key runs the generic harness; <code>alpaca doctor</code> reports a profile that fails to import. Harness verification and a profile's domain acceptance are separate results.</p>
+<h2>Alpaca-specific commands</h2>
+<ul>
+<li><code>alpaca session</code> starts, checkpoints, stops, and ends a Claude Code or Codex session using one shared project-local record. See <code>docs/operators.md</code>.</li>
+</ul>
+<p>Codex lifecycle calls are explicit through AGENTS.md. Claude Code uses native hooks. Tool usage and token counts unavailable from the operator are shown as unavailable, never inferred as measured zero.</p>
+<h1>Alpaca user manual</h1>
+<p><code>alpaca</code> is the one writer of the record (<code>.alpaca/alpaca.db</code>). Every verb below dispatches through that one CLI. Exit codes follow the verdict contract: 0 PASS, 1 FAIL, 2 BLOCKED, 3 PAUSED-FOR-DECISION, 64..67 harness errors. <code>alpaca doctor</code> reports 0 ok, 1 warn, 2 error.</p>
+<p>This chapter is the truth source for the operating surface (<code>alpaca.surface</code>). The front page is the small set of everyday verbs; the rest are reachable but grouped behind it. The surface lint (<code>alpaca.surface.lint</code>) checks this chapter against the live dispatch table, so a verb cannot ship undocumented and this chapter cannot name a verb the CLI does not dispatch.</p>
+<h2>Verbs</h2>
+<h3>Front page (daily use)</h3>
+<p>The everyday operating verbs. Small on purpose.</p>
+<ul>
+<li><code>alpaca status</code> - render the landing pad, or <code>--json</code> for the machine shape (the op index rides on it).</li>
+<li><code>alpaca op</code> - open, list, move and close an op (the unit of work in the record).</li>
+<li><code>alpaca task</code> - add, claim, list and move a task; a task is done only with a sealed proof report.</li>
+<li><code>alpaca board</code> - show the board and move a row between lanes; an expired lease returns its row.</li>
+<li><code>alpaca msg</code> - post and read messages on the board between agents working one op.</li>
+<li><code>alpaca decide</code> - record a decision row, the human-owned choice a level cannot auto-advance.</li>
+<li><code>alpaca ask</code> - post a question that pauses work until it is answered.</li>
+<li><code>alpaca answer</code> - answer an open question and let the paused work resume.</li>
+<li><code>alpaca phase</code> - enter a phase by level, or adjudicate a phase boundary door (<code>enter</code>, <code>gate</code>).</li>
+<li><code>alpaca doctor</code> - check the installation and the record's own consistency; read-only.</li>
+</ul>
+<h3>Setup and adoption</h3>
+<ul>
+<li><code>alpaca init</code> - create the runtime record under <code>.alpaca/</code> in this project root.</li>
+<li><code>alpaca onboard</code> - sense the repository, propose an identity, and seed the record on first contact.</li>
+<li><code>alpaca upgrade</code> - refresh the mechanism paths and leave the memory paths untouched, crash-safe.</li>
+</ul>
+<h3>Maintenance</h3>
+<ul>
+<li><code>alpaca verify</code> - recompute the append-only event chain and report PASS or FAIL.</li>
+<li><code>alpaca retention</code> - apply the declared store retention and compaction policy.</li>
+<li><code>alpaca apply</code> - apply a recorded in-place change with its mandatory snapshot note.</li>
+<li><code>alpaca token</code> - manage a claim token (the live lease a row holds).</li>
+</ul>
+<h3>The record over time</h3>
+<ul>
+<li><code>alpaca day</code> - regenerate the per-project daily digest, a view over the record, never a source.</li>
+<li><code>alpaca proof</code> - the report a task hands in: <code>new</code> scaffolds it, <code>seal</code> hashes it onto the record, <code>check</code> re-hashes it.</li>
+<li><code>alpaca review</code> - list and move the review-card rows a formation produces.</li>
+<li><code>alpaca barrier</code> - the outbound push barrier and the tier rule at the push boundary.</li>
+</ul>
+<h3>Knowledge</h3>
+<ul>
+<li><code>alpaca sort</code> - drain the session and sort notes into their op timelines or the unsorted bucket.</li>
+<li><code>alpaca wiki</code> - the wiki engine verbs; <code>alpaca wiki extract</code> emits a portable vault and nothing writes back.</li>
+</ul>
+<h3>Output and views</h3>
+<ul>
+<li><code>alpaca export</code> - export the record as a static bundle.</li>
+<li><code>alpaca deploy</code> - deploy the read-only page for the owner to read while away.</li>
+<li><code>alpaca serve</code> - serve the read-only page locally.</li>
+<li><code>alpaca analytics</code> - build the analytics projection (<code>analytics/index.html</code>).</li>
+<li><code>alpaca recall</code> - recall a session's record by its id.</li>
+</ul>
+<h3>Style</h3>
+<ul>
+<li><code>alpaca style</code> - the plain-writing ban list: <code>ban</code>, <code>unban</code>, <code>use</code> a preset, or <code>humanize</code> (lint) text.</li>
+</ul>
+<h2>Copy and rename</h2>
+<p>Use the clean archive produced by <code>setup/ship.py</code>. Extract it into a new directory, rename that directory if desired, and run <code>bash setup/bootstrap.sh</code>. The local Python environment is recreated on the destination; any tools a domain profile needs are installed separately. No source-machine paths or runtime state are required.</p>
+<p>Nothing in the tree names the harness folder or bakes in an absolute path, so you can rename the folder or move it and the harness keeps working. The root is discovered by walking up to the directory that holds <code>ALPACA-MANIFEST</code>, the marker that says "this directory is the harness root".</p>
+<p>Two file classes travel differently. The mechanism class (the code, the doctrine, the contracts) is replaced wholesale on an upgrade. The memory class (<code>RESUME.md</code> and the record under <code>.alpaca/</code>) is yours and is never overwritten; <code>alpaca upgrade</code> refreshes the mechanism paths and leaves the memory paths untouched. <code>project.yaml</code> ships as a template with no project identity filled in. Each installation receives a fresh project-local identity in <code>.alpaca/instance.json</code>. Runtime record, resume pad, analytics and tool installations never travel in the clean archive. An in-place upgrade preserves the target's configuration and record.</p>
+<h2>First chat and onboarding</h2>
+<p>On the first session the SessionStart hook prints <code>RESUME.md</code> into the chat. On a generic unconfigured project there is nothing to resume yet, so the first thing to do is onboard.</p>
+<ul>
+<li><code>alpaca onboard</code> senses the repository, proposes an identity, and seeds the record. It writes</li>
+</ul>
+<p><code>project.yaml</code> (the project identity, the default autodrive level, the plain-writing preset choice) and opens the record. It is a sense-then-propose step: it reads the repository and proposes, and you confirm, rather than guessing silently.</p>
+<ul>
+<li><code>alpaca doctor</code> then checks that the installation and the record are consistent. Run it once right</li>
+</ul>
+<p>after onboarding.</p>
+<p>Onboarding asks who is working on the project, what is being worked on, what the open tasks are, and whether to turn on the plain-writing preset. Answer those, run <code>alpaca onboard</code>, then <code>alpaca doctor</code>.</p>
+<h2>Daily use</h2>
+<p>The everyday loop is four surfaces over the one record.</p>
+<ul>
+<li>The landing pad. <code>alpaca status</code> renders the landing pad: the open ops, the open tasks, the last</li>
+</ul>
+<p>event, whether the project is onboarded. <code>alpaca status --json</code> prints the same shape for a machine; the op index rides on it. The rendered pad also lands in <code>RESUME.md</code>, which the SessionStart hook prints when a session opens or resumes. <code>RESUME.md</code> is a projection of the record, never a source you hand-edit.</p>
+<ul>
+<li>The board. <code>alpaca board</code> shows the board and moves a row between lanes. When a claim lease expires,</li>
+</ul>
+<p>the row returns to the board on its own, so no work is stranded under a lease that went stale.</p>
+<ul>
+<li>The verbs. <code>alpaca op</code> opens, lists and closes an op (the unit of work). <code>alpaca task</code> adds, claims and</li>
+</ul>
+<p>moves a task; a task is done only with a sealed proof report, so the closing move is <code>alpaca proof new &lt;id&gt;</code>, write the report, <code>alpaca proof seal &lt;id&gt;</code>, then <code>alpaca task move &lt;id&gt; done --proof local:&lt;report&gt;</code>. <code>alpaca msg</code> posts and reads messages between agents working one op. <code>alpaca decide</code> records a decision the level cannot auto-advance. <code>alpaca ask</code> and <code>alpaca answer</code> bank and clear a question that pauses work until it is answered. <code>alpaca phase</code> enters a phase or adjudicates a phase boundary door.</p>
+<ul>
+<li>Resume. When you come back to a project, read the pad first. Do not race ahead of it: <code>alpaca status</code></li>
+</ul>
+<p>tells you the open work and the last event, and the record is the truth behind both. Pick up the first open task, claim it, and move it when its proof exists.</p>
+<h2>The autodrive levels and what each one asks of you</h2>
+<p>Autonomy is one ladder of named rungs from attended to pre-authorised. The level in force is a recorded decision every gate reads. You may drop to a safer rung at any time; you never raise your own. A raise is one human decision. The project-local session command sets the level; the reason the ladder exists lives in <code>doctrine/leaves/autodrive-levels.md</code>, and the band is enforced by <code>alpaca/posture/level.py</code>. A fresh install runs at L2.</p>
+<div class="scroll-x"><table><thead><tr><th>Level</th><th>Name</th><th>What it asks of you</th></tr></thead><tbody><tr><td>L1</td><td>Assist</td><td>The agent investigates and hands over ready-to-run changes; it writes nothing itself. You apply every change.</td></tr><tr><td>L2</td><td>Partial</td><td>The agent makes single bounded edits, one at a time, and confirms each. You approve each edit.</td></tr><tr><td>L3</td><td>Conditional</td><td>The agent runs a task end to end but hands control back at every fork or irreversible step. You decide at the forks.</td></tr><tr><td>L4</td><td>High</td><td>The agent is autonomous inside one declared scope and self-verifies; it stops at the scope edge or a hard blocker. You set the scope.</td></tr><tr><td>L5</td><td>Full</td><td>The agent plans and runs the whole task, routes around a wall, and surfaces what it could not finish once at the end. You read the end report.</td></tr><tr><td>L6</td><td>Never-defer</td><td>The agent pursues the goal without deferring mid-run; it stops only when the goal marker is written or you stop it. You set the goal and can stop it.</td></tr></tbody></table></div>
+<p>Ship, release close, and irreversible external actions stay human decisions at every level.</p>
+<h2>Formations and when to call one</h2>
+<p>A formation is a shape for the work: how many agents, who checks whom. The manifests live under <code>formations/</code>.</p>
+<ul>
+<li><code>formations/solo.md</code> - one agent, the default for a bounded task.</li>
+<li><code>formations/builder-verifier.md</code> - one builds, a second verifies, when a change needs an</li>
+</ul>
+<p>independent check.</p>
+<ul>
+<li><code>formations/fan-out.md</code> - several agents on independent rows of one op, when the work parallelises.</li>
+<li><code>formations/bug-loop.md</code> - a reproduce-fix-verify loop, when chasing a defect.</li>
+<li><code>formations/nuclear.md</code> - the depth-first adversarial audit and fix, for a narrow high-stakes call.</li>
+<li><code>formations/napalm.md</code> - the breadth-first sweep, for a wide surface at lower stakes.</li>
+</ul>
+<p>Reach for a formation when the shape of the work needs more than one pair of hands or an independent check; stay solo when it does not.</p>
+<h2>The analytics file</h2>
+<p><code>alpaca analytics</code> builds one HTML file per project, <code>analytics/index.html</code>, from the record. Open it to see what the project's sessions did, overall and per session. It is a projection: it is rebuilt from the record and is never a source you edit. Externally sourced values are neutralised before they enter the page, so a hostile value in a name or a message cannot inject live markup, and the file is pure ASCII so it reads on a phone. <code>alpaca export</code>, <code>alpaca deploy</code> and <code>alpaca serve</code> package and serve the same read-only view.</p>
+<h2>The cockpit</h2>
+<p><code>alpaca serve</code> serves the workspace hub at the root address it prints at start; its Alpaca tile opens the cockpit at <code>/hub/</code>. When a web login is configured (the files-auth file under <code>.alpaca/</code>, or <code>ALPACA_FILES_AUTH</code>), every page first shows the sign-in page, and a correct access code sets a 12-hour session cookie. The cockpit reads the seven keys of <code>data.json</code>, served live beside it, and nothing else from the record: every obligation row grouped by acceptance item with its state, the observed value, the instrument and the proof pointer; the latest verdict of every gate; the recent gate runs; and the latest record events. It refreshes while it is open. The analytics page stays a view of sessions; the cockpit is where you read the status of the work. The classic status board page is retired, and its old addresses (/board/ and /board.html) redirect to the cockpit.</p>
+<h2>Troubleshooting with alpaca doctor</h2>
+<p><code>alpaca doctor</code> is the first stop when something looks wrong. It is read-only: it never changes the record. It checks the installation and the record's own consistency - a pad naming an op that does not exist, a cursor that resolves to nothing, an op marked live whose cursor has not advanced, an expired authority still being cited, an unresolved collision, a store over its retention ceiling - and reports each with a pointer. Its exit codes are 0 ok, 1 warn, 2 error. <code>alpaca verify</code> recomputes the append-only event chain and reports PASS or FAIL when you suspect the record itself.</p>
+<h2>The hooks</h2>
+<p>The harness registers a set of hooks in <code>.claude/settings.json</code>. Each one is a small module under <code>alpaca/hooks/</code> that the harness runs at a point in the session. Every hook is fail-open: any error is swallowed and the session continues.</p>
+<div class="scroll-x"><table><thead><tr><th>Event</th><th>Module</th><th>What it does</th></tr></thead><tbody><tr><td>SessionStart</td><td><code>alpaca.hooks.session_start</code></td><td>Prints <code>RESUME.md</code> and the router into the chat when a session opens or resumes.</td></tr><tr><td>UserPromptSubmit</td><td><code>alpaca.hooks.user_prompt</code></td><td>Re-arms the level contract and the plain-writing reminder on a cadence.</td></tr><tr><td>PreToolUse</td><td><code>alpaca.hooks.pre_tool</code></td><td>Writes the tool name and the whole tool input to the capture pool. Prints nothing, so it never blocks a call.</td></tr><tr><td>PostToolUse</td><td><code>alpaca.hooks.post_tool</code></td><td>Records a heartbeat of tool activity against the right project, and the whole call and its response to the pool.</td></tr><tr><td>Stop</td><td><code>alpaca.hooks.stop</code></td><td>Runs the plain-writing lint over the turn before it lands, and keeps the local transcript copy current.</td></tr><tr><td>SubagentStop</td><td><code>alpaca.hooks.subagent_stop</code></td><td>Records that a subagent finished and copies its transcript into the project.</td></tr><tr><td>SessionEnd</td><td><code>alpaca.hooks.session_end</code></td><td>Drains the session into the record, snapshots the transcript and rebuilds the projections.</td></tr><tr><td>PreCompact</td><td><code>alpaca.hooks.pre_compact</code></td><td>Snapshots the working context before the transcript is compacted.</td></tr></tbody></table></div>
+<h2>The rules that survive</h2>
+<p>These hold in every session, at every level.</p>
+<ul>
+<li>The record is the only truth. <code>.alpaca/alpaca.db</code> is the source; <code>RESUME.md</code>, <code>analytics/index.html</code>,</li>
+</ul>
+<p><code>board.json</code> and <code>data.json</code> are projections, rendered and never hand-edited.</p>
+<ul>
+<li>The record is append-only, with a hash chain <code>alpaca verify</code> recomputes. <code>alpaca</code> is the sole writer.</li>
+<li>A task is done only with a sealed proof report: <code>alpaca proof new</code>, write it, <code>alpaca proof seal</code>,</li>
+</ul>
+<p>then <code>--proof local:&lt;report&gt;</code>. No sealed report, not done.</p>
+<ul>
+<li>Every claim carries a pointer to a file, a command output, or a record row.</li>
+<li>Ship and irreversible external actions are human decisions at every autodrive level.</li>
+<li>Never leave the project root, and never hand-edit a projection.</li>
+<li>The authority surface (<code>contracts/</code>, <code>project.yaml</code>, <code>doctrine/</code>, the boot block in <code>CLAUDE.md</code>)</li>
+</ul>
+<p>is human-owned; below L5 an agent write there is a review card.</p>
+<h2>This manual and its gate</h2>
+<p>This file is <code>MANUAL.md</code>. <code>setup/build_manual_html.py</code> renders it into <code>docs/manual.html</code>, a phone-safe page you can open over a file link. The manual gate checks that every command, path, verb, hook and file named here resolves in the shipped tree, that <code>docs/manual.html</code> is pure ASCII and parses, and that the page carries the charset and viewport metas and both theme blocks. A release candidate whose manual gate fails does not package. <code>setup/boot-check.py</code> composes the gate with the rest of the instruments. The boot read-order and the router live in <code>MAP.md</code>, and the work an op opens from lives in <code>intents/queue.md</code>.</p>
+<h2>Durable observability and recovery</h2>
+<ul>
+<li><code>alpaca collect</code> registers expected sources, ingests bounded batches, runs independent</li>
+</ul>
+<p>projection consumers, and reports coverage, cursor backlog and retry state. <code>collect once</code> is a bounded repair pass; <code>collect watch --interval 15</code> is the supervised service. <code>collect enable</code> moves expensive native-hook snapshots and wiki/export work to that service.</p>
+<ul>
+<li><code>alpaca artifact</code> preserves approved result bytes, catalogs older archive availability,</li>
+</ul>
+<p>pins evidence, and previews retention. <code>artifact retention-dry-run</code> never deletes bytes.</p>
+<ul>
+<li><code>alpaca backup</code> creates and verifies coordinated SQLite snapshots plus replayable files,</li>
+</ul>
+<p>reports recorded verification, and restores only into an empty isolated destination. A structurally valid backup can still contain explicitly declared historical evidence gaps.</p>
+<ul>
+<li><code>alpaca workspace</code> registers this instance in the host workspace registry (<code>add</code>, <code>list</code>,</li>
+</ul>
+<p><code>remove</code>) and renders one combined cloudflared config for every registered hostname (<code>render-ingress</code>), which the owner applies. See <code>docs/workspaces.md</code> for the pathway from a local root to a cockpit on localhost and on a public hostname.</p>
+<p>See <code>docs/observability-operations.md</code> for collection contracts, service setup, failure recovery, retention budgets and the restore rehearsal. The optional project SQLite runtime is described in <code>setup/sqlite-runtime.md</code>. Raw native reasoning is excluded from new analytical capture.</p>
+</main>
+<footer>
+<p>Rendered from MANUAL.md by setup/build_manual_html.py. This page is pure ASCII, so it reads on a phone over a file link even when the browser ignores the charset.</p>
+</footer>
+</div>
+<script>
+(function () {
+  var root = document.documentElement;
+  var KEY = "alpaca-manual-theme";
+  var btn = document.getElementById("theme-toggle");
+  function stored() {
+    try { return window.localStorage.getItem(KEY); } catch (e) { return null; }
+  }
+  function save(v) {
+    try { window.localStorage.setItem(KEY, v); } catch (e) {}
+  }
+  function systemDark() {
+    try { return window.matchMedia("(prefers-color-scheme: dark)").matches; } catch (e) { return false; }
+  }
+  function current() {
+    var a = root.getAttribute("data-theme");
+    if (a === "dark" || a === "light") { return a; }
+    return systemDark() ? "dark" : "light";
+  }
+  function apply(v) {
+    root.setAttribute("data-theme", v);
+    if (btn) {
+      btn.setAttribute("aria-pressed", v === "dark" ? "true" : "false");
+      btn.textContent = v === "dark" ? "Light mode" : "Dark mode";
+    }
+  }
+  var s = stored();
+  if (s === "dark" || s === "light") { apply(s); } else { apply(current()); }
+  if (btn) {
+    btn.addEventListener("click", function () {
+      var next = current() === "dark" ? "light" : "dark";
+      apply(next); save(next);
+    });
+  }
+})();
+</script>
+</body>
+</html>

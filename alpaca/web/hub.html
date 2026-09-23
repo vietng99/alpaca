@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<script src="/hub/assets/theme.js"></script>
+<title>Alpaca | Operations</title>
+<link rel="stylesheet" href="/hub/assets/hub.css">
+<link rel="stylesheet" href="/hub/assets/analytics.css">
+<link rel="stylesheet" href="/hub/assets/cockpit.css">
+<link rel="stylesheet" href="/hub/assets/runlog.css">
+<link rel="stylesheet" href="/hub/assets/live.css">
+<link rel="stylesheet" href="/hub/assets/theme.css">
+<script type="module" src="/hub/assets/hub.js"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<aside class="sidebar" id="sidebar" aria-label="Workspace navigation">
+<a class="brand" href="#cockpit"><span class="brand-symbol">S</span><span>Alpaca<small>Operations workspace</small></span></a>
+<div class="workspace"><span class="workspace-icon">VS</span><span id="project-name">Alpaca</span><span class="workspace-dot"></span></div>
+<button class="search-launch" id="search-launch"><span data-icon="search"></span><span>Find anything</span><kbd>Ctrl K</kbd></button>
+<p class="nav-label">WORKSPACE</p><nav id="navigation"></nav>
+<div class="sidebar-bottom"><a class="hub-back" href="/" title="Back to the workspace hub">&larr; All workspaces</a><a class="hub-back" href="/logout" title="Sign out of the web session">Sign out</a><div class="connection" id="connection"><i></i><span>Connecting to record</span></div><small>Evidence before completion.</small></div>
+</aside>
+<div class="app-shell"><header class="topbar"><div class="breadcrumb"><button id="menu" class="icon-button mobile-only" aria-label="Open navigation" aria-expanded="false"><span data-icon="menu"></span></button><span class="crumb-project">Workspace</span><span class="crumb-slash">/</span><strong id="crumb">Overview</strong></div><div class="top-actions"><button type="button" class="theme-switch" data-theme-control role="switch" aria-checked="false" aria-label="Dark theme" title="Switch to dark theme"><span class="ts-track" aria-hidden="true"><svg class="ts-hint ts-hint-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg><svg class="ts-hint ts-hint-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.2 14.6A8.4 8.4 0 0 1 9.4 3.8a8.4 8.4 0 1 0 10.8 10.8z"/></svg><span class="ts-thumb"><svg class="ts-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg><svg class="ts-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.2 14.6A8.4 8.4 0 0 1 9.4 3.8a8.4 8.4 0 1 0 10.8 10.8z"/></svg></span></span></button><span id="checked-at" class="muted"></span><button id="refresh" class="icon-button" aria-label="Refresh current view"><span data-icon="refresh"></span></button><span class="avatar" title="Shared engineering workspace">VS</span></div></header><main id="main" tabindex="-1"><div class="loading"><span class="spinner"></span>Loading the project record...</div></main><footer class="app-footer"><span>Alpaca operations</span><span>Work. Context. Evidence.</span></footer></div>
+<dialog id="inspector" aria-labelledby="inspector-title"><div class="dialog-head"><span class="eyebrow" id="inspector-label">DETAIL</span><button class="icon-button" data-close="inspector" aria-label="Close detail"><span data-icon="close"></span></button></div><div id="inspector-content"></div></dialog>
+<dialog id="command" aria-label="Search workspace"><div class="command-input"><span data-icon="search"></span><input id="command-query" type="search" placeholder="Find a page, work item, or report..." aria-label="Search workspace"><button class="icon-button" data-close="command" aria-label="Close search">Esc</button></div><div id="command-results"></div></dialog>
+<div id="toast" role="status" aria-live="polite"></div>
+</body></html>

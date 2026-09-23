@@ -1,0 +1,67 @@
+# Sample project.yaml for the M1 acceptance test (tests/test_acceptance_m1.py).
+#
+# This is a schema-complete config for the tiny "greet CLI" sample: it passes
+# alpaca/project_schema.validate and declares exactly the oracle classes the sample SPEC.md
+# uses (unit, integration, behavioral, review), so the fidelity instrument (M1.12) reads
+# a real taxonomy rather than a vacuous one. Everything here is DATA (spec:245-247); the
+# schema only checks presence and shape, never a particular member. Pure ASCII, no em dash.
+name: sample-greet
+project_id: 5a3e0c11d2f4
+what: a tiny greet CLI used only as the M1 acceptance sample
+people:
+- name: alex
+  role: owner
+tier: public
+existing_repo: false
+phases:
+  default:
+  - requirement
+  - design
+  - build
+  - verify
+  - release
+commands:
+  # build/test/lint/run are the required seam commands (spec 5.11, project_schema). Kept
+  # colon-free so this plain-scalar YAML parses without quoting gymnastics.
+  build: python3 -m compileall -q .
+  test: python3 -m pytest
+  lint: python3 -c "import sys; sys.exit(0)"
+  run: python3 -c "print('greeting hello')"
+paths:
+  # where the product lives, where its acceptance artifacts live, where the spec lives.
+  product_tree: .
+  artifacts: docs
+  spec_dir: .
+oracle_classes:
+  # the oracle taxonomy the sample SPEC.md uses. The fidelity instrument refuses an item
+  # consumed by a class absent from this list, so this list is load-bearing for the test.
+  - unit
+  - integration
+  - behavioral
+  - review
+forbidden_literals: []
+resource_class: small
+boundary_rules:
+  root_only: true
+  no_tmp_root: true
+  realpath_containment: true
+  atomic_writes: temp-then-rename
+non_adoptions:
+  why: the runtime is Claude Code sessions, hooks, skills and the Workflow tool; this list
+    is data the proportionality tripwire reads and never carries in code.
+  forbidden:
+  - langchain
+  - langgraph
+  - celery
+fingerprint:
+  # the seam signature command and its frozen expected value (halt-on-drift).
+  command: python3 -c "print('ok')"
+  expected: ok
+skin:
+  # one worked generic adapter: the mapping from this project's artifact shape to a step
+  # model and a register. The domain-specific instance is out of scope for M1-M4.
+  adapters:
+  - artifact_shape: acceptance-table
+    key_column: item
+    step_model: step-models/requirement.json
+    register: req_key

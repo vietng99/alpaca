@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "alpaca",
+  "version": "1.0.0",
+  "description": "Optional Alpaca operating and writing skills with bundled local helpers for Claude Code and Codex.",
+  "author": {
+    "name": "Alpaca"
+  },
+  "skills": [
+    "./skills",
+    "./skills/caveman/skills",
+    "./skills/eli5/skills",
+    "./skills/i-have-adhd/skills"
+  ]
+}

@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark" data-theme-key="alpaca.hub-theme">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="noindex, nofollow">
+<title>Alpaca Hub</title>
+<link rel="stylesheet" href="/login/assets/vault.css">
+<script src="/login/assets/vault.js" defer></script>
+</head>
+<body data-page="hub">
+<div class="screen scroll">
+  <div class="corner">
+    <button type="button" class="chip-btn" data-vault-theme aria-label="Toggle color theme">Theme</button>
+    <button type="button" class="chip-btn" id="signout" aria-label="Sign out">Sign out</button>
+  </div>
+  <main class="hub">
+    <div class="brand">
+      <div class="wordmark"><span class="wmAccent">Alpaca</span> Hub</div>
+      <div class="brandSub"><span id="count">Loading workspaces</span></div>
+    </div>
+    <h1 class="hub-title">Select a workspace</h1>
+    <p class="hub-sub">Each tile is one project's cockpit, with a live summary read from its record.</p>
+    <div class="grid" id="grid" aria-live="polite"></div>
+  </main>
+</div>
+</body>
+</html>

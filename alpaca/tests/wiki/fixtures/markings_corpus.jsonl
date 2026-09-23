@@ -1,0 +1,36 @@
+{"id": "us-noforn", "lang": "en", "category": "gov", "text": "SECRET//NOFORN\nThis assessment addresses regional force posture.", "expect_trip": true, "expect_tier": 1}
+{"id": "us-sci-slash", "lang": "en", "category": "gov", "text": "TOP SECRET//SI//TK\nCompartmented reporting follows.", "expect_trip": true, "expect_tier": 1}
+{"id": "us-orcon", "lang": "en", "category": "gov", "text": "SECRET//ORCON//NOFORN\nOriginator controlled.", "expect_trip": true, "expect_tier": 1}
+{"id": "us-sap", "lang": "en", "category": "defense", "text": "SPECIAL ACCESS REQUIRED\nProgram nickname BLUEBIRD.", "expect_trip": true, "expect_tier": 1}
+{"id": "us-nato", "lang": "en", "category": "gov", "text": "NATO SECRET\nAlliance distribution only.", "expect_trip": true, "expect_tier": 1}
+{"id": "us-cui-specified", "lang": "en", "category": "gov", "text": "CUI//SP-PRVCY\nControlled unclassified information.", "expect_trip": true, "expect_tier": 1}
+{"id": "us-authority-block", "lang": "en", "category": "gov", "text": "Program summary.\nClassified By: J. Doe, Director\nDeclassify On: 2045-01-01", "expect_trip": true, "expect_tier": 1}
+{"id": "us-eyes-only", "lang": "en", "category": "gov", "text": "US EYES ONLY\nDo not release.", "expect_trip": true, "expect_tier": 1}
+{"id": "export-dcs", "lang": "en", "category": "itar", "text": "These commodities, technology, or software were exported from the United States in accordance with the Export Administration Regulations.", "expect_trip": true, "expect_tier": 1}
+{"id": "export-cfr", "lang": "en", "category": "itar", "text": "This technical data is controlled under 22 CFR 121 of the ITAR.", "expect_trip": true, "expect_tier": 1}
+{"id": "export-phrase", "lang": "en", "category": "itar", "text": "This item is subject to U.S. export control laws and regulations.", "expect_trip": true, "expect_tier": 1}
+{"id": "export-two-token", "lang": "en", "category": "itar", "text": "The design is ITAR-controlled; see USML Category IV for the munitions listing.", "expect_trip": true, "expect_tier": 2}
+{"id": "us-portion-marks", "lang": "en", "category": "gov", "text": "(S) The first paragraph is classified.\n(TS) The second paragraph is more sensitive.", "expect_trip": true, "expect_tier": 2}
+{"id": "vn-tuyet-mat", "lang": "vi", "category": "gov", "text": "TUYỆT MẬT\nTài liệu về kế hoạch quốc phòng.", "expect_trip": true, "expect_tier": 1}
+{"id": "vn-toi-mat", "lang": "vi", "category": "gov", "text": "TỐI MẬT\nBáo cáo nội bộ của cơ quan.", "expect_trip": true, "expect_tier": 1}
+{"id": "vn-dau-a", "lang": "vi", "category": "gov", "text": "Dấu A\nTài liệu mật quốc gia.", "expect_trip": true, "expect_tier": 1}
+{"id": "vn-mat-anchored", "lang": "vi", "category": "gov", "text": "MẬT\nTài liệu này thuộc bí mật nhà nước theo Luật Bảo vệ bí mật nhà nước.", "expect_trip": true, "expect_tier": 2}
+{"id": "cn-juemi", "lang": "zh", "category": "gov", "text": "绝密\n本文件涉及国家安全。", "expect_trip": true, "expect_tier": 1}
+{"id": "ru-sekretno", "lang": "ru", "category": "gov", "text": "СЕКРЕТНО\nДокумент ограниченного доступа.", "expect_trip": true, "expect_tier": 1}
+{"id": "evasion-zerowidth", "lang": "en", "category": "evasion", "text": "SECRET//NO​FORN\nInserted a zero-width space to dodge the scanner.", "expect_trip": true, "expect_tier": 1}
+{"id": "evasion-homoglyph", "lang": "en", "category": "evasion", "text": "SECRET//NOFОRN\nThe fourth letter is a Cyrillic homoglyph.", "expect_trip": true, "expect_tier": 1}
+{"id": "evasion-spaced", "lang": "en", "category": "evasion", "text": "SECRET\nDissemination: N O F O R N", "expect_trip": true, "expect_tier": 1}
+{"id": "corp-confidential", "lang": "en", "category": "corporate", "text": "Confidential\nThis proposal is confidential and for internal discussion only.", "expect_trip": false, "expect_tier": null}
+{"id": "corp-company-confidential", "lang": "en", "category": "corporate", "text": "Company Confidential - Internal Use Only\nQ3 revenue projections.", "expect_trip": false, "expect_tier": null}
+{"id": "corp-proprietary", "lang": "en", "category": "corporate", "text": "Proprietary and Confidential\nContains trade secret material of Acme Corp.", "expect_trip": false, "expect_tier": null}
+{"id": "corp-nda", "lang": "en", "category": "corporate", "text": "Disclosure is subject to the NDA executed on 2024-03-01.", "expect_trip": false, "expect_tier": null}
+{"id": "corp-attorney", "lang": "en", "category": "corporate", "text": "Attorney-Client Privileged\nAttorney Work Product prepared in anticipation of litigation.", "expect_trip": false, "expect_tier": null}
+{"id": "corp-copyright", "lang": "en", "category": "corporate", "text": "(C) 2024 Acme Corp. All rights reserved.", "expect_trip": false, "expect_tier": null}
+{"id": "corp-banner-suppressed", "lang": "en", "category": "corporate", "text": "CONFIDENTIAL\nQ3 board deck - do not forward.\nCONFIDENTIAL\nCompany Confidential and Proprietary.", "expect_trip": false, "expect_tier": null}
+{"id": "ear99-uncontrolled", "lang": "en", "category": "export-benign", "text": "Export classification determination: EAR99, no license required.", "expect_trip": false, "expect_tier": null}
+{"id": "itar-bare-single", "lang": "en", "category": "export-benign", "text": "The team completed its annual ITAR compliance training last quarter.", "expect_trip": false, "expect_tier": null}
+{"id": "bare-secret-banner", "lang": "en", "category": "benign", "text": "SECRET\nNo control markings, portion marks, or authority block accompany this word.", "expect_trip": false, "expect_tier": null}
+{"id": "en-word-secret", "lang": "en", "category": "benign", "text": "The secret to good bread is a long, cold fermentation.", "expect_trip": false, "expect_tier": null}
+{"id": "vn-toi-mat-benign", "lang": "vi", "category": "benign", "text": "Tôi mất chìa khóa nhà ở đâu đó trên đường về.", "expect_trip": false, "expect_tier": null}
+{"id": "vn-mat-ong-benign", "lang": "vi", "category": "benign", "text": "Mật ong rừng nguyên chất có độ đặc cao và màu vàng sẫm.", "expect_trip": false, "expect_tier": null}
+{"id": "vn-mat-no-anchor", "lang": "vi", "category": "benign", "text": "Nhà tôi trồng nhiều cây mật gấu trong vườn sau.", "expect_trip": false, "expect_tier": null}

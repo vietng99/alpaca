@@ -1,0 +1,3 @@
+# Open Codex in this trusted project directory. No global configuration is changed.
+# Alpaca itself registers no project MCP server; a project that needs one adds its
+# [mcp_servers.<name>] table here.

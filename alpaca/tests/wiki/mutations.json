@@ -1,0 +1,136 @@
+[
+  {
+    "mechanism_id": "lint.edge-source-block-unresolvable",
+    "file": "alpaca/wiki/lint.py",
+    "find": "    rule_edge_source_block_unresolvable,\n",
+    "replace": "",
+    "flips_test": "alpaca.tests.wiki.test_lint.TestLintRules.test_edge_source_block_unresolvable",
+    "expect": "fail"
+  },
+  {
+    "mechanism_id": "lint.edge-endpoint-node-missing",
+    "file": "alpaca/wiki/lint.py",
+    "find": "    rule_edge_endpoint_node_missing,\n",
+    "replace": "",
+    "flips_test": "alpaca.tests.wiki.test_lint.TestLintRules.test_edge_endpoint_node_missing",
+    "expect": "fail"
+  },
+  {
+    "mechanism_id": "lint.dangling-source-doc",
+    "file": "alpaca/wiki/lint.py",
+    "find": "    rule_dangling_source_doc,\n",
+    "replace": "",
+    "flips_test": "alpaca.tests.wiki.test_lint.TestLintRules.test_dangling_source_doc",
+    "expect": "fail"
+  },
+  {
+    "mechanism_id": "lint.dangling-sources",
+    "file": "alpaca/wiki/lint.py",
+    "find": "    rule_node_block_source_dangling,\n",
+    "replace": "",
+    "flips_test": "alpaca.tests.wiki.test_lint.TestLintRules.test_dangling_sources_node_block",
+    "expect": "fail"
+  },
+  {
+    "mechanism_id": "lint.alias-multi-canonical",
+    "file": "alpaca/wiki/lint.py",
+    "find": "    rule_alias_multi_canonical,\n",
+    "replace": "",
+    "flips_test": "alpaca.tests.wiki.test_lint.TestLintRules.test_alias_multi_canonical",
+    "expect": "fail",
+    "control_green": [
+      "alpaca.tests.wiki.test_lint.TestLintRules.test_alias_multi_canonical_excused_by_merge_candidate"
+    ]
+  },
+  {
+    "mechanism_id": "lint.wikilink-no-node",
+    "file": "alpaca/wiki/lint.py",
+    "find": "    rule_wikilink_no_node,\n",
+    "replace": "",
+    "flips_test": "alpaca.tests.wiki.test_lint.TestLintRules.test_wikilink_no_node",
+    "expect": "fail"
+  },
+  {
+    "mechanism_id": "lint.enum-violation",
+    "file": "alpaca/wiki/lint.py",
+    "find": "    rule_enum_domain_violations,\n",
+    "replace": "",
+    "flips_test": "alpaca.tests.wiki.test_lint.TestLintRules.test_enum_violation",
+    "expect": "fail"
+  },
+  {
+    "mechanism_id": "lint.edge-tier-vs-page-band",
+    "file": "alpaca/wiki/lint.py",
+    "find": "    rule_edge_tier_vs_page_band,\n",
+    "replace": "",
+    "flips_test": "alpaca.tests.wiki.test_lint.TestLintRules.test_edge_tier_vs_page_band",
+    "expect": "fail"
+  },
+  {
+    "mechanism_id": "lint.raw-doc-no-ingest-event",
+    "file": "alpaca/wiki/lint.py",
+    "find": "    rule_raw_doc_no_ingest_event,\n",
+    "replace": "",
+    "flips_test": "alpaca.tests.wiki.test_lint.TestLintRules.test_raw_doc_no_ingest_event",
+    "expect": "fail"
+  },
+  {
+    "mechanism_id": "lint.stamp-coverage",
+    "file": "alpaca/wiki/lint.py",
+    "find": "    rule_stamp_coverage,\n",
+    "replace": "",
+    "flips_test": "alpaca.tests.wiki.test_lint.TestLintRules.test_stamp_coverage",
+    "expect": "fail"
+  },
+  {
+    "mechanism_id": "lint.block-missing-content-id",
+    "file": "alpaca/wiki/lint.py",
+    "find": "    rule_block_missing_content_id,\n",
+    "replace": "",
+    "flips_test": "alpaca.tests.wiki.test_lint.TestLintRules.test_block_missing_content_id",
+    "expect": "fail"
+  },
+  {
+    "mechanism_id": "lint.untracked-raws",
+    "file": "alpaca/wiki/lint.py",
+    "find": "    rule_untracked_raws,\n",
+    "replace": "",
+    "flips_test": "alpaca.tests.wiki.test_lint.TestLintRules.test_untracked_raws",
+    "expect": "fail"
+  },
+  {
+    "mechanism_id": "lint.one-door",
+    "file": "alpaca/wiki/lint.py",
+    "find": "    rule_one_door,\n",
+    "replace": "",
+    "flips_test": "alpaca.tests.wiki.test_lint.TestLintRules.test_one_door_surfaces_guard_hits",
+    "expect": "fail"
+  },
+  {
+    "mechanism_id": "glossary.alias-existence-check",
+    "file": "alpaca/wiki/engine/glossary.py",
+    "find": "if _alias_exists(db, norm):",
+    "replace": "if True:",
+    "flips_test": "alpaca.tests.wiki.test_lint.TestGlossaryLint.test_unbacked_term_flagged",
+    "expect": "fail"
+  },
+  {
+    "mechanism_id": "glossary.undocumented-alias-flag",
+    "file": "alpaca/wiki/engine/glossary.py",
+    "find": "undocumented.append(surface)",
+    "replace": "pass",
+    "flips_test": "alpaca.tests.wiki.test_lint.TestGlossaryLint.test_undocumented_alias_flagged",
+    "expect": "fail"
+  },
+  {
+    "mechanism_id": "guards.read-door-allowlist",
+    "file": "alpaca/wiki/guards.py",
+    "find": "ALLOWED: set[str] = {\"engine/retrieve.py\", \"store/read.py\"}",
+    "replace": "ALLOWED: set[str] = {\"engine/retrieve.py\", \"store/read.py\", \"engine/loop.py\"}",
+    "flips_test": "alpaca.tests.wiki.test_one_door_law.TestReadDoorPositivePaths.test_declared_doors_may_import_the_surface",
+    "expect": "fail",
+    "control_green": [
+      "alpaca.tests.wiki.test_one_door_law.TestReadDoorRealTree.test_real_wiki_tree_has_one_read_door"
+    ]
+  }
+]

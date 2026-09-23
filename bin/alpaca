@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ALPACA_INSTALL_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+exec "$ALPACA_INSTALL_ROOT/bin/alpaca-python" -m alpaca "$@"

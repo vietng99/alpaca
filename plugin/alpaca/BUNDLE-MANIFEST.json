@@ -1,0 +1,1051 @@
+{
+  "bundle": "alpaca",
+  "source_root": "an earlier shared-skills snapshot",
+  "note": "Required support files are included; runtime instructions use the bundled Alpaca APIs and native operator tools. Historical non-vendored rows record lineage only and are not runtime dependencies. Every physical plugin file is hashed under skills, hooks, or local_files.",
+  "license_review": "Four skills carry an upstream MIT LICENSE file (caveman, humanizer, eli5, i-have-adhd). The other eleven (spear, sang, sam, flare, autodrive, timebomb, capture, vsys, nuclear, napalm, html-safe) are the owner's own work and are part of Alpaca under the root LICENSE (MIT). THIRD-PARTY-NOTICES.md is the inventory.",
+  "transcript_parser_debt": {
+    "choice": "replaced-by-drain",
+    "note": "The remember/capture-side transcript parser that read zero exchanges on the current model format is not revived here; the M2 session drain and alpaca sort path is the shipped capture route, and the record is its sink.",
+    "spec": "spec:871"
+  },
+  "hook_flattening": {
+    "plugin/alpaca/hooks/sam-inject.sh": "sam/hooks/sam-inject.sh",
+    "plugin/alpaca/hooks/sam-stop-guard.sh": "sam/hooks/sam-stop-guard.sh",
+    "plugin/alpaca/hooks/sam-banwords.txt": "sam/hooks/sam-banwords.txt",
+    "plugin/alpaca/hooks/sam-banphrases.txt": "sam/hooks/sam-banphrases.txt",
+    "plugin/alpaca/hooks/sam-tech-allow.txt": "sam/hooks/sam-tech-allow.txt",
+    "plugin/alpaca/hooks/html-safe-always-on.sh": "html-safe/hooks/always-on.sh",
+    "plugin/alpaca/hooks/adhd-always-on.sh": "i-have-adhd/hooks/always-on.sh",
+    "plugin/alpaca/hooks/autodrive-inject.sh": "autodrive/autodrive-inject.sh",
+    "plugin/alpaca/hooks/autodrive-stop.sh": "autodrive/autodrive-stop.sh",
+    "plugin/alpaca/hooks/autodrive-set.sh": "autodrive/autodrive-set.sh",
+    "plugin/alpaca/hooks/autodrive-badge.sh": "autodrive/autodrive-badge.sh"
+  },
+  "skills": [
+    {
+      "name": "spear",
+      "upstream_path": "spear",
+      "entry_points": [
+        "skills/spear/SKILL.md"
+      ],
+      "license": "LICENSE (part of Alpaca, MIT)",
+      "symlink": null,
+      "resolved_target": null,
+      "files": [
+        {
+          "upstream_path": "spear/SKILL.md",
+          "bundle_path": "plugin/alpaca/skills/spear/SKILL.md",
+          "sha256": "2e0e38c6ac620c9462b02c559024841ec45899327593e53f582f095ef64e1b97",
+          "vendored": true,
+          "role": "entry-point"
+        }
+      ]
+    },
+    {
+      "name": "sang",
+      "upstream_path": "sang",
+      "entry_points": [
+        "skills/sang/SKILL.md"
+      ],
+      "license": "LICENSE (part of Alpaca, MIT)",
+      "symlink": null,
+      "resolved_target": null,
+      "files": [
+        {
+          "upstream_path": "sang/SKILL.md",
+          "bundle_path": "plugin/alpaca/skills/sang/SKILL.md",
+          "sha256": "b130371f048fce1dffc4a5784d62b5cf5d662676b9e603adba4404a93ebdba65",
+          "vendored": true,
+          "role": "entry-point",
+          "upstream_sha256": "14b4ea5ba56e2874c1d8d26c071542ed43081134ea60587d5060699a5b8a8738",
+          "adaptation": "Alpaca project-local standalone support"
+        },
+        {
+          "upstream_path": "sang/reviewer-brief.md",
+          "sha256": "883dabddc932075bd49b429c8295cc841c03b82abcf5582f1624b16e38e99d29",
+          "vendored": true,
+          "role": "support",
+          "bundle_path": "plugin/alpaca/skills/sang/reviewer-brief.md",
+          "upstream_sha256": "883dabddc932075bd49b429c8295cc841c03b82abcf5582f1624b16e38e99d29"
+        },
+        {
+          "upstream_path": "sang/tests/case-1-flawed.md",
+          "sha256": "36bc0fc9a633c40972db9261bddaf19ca4174ac711851c7af847dd4fb63a6c2e",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "sang/tests/case-2-supported.md",
+          "sha256": "f8a89509c067dfe9353ad3aab6bfa6dea1b9d6f323dc764fa9a7494be3c12e0a",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "sang/tests/case-3-unnecessary.md",
+          "sha256": "9d2b12553f6478e8451a23688856142b2f016c41410af186942596163eb2ec0f",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "sang/tests/case-4-needs-evidence.md",
+          "sha256": "f557ec74d0c445d596e62dcab8ad94e367a60af078961bec5e1e9bf3b782d9fa",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "sang/tests/case-5-rebuttal.md",
+          "sha256": "0f42db5f997d0f210a87724202428eac81bc0735986b5feadb296a870d9fa22d",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "sang/tests/README.md",
+          "sha256": "60f90df5e3a1b93cdf261b542771391a7fa920f6bd555681b83d17c03caf6d8d",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "sang/tests/RESULTS-2026-09-15.md",
+          "sha256": "e51c723955c58b0941cf89e655f38a9a13293f6a149f8dda2fc6803107942251",
+          "vendored": false,
+          "role": "support"
+        }
+      ]
+    },
+    {
+      "name": "sam",
+      "upstream_path": "sam",
+      "entry_points": [
+        "skills/sam/SKILL.md"
+      ],
+      "license": "LICENSE (part of Alpaca, MIT)",
+      "symlink": null,
+      "resolved_target": null,
+      "files": [
+        {
+          "upstream_path": "sam/SKILL.md",
+          "bundle_path": "plugin/alpaca/skills/sam/SKILL.md",
+          "sha256": "9a9689bffd630ad745afc463eccf539a1520acff70476e1f0ee9bf426ee9a8f0",
+          "vendored": true,
+          "role": "entry-point"
+        },
+        {
+          "upstream_path": "sam/sam-core.md",
+          "sha256": "3abbcceaa4c28375d4354298cb3b7a98f812a3669d5a46100524e558c92462f3",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "sam/plain-writing-ban-list.md",
+          "sha256": "5a0aa730a130d935f094467f2ca76dc6cc2835f4e229f9f887ff0c139cdfb06f",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "sam/hooks/sam-inject.sh",
+          "sha256": "5a39b3b0857605f416a0ed5f0fa8527abd00a5f7f12c89f6c4948ec75f8a4bb5",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "sam/hooks/sam-stop-guard.sh",
+          "sha256": "e52ee00fd640398d8af16a5f3232dc0ccd2cc0d4c4c86243714504df9863838b",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "sam/hooks/sam-banwords.txt",
+          "sha256": "478200a0e604b6b05fae927a0ed0525c0e7a31adc24afa28ea036dfdc4742089",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "sam/hooks/sam-banphrases.txt",
+          "sha256": "200080049b11806cad2de96af51681eb30e97489596b85fccb8faef261134488",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "sam/hooks/sam-tech-allow.txt",
+          "sha256": "d868225f032cd9851abc86670875289720ed0d39249610b8c5f45cfb5e3c28b8",
+          "vendored": false,
+          "role": "support"
+        }
+      ]
+    },
+    {
+      "name": "flare",
+      "upstream_path": "flare",
+      "entry_points": [
+        "skills/flare/SKILL.md"
+      ],
+      "license": "LICENSE (part of Alpaca, MIT)",
+      "symlink": null,
+      "resolved_target": null,
+      "files": [
+        {
+          "upstream_path": "flare/SKILL.md",
+          "bundle_path": "plugin/alpaca/skills/flare/SKILL.md",
+          "sha256": "7b85448ade0e8a0cca758c8fba734a67a6c5d60053fcc54cdaed1b70130ca5dd",
+          "vendored": true,
+          "role": "entry-point"
+        }
+      ]
+    },
+    {
+      "name": "humanizer",
+      "upstream_path": "humanizer",
+      "entry_points": [
+        "skills/humanizer/SKILL.md"
+      ],
+      "license": "humanizer/LICENSE",
+      "symlink": null,
+      "resolved_target": null,
+      "files": [
+        {
+          "upstream_path": "humanizer/SKILL.md",
+          "bundle_path": "plugin/alpaca/skills/humanizer/SKILL.md",
+          "sha256": "bd5b54b7063174253025ce8572819ce52b14ef9fac76254d087b1ae3119c20cf",
+          "vendored": true,
+          "converted": "em-dash-to-hyphen",
+          "upstream_sha256": "e8269e236bed06ed0fe4824c274112e54950b0cb46b0bafe5e1576ef7c9f93d5",
+          "role": "entry-point"
+        },
+        {
+          "upstream_path": "humanizer/README.md",
+          "sha256": "d546538831ce8423587208d4a86dbe2be1f1f63445505d284dc558e6de86dac0",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "humanizer/AGENTS.md",
+          "sha256": "8f5069d68622bc956e2d492f26879d2a06508e2ef16d2e573ab13f7a92a0607a",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "humanizer/agents/openai.yaml",
+          "sha256": "9d87ff83149a04f86a372948b8ee35fa249de20923867bbc2a49304290aad736",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "humanizer/scripts/validate-package.py",
+          "sha256": "750e5f50561b8a5285bd1a20ed8b127af65b1b25d50e88c2ce5fe8522943c8fd",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "humanizer/.claude-plugin/plugin.json",
+          "sha256": "ce4f3dd0397c9ca71fe9a089dd00cd132436cfeba4513c53cc6c486f537de43c",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "humanizer/LICENSE",
+          "sha256": "4ac4810254ab36d45419141aeb8e69bf50652cfafe5b2dab947d06d44e5cbf96",
+          "vendored": true,
+          "role": "support",
+          "bundle_path": "plugin/alpaca/skills/humanizer/LICENSE"
+        }
+      ]
+    },
+    {
+      "name": "autodrive",
+      "upstream_path": "autodrive",
+      "entry_points": [
+        "skills/autodrive/SKILL.md"
+      ],
+      "license": "LICENSE (part of Alpaca, MIT)",
+      "symlink": null,
+      "resolved_target": null,
+      "files": [
+        {
+          "upstream_path": "autodrive/SKILL.md",
+          "bundle_path": "plugin/alpaca/skills/autodrive/SKILL.md",
+          "sha256": "ab9b3580420f2603ee128e32ae24afddd0e9a001c0e50aa6a7dea3a665426007",
+          "vendored": true,
+          "role": "entry-point",
+          "upstream_sha256": "da664320ea3c4fec7f46679a472bbc618656e92089f7de45d81849ec50f9bb81",
+          "adaptation": "Alpaca project-local standalone support"
+        },
+        {
+          "upstream_path": "autodrive/AUTODRIVE-DOCTRINE.md",
+          "sha256": "ae387ef143bcd7be5b50b267bd64d1dcc4895a7cfa0df747a3418b9242233d68",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "autodrive/install.sh",
+          "sha256": "fdd156e78a43ebbedbd5653a030bfdb2f7c02b3850a6619d715c3a93f00e540e",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "autodrive/autodrive-inject.sh",
+          "sha256": "16bf27a2a4b1f59d1a0851aa5d0b65a999f470c330418be0b46e9b332221603e",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "autodrive/autodrive-stop.sh",
+          "sha256": "3619eacfeb65bf7d80e6152d4545d0791e7b4192c10a14de95511d061f30032a",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "autodrive/autodrive-set.sh",
+          "sha256": "6b8c3a80fc0115fe1d9c30baa4173c196af65ad7312f69aa779ab081b3769c0b",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "autodrive/autodrive-badge.sh",
+          "sha256": "525a474bdac1cc7cd7f142b5690bd074b10ce1ec9d26bc2ee499c4e9ebab073f",
+          "vendored": false,
+          "role": "support"
+        }
+      ]
+    },
+    {
+      "name": "timebomb",
+      "upstream_path": "timebomb",
+      "entry_points": [
+        "skills/timebomb/SKILL.md"
+      ],
+      "license": "LICENSE (part of Alpaca, MIT)",
+      "symlink": null,
+      "resolved_target": null,
+      "files": [
+        {
+          "upstream_path": "timebomb/SKILL.md",
+          "bundle_path": "plugin/alpaca/skills/timebomb/SKILL.md",
+          "sha256": "97a3bd7dd923c5a4d34c2864bc42ed4fdf9d3d003a978a0b7bcd90a466c7cb7f",
+          "vendored": true,
+          "converted": "em-dash-to-hyphen",
+          "upstream_sha256": "d76122673fa0949107029b4f84dcea38e6e3cb447e2240be1215f5582de38196",
+          "role": "entry-point"
+        },
+        {
+          "upstream_path": "timebomb/install.sh",
+          "sha256": "b2ecef2b1e45e4de808086fa52f750b57151388217571a65f83ebc0a2d5b687f",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "timebomb/bin/timebomb",
+          "sha256": "57729b1657dede7b440f80c7d7ea901e9fd373f49b39e900b73bc01c6d17ff38",
+          "vendored": false,
+          "role": "support"
+        }
+      ]
+    },
+    {
+      "name": "capture",
+      "upstream_path": "capture",
+      "entry_points": [
+        "skills/capture/SKILL.md"
+      ],
+      "license": "LICENSE (part of Alpaca, MIT)",
+      "symlink": null,
+      "resolved_target": null,
+      "files": [
+        {
+          "upstream_path": "capture/SKILL.md",
+          "bundle_path": "plugin/alpaca/skills/capture/SKILL.md",
+          "sha256": "400b95a885ce4afdbef74f3b3fbc1f58699e2343ef811b55780f152396d1aff5",
+          "vendored": true,
+          "converted": "em-dash-to-hyphen",
+          "upstream_sha256": "0a1801007f0f04748623e0e659e8a2e97283b027e05d1b93375863c29ec8bbe7",
+          "role": "entry-point"
+        },
+        {
+          "upstream_path": "capture/template.html",
+          "sha256": "5e871329f037ed014b7bc0a39128c2c1aabab6feecf42ae64a75e83d499b9ad6",
+          "vendored": true,
+          "role": "support",
+          "bundle_path": "plugin/alpaca/skills/capture/template.html",
+          "upstream_sha256": "5e871329f037ed014b7bc0a39128c2c1aabab6feecf42ae64a75e83d499b9ad6"
+        }
+      ]
+    },
+    {
+      "name": "vsys",
+      "upstream_path": "vsys",
+      "entry_points": [
+        "skills/vsys/SKILL.md"
+      ],
+      "license": "LICENSE (part of Alpaca, MIT)",
+      "symlink": null,
+      "resolved_target": null,
+      "files": [
+        {
+          "upstream_path": "vsys/SKILL.md",
+          "bundle_path": "plugin/alpaca/skills/vsys/SKILL.md",
+          "sha256": "446dc7ca0df3a4888c18a215666d93c4d00d80db3019436444388fef3c959fb0",
+          "vendored": true,
+          "role": "entry-point",
+          "upstream_sha256": "7239ac39ac5ef1fa21a6afdb426b5a7609c95ff7cd1ac7e1944116942a3634cd",
+          "adaptation": "Alpaca project-local standalone support"
+        },
+        {
+          "upstream_path": "vsys/vsys-home/TRACE-CONVENTION.md",
+          "sha256": "34017670a2022049b57edd32e5d6d68d1447b2ac85fee74866f4361729df74d0",
+          "vendored": true,
+          "role": "support",
+          "bundle_path": "plugin/alpaca/skills/vsys/vsys-home/TRACE-CONVENTION.md",
+          "upstream_sha256": "7200264fa19e5aa73eccbedc135e5d98452288762d5c80457981832db05a7ee4",
+          "adaptation": "Alpaca project-local standalone support"
+        },
+        {
+          "upstream_path": "vsys/vsys-home/tracer/PROTOCOL.md",
+          "sha256": "5f820e047109d2fb42c1a3d35e08b4d3fa1a393fe6892075f3f08fa99bf6c64c",
+          "vendored": true,
+          "role": "support",
+          "bundle_path": "plugin/alpaca/skills/vsys/vsys-home/tracer/PROTOCOL.md",
+          "upstream_sha256": "b7412b59db06f3f18c35c46de6f418bd389204c4815439a0e54cb7b85f1964a3",
+          "adaptation": "Alpaca project-local standalone support"
+        },
+        {
+          "upstream_path": "vsys/vsys-home/tracer/trace.workflow.js",
+          "sha256": "6c544be3ca1c8a43a9781d5d4e4fe369b0bddeebeb0eafe13a674914b00a400d",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "vsys/vsys-home/engine/gen_blueprint.py",
+          "sha256": "b77febaa7878fe264af7b58743059c6340cfa135cfb7e0c1459459da402c1757",
+          "vendored": true,
+          "role": "support",
+          "bundle_path": "plugin/alpaca/skills/vsys/vsys-home/engine/gen_blueprint.py",
+          "upstream_sha256": "45371d08e37d9fdbfb6656339dfbc7e3f56f9a9129e4445712db7386b60da931"
+        },
+        {
+          "upstream_path": "vsys/vsys-home/engine/blueprint-engine.html",
+          "sha256": "6f09ff68602c2b24a93681aa5ed3a62b4ceab1d7f64471f5c25d5ee482cb54a5",
+          "vendored": true,
+          "role": "support",
+          "bundle_path": "plugin/alpaca/skills/vsys/vsys-home/engine/blueprint-engine.html",
+          "upstream_sha256": "7140c09a3129ac6adbed9ff74fc338d7f33d77a3af66f3e7d6af3709cef440a2"
+        }
+      ]
+    },
+    {
+      "name": "nuclear",
+      "upstream_path": "nuclear",
+      "entry_points": [
+        "skills/nuclear/SKILL.md"
+      ],
+      "license": "LICENSE (part of Alpaca, MIT)",
+      "symlink": "nuclear -> <owner-skills>/nuclear",
+      "resolved_target": "<owner-skills>/nuclear",
+      "files": [
+        {
+          "upstream_path": "nuclear/SKILL.md",
+          "bundle_path": "plugin/alpaca/skills/nuclear/SKILL.md",
+          "sha256": "8fbb3d09057c12f55299d1c137cd7701645829494c791b3dfc0cb1681522c51e",
+          "vendored": true,
+          "converted": "em-dash-to-hyphen",
+          "upstream_sha256": "a3144da3cfa6a82bfa6aaf4347c33d668c8576336ce396a645480838b31815ce",
+          "role": "entry-point",
+          "adaptation": "Alpaca project-local standalone support"
+        },
+        {
+          "upstream_path": "nuclear/NUCLEAR-DOCTRINE-v3.6.md",
+          "sha256": "153510d34501048932962fd4b0bf1b008bfc521c47a4bd7a1251a0f886b6dc4f",
+          "vendored": true,
+          "role": "support",
+          "bundle_path": "plugin/alpaca/skills/nuclear/NUCLEAR-DOCTRINE-v3.6.md",
+          "upstream_sha256": "bd43bb5bc6a6cfb4e16349cd645ceffac37a549c0f9ade62082af0657ea8a4b8",
+          "adaptation": "Alpaca project-local standalone support"
+        }
+      ]
+    },
+    {
+      "name": "napalm",
+      "upstream_path": "napalm",
+      "entry_points": [
+        "skills/napalm/SKILL.md"
+      ],
+      "license": "LICENSE (part of Alpaca, MIT)",
+      "symlink": "napalm -> <owner-skills>/napalm",
+      "resolved_target": "<owner-skills>/napalm",
+      "files": [
+        {
+          "upstream_path": "napalm/SKILL.md",
+          "bundle_path": "plugin/alpaca/skills/napalm/SKILL.md",
+          "sha256": "45956eb0de3fc741ca7ec5a155153d81aee37243c15fa94a620a7e7d7f9064a7",
+          "vendored": true,
+          "converted": "em-dash-to-hyphen",
+          "upstream_sha256": "6cfd256b72e07616521440a1d82a36ffcd3c3d3f7ba7fbbf4534c75899d191f7",
+          "role": "entry-point",
+          "adaptation": "Alpaca project-local standalone support"
+        },
+        {
+          "upstream_path": "napalm/NAPALM-DOCTRINE-v1.1.md",
+          "sha256": "cea373a9363c1dd3e110deac946021de03ac9bc8d0d3a48f66961fc560725d5b",
+          "vendored": true,
+          "role": "support",
+          "bundle_path": "plugin/alpaca/skills/napalm/NAPALM-DOCTRINE-v1.1.md",
+          "upstream_sha256": "848e91196d9adb3f2b6265dd7224b0b38f0af4c68953449b2d5612e382b16bd4",
+          "adaptation": "Alpaca project-local standalone support"
+        }
+      ]
+    },
+    {
+      "name": "eli5",
+      "upstream_path": "eli5",
+      "entry_points": [
+        "skills/eli5/skills/eli5/SKILL.md"
+      ],
+      "license": "eli5/LICENSE",
+      "symlink": null,
+      "resolved_target": null,
+      "files": [
+        {
+          "upstream_path": "eli5/skills/eli5/SKILL.md",
+          "bundle_path": "plugin/alpaca/skills/eli5/skills/eli5/SKILL.md",
+          "sha256": "0e76d5ada831030b780ae426396e77e20cc8675bbc38e296a899e7a6135f390f",
+          "vendored": true,
+          "converted": "em-dash-to-hyphen",
+          "upstream_sha256": "a671efd44a818aee7dbe4ea2ec634079401c3f578c08cb634c2b6181ced2dbe9",
+          "role": "entry-point"
+        },
+        {
+          "upstream_path": "eli5/README.md",
+          "sha256": "67cf8d9493f36059ce8861f19df00d0c3c06a606b9c7137e8fc991c4dc2f3964",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "eli5/eli5-workspace/evals.json",
+          "sha256": "754f6a809ed904d1cb91f755914b0bac87a0998e066c87452f72d6f2a6a5a615",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "eli5/eli5-workspace/eval-workflow.md",
+          "sha256": "d3d95f4fad9fc365ea32068ea13220e908a101700318f1a33ac02e678806bdb1",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "eli5/eli5-workspace/eval-results.md",
+          "sha256": "d8f8c6a53ddc86b56453081d8022984b9d70e75f15823505f4a700861ff8e2ee",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "eli5/eli5-workspace/run-evals.py",
+          "sha256": "7ba67193fd039fe3aea76463d5f6fb3e68562089bc8b50e141f16bb535519681",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "eli5/eli5-workspace/test_run_evals.py",
+          "sha256": "c597d400a6c804486dddab87be947e89cfea82c4c139be18492c3e9f6bfe1a4f",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "eli5/LICENSE",
+          "sha256": "1126322e2cc8d165adc4c792eeb195717de2bcc7b39be1ce77959d78e87ef685",
+          "vendored": true,
+          "role": "support",
+          "bundle_path": "plugin/alpaca/skills/eli5/LICENSE"
+        }
+      ]
+    },
+    {
+      "name": "i-have-adhd",
+      "upstream_path": "i-have-adhd",
+      "entry_points": [
+        "skills/i-have-adhd/skills/i-have-adhd/SKILL.md"
+      ],
+      "license": "i-have-adhd/LICENSE",
+      "symlink": null,
+      "resolved_target": null,
+      "files": [
+        {
+          "upstream_path": "i-have-adhd/skills/i-have-adhd/SKILL.md",
+          "bundle_path": "plugin/alpaca/skills/i-have-adhd/skills/i-have-adhd/SKILL.md",
+          "sha256": "cae8c063977214b372c6897b7c93ac8faa573214a8635896f767e3bac092adf8",
+          "vendored": true,
+          "role": "entry-point"
+        },
+        {
+          "upstream_path": "i-have-adhd/README.md",
+          "sha256": "16a2319ff6ec9535643434b9e943ae0db69a301099632ebade42cacbfbffa493",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "i-have-adhd/INSTALL.md",
+          "sha256": "847685ccdcf11530a1b143b03d9cfe825f0f4e8791d5849ad0213d5d8383558b",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "i-have-adhd/scripts/run_evals.py",
+          "sha256": "b12f7d83c64904541f9957f6851ab3f03751e433f1fa6807a67ab3f9fbff8308",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "i-have-adhd/scripts/check_pi_extension.py",
+          "sha256": "9ec82a1f5ec72e8f4e59194444d447c0651aecd8fdc710d594c41b8d6dada9fd",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "i-have-adhd/evals/cases.jsonl",
+          "sha256": "05ba81a77bca9165c4a364f7ddb03ddc74dcf76428de3fc87a6e2d649c7d850d",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "i-have-adhd/evals/rubric.md",
+          "sha256": "1251e6441feaf9c27c3fd3475aee51dfbad073b3a0d531f39f77cce1f723e768",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "i-have-adhd/hooks/hooks.json",
+          "sha256": "cf9275338e49a5871d3c73fa9404986432b5dbed7200ee8bd7471cbf322e91a9",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "i-have-adhd/hooks/always-on.sh",
+          "sha256": "2cb2c461968fe5d59b474ee7419fbce057935fe06b6dd594bccafda531c38c87",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "i-have-adhd/hooks/always-on.mjs",
+          "sha256": "2339a4d50ec99c68d90e63b5a2f8b45b524f696765e370c5088eb37678e26442",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "i-have-adhd/hooks/always-on.ps1",
+          "sha256": "657563ab147358487b1a71aeacd9a548a1032425a32e2a1de34211f6fc67a52c",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "i-have-adhd/tests/test_always_on_hooks.py",
+          "sha256": "e9c25391912c32903b384065cfbbec1b9447d4d35ddfe80a29b4b2e9599d7820",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "i-have-adhd/tests/test_run_evals.py",
+          "sha256": "4940f2a102e78f3699cb8e4c698653bf31751e079ca181d3ef64b0a8f2888ef5",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "i-have-adhd/LICENSE",
+          "sha256": "8acbb618089b738404f76ac60fca1aaa995d9a87995eddf95f0b777acd7f7d2c",
+          "vendored": true,
+          "role": "support",
+          "bundle_path": "plugin/alpaca/skills/i-have-adhd/LICENSE"
+        }
+      ]
+    },
+    {
+      "name": "caveman",
+      "upstream_path": "caveman",
+      "entry_points": [
+        "skills/caveman/skills/caveman/SKILL.md",
+        "skills/caveman/skills/caveman-commit/SKILL.md",
+        "skills/caveman/skills/caveman-review/SKILL.md",
+        "skills/caveman/skills/caveman-stats/SKILL.md",
+        "skills/caveman/skills/caveman-help/SKILL.md",
+        "skills/caveman/skills/caveman-compress/SKILL.md",
+        "skills/caveman/skills/cavecrew/SKILL.md"
+      ],
+      "license": "caveman/LICENSE",
+      "symlink": null,
+      "resolved_target": null,
+      "files": [
+        {
+          "upstream_path": "caveman/skills/caveman/SKILL.md",
+          "bundle_path": "plugin/alpaca/skills/caveman/skills/caveman/SKILL.md",
+          "sha256": "d33253598ef3a40054e2b539e6f94654bcd3b801f58046277dfbb0180068f1c8",
+          "vendored": true,
+          "converted": "em-dash-to-hyphen",
+          "upstream_sha256": "daf9cec496ebd039809d8236f99f17fa1b4beaadf8ce4e2d532d0da51d70afce",
+          "role": "entry-point"
+        },
+        {
+          "upstream_path": "caveman/skills/caveman-commit/SKILL.md",
+          "bundle_path": "plugin/alpaca/skills/caveman/skills/caveman-commit/SKILL.md",
+          "sha256": "d698c45c51b9003af50e3d6aeb1634a704bfce4d1bb5541064ccfe37a937f812",
+          "vendored": true,
+          "converted": "em-dash-to-hyphen",
+          "upstream_sha256": "58db7b8efab911a629c26e7132517d9076e4e3645009eb604cb8c25663477841",
+          "role": "entry-point"
+        },
+        {
+          "upstream_path": "caveman/skills/caveman-review/SKILL.md",
+          "bundle_path": "plugin/alpaca/skills/caveman/skills/caveman-review/SKILL.md",
+          "sha256": "2026b16062543a0c61a270c4785b23790803df636a50eedbea7b556b509ebc83",
+          "vendored": true,
+          "converted": "em-dash-to-hyphen",
+          "upstream_sha256": "9ef09065f26b9781275b5a4775e14870e331fab833efb2a2aa33f3205a2b83c3",
+          "role": "entry-point"
+        },
+        {
+          "upstream_path": "caveman/skills/caveman-stats/SKILL.md",
+          "bundle_path": "plugin/alpaca/skills/caveman/skills/caveman-stats/SKILL.md",
+          "sha256": "a1c5c83543a2281be9e24112478d09383ae8a2fc6ffe9a847a5a7c4c5e07483e",
+          "vendored": true,
+          "converted": "em-dash-to-hyphen",
+          "upstream_sha256": "b78227f62898b0360d21f2a94d48e9d7a80629cb879cc7b7f9b45b4a241eba90",
+          "role": "entry-point",
+          "adaptation": "Alpaca project-local standalone support"
+        },
+        {
+          "upstream_path": "caveman/skills/caveman-help/SKILL.md",
+          "bundle_path": "plugin/alpaca/skills/caveman/skills/caveman-help/SKILL.md",
+          "sha256": "ec47ffc26d53c62da2850dd864fb0735750f83fe190f98206d36ed231ea1d082",
+          "vendored": true,
+          "converted": "em-dash-to-hyphen",
+          "upstream_sha256": "ae18884d30b7ddccaefc9612cf73645d9e1eaf18b44d3c36e398b9706f183c1e",
+          "role": "entry-point",
+          "adaptation": "Alpaca project-local standalone support"
+        },
+        {
+          "upstream_path": "caveman/skills/caveman-compress/SKILL.md",
+          "bundle_path": "plugin/alpaca/skills/caveman/skills/caveman-compress/SKILL.md",
+          "sha256": "b3c59dd43320cb84806331557276f3328a96829fade15f6be1c6033845086961",
+          "vendored": true,
+          "converted": "em-dash-to-hyphen",
+          "upstream_sha256": "3167d62440eee99c0e5b224d7f8b8ebcfe37efba38bc5bbee24f0d00da72a688",
+          "role": "entry-point",
+          "adaptation": "Alpaca project-local standalone support"
+        },
+        {
+          "upstream_path": "caveman/skills/cavecrew/SKILL.md",
+          "bundle_path": "plugin/alpaca/skills/caveman/skills/cavecrew/SKILL.md",
+          "sha256": "43e5634f5e0061b316104fac58711e4c76712a4c82b05d457b0f08d8be2b9d53",
+          "vendored": true,
+          "converted": "em-dash-to-hyphen",
+          "upstream_sha256": "b74f374f6aae6e9a31e78e7d876860406fe5833378e9298536edf176c12f379b",
+          "role": "entry-point",
+          "adaptation": "Alpaca project-local standalone support"
+        },
+        {
+          "upstream_path": "caveman/README.md",
+          "sha256": "6aa3626827e2475929df3b7193b1bf2afebd0341e2dc6d4ea0e0ae0069c01e78",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "caveman/INSTALL.md",
+          "sha256": "90928f5fc5194626edf3593f908469bbdec5a025b453bcd3c0cb88ac90ffddfd",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "caveman/commands/caveman.md",
+          "sha256": "c27ca36f189e329a891e7350360bcaff3aeaa8e6fe6cd64cbdda42cfb598893f",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "caveman/commands/caveman-commit.md",
+          "sha256": "6dfa36fd6fda22c98fba37894c86e9d679ec224285aca19ba94efa28ecad93e5",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "caveman/commands/caveman-review.md",
+          "sha256": "965a23a5521e64e0892d9b8da72aba1b33e541e9b6cabb85ad19e865daab60fc",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "caveman/commands/caveman-stats.md",
+          "sha256": "572d9ddcecdb80c405b16cb46749331c9b5b2b22c6b413e8d2bb1f3078a3ba68",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "caveman/commands/caveman-init.md",
+          "sha256": "ebdbcd45dc7dff00e4d1de30714c279ccde98468f77a6dc7681ee6975d35a806",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "caveman/cli/install.js",
+          "sha256": "dedbc4716fa475312ef11214a2ef2ab14b0dcb07578fd8200aee72b69b4a8323",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "caveman/dist/caveman.skill",
+          "sha256": "1b9ecaa16ae750589bd07a3bfac2529035caf83b71d93a2da364a26358e50548",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "caveman/src/hooks/caveman-activate.js",
+          "sha256": "fea02dc4f0460433a5b892a32ccd4a735eb8bfd8974b592113574c6e55c90370",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "caveman/src/hooks/caveman-config.js",
+          "sha256": "bece20e2d95b2502606dedc8b3bc329ac769a2f3638e3013d8477cabeab13f34",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "caveman/src/hooks/caveman-parse.js",
+          "sha256": "397cf3d243fae04859e0c135f87f456a4972256ae425ee66457da4631ffa509a",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "caveman/src/hooks/caveman-stats.js",
+          "sha256": "f598dde3cc7b701c68547c103a56d566ccc2f75d1c1f3484883ab9f396032b5d",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "caveman/src/hooks/caveman-mode-tracker.js",
+          "sha256": "07a16ec91be50900eaaa5cb24d0518fc77c98b6159102e27c37d43aae1d70640",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "caveman/src/hooks/cavecrew-model-overrides.js",
+          "sha256": "9b72e18343a5487acde46d795f4871abfae21212b6eeb853d54981aae260bdf1",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "caveman/tests/test_detect.py",
+          "sha256": "b0620a740a24dc3124c117eaab0884af821868548933af9aeef99ed4529d58ce",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "caveman/tests/test_hooks.py",
+          "sha256": "ba5454e6bf3986e1c42bf69944fddcea60b079331b2c2e8e336cd0d47b7930e0",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "caveman/evals/measure.py",
+          "sha256": "11075a6c438dfc0225a8ccca9c593cb084e62db22efbf71b7a4436362b314ff3",
+          "vendored": false,
+          "role": "support"
+        },
+        {
+          "upstream_path": "caveman/LICENSE",
+          "sha256": "5eb826cd03151bcc7cce3f80d40e87733237fedfc6c36d6908aca5fd650a0bdb",
+          "vendored": true,
+          "role": "support",
+          "bundle_path": "plugin/alpaca/skills/caveman/LICENSE"
+        },
+        {
+          "upstream_path": "caveman/plugins/caveman/skills/caveman-compress/scripts/validate.py",
+          "role": "support",
+          "bundle_path": "plugin/alpaca/skills/caveman/skills/caveman-compress/scripts/validate.py",
+          "vendored": true,
+          "upstream_sha256": "6098687a5fa374dc22b886452af6792f3aaa60855c4032e035ea1228dae253c7",
+          "sha256": "dbec8cc4cb1e7796e0d9e53c2af23906afffe9202f4dd53fa16f242d60cbd169"
+        }
+      ]
+    },
+    {
+      "name": "html-safe",
+      "upstream_path": "html-safe",
+      "entry_points": [
+        "rules/html-safe/RULE.md"
+      ],
+      "license": "LICENSE (part of Alpaca, MIT)",
+      "symlink": null,
+      "resolved_target": null,
+      "files": [
+        {
+          "upstream_path": "html-safe/RULE.md",
+          "bundle_path": "plugin/alpaca/rules/html-safe/RULE.md",
+          "sha256": "c518b348042a99e5ca4febc653c49609f2097c23de3d43969743342f19ae8592",
+          "vendored": true,
+          "role": "entry-point"
+        },
+        {
+          "upstream_path": "html-safe/hooks/always-on.sh",
+          "sha256": "c9d2c83070a4ff1db7ea47de89c85920ec3475cc5d092da7394b9b850020f3dc",
+          "vendored": false,
+          "role": "support"
+        }
+      ]
+    }
+  ],
+  "hooks": [
+    {
+      "upstream_path": "sam/hooks/sam-inject.sh",
+      "bundle_path": "plugin/alpaca/hooks/sam-inject.sh",
+      "sha256": "fb131a18836e88063dacbf83ba5ea9a24be6f63917fdfdba7455dcf6b60baa4e",
+      "vendored": true,
+      "role": "hook",
+      "upstream_sha256": "6ea7d716f878242fd44b643be7fce4b28d49f45c1c2189f72008930001082fa0",
+      "adaptation": "Alpaca project-local standalone support"
+    },
+    {
+      "upstream_path": "sam/hooks/sam-stop-guard.sh",
+      "bundle_path": "plugin/alpaca/hooks/sam-stop-guard.sh",
+      "sha256": "706268bb613e8d77995e38f553227351f774e78525e506c82f31ce98203e15d6",
+      "vendored": true,
+      "role": "hook",
+      "upstream_sha256": "11c4bf370578160b0c200d617f691ba82cc95de6b63afb3ea015e8210caf8200",
+      "adaptation": "Alpaca project-local standalone support"
+    },
+    {
+      "upstream_path": "sam/hooks/sam-banwords.txt",
+      "bundle_path": "plugin/alpaca/hooks/sam-banwords.txt",
+      "sha256": "478200a0e604b6b05fae927a0ed0525c0e7a31adc24afa28ea036dfdc4742089",
+      "vendored": true,
+      "role": "hook"
+    },
+    {
+      "upstream_path": "sam/hooks/sam-banphrases.txt",
+      "bundle_path": "plugin/alpaca/hooks/sam-banphrases.txt",
+      "sha256": "200080049b11806cad2de96af51681eb30e97489596b85fccb8faef261134488",
+      "vendored": true,
+      "role": "hook"
+    },
+    {
+      "upstream_path": "sam/hooks/sam-tech-allow.txt",
+      "bundle_path": "plugin/alpaca/hooks/sam-tech-allow.txt",
+      "sha256": "d868225f032cd9851abc86670875289720ed0d39249610b8c5f45cfb5e3c28b8",
+      "vendored": true,
+      "role": "hook"
+    },
+    {
+      "upstream_path": "html-safe/hooks/always-on.sh",
+      "bundle_path": "plugin/alpaca/hooks/html-safe-always-on.sh",
+      "sha256": "688fde9089443881b4b8db701f7e23ea32c1c2324961168c3eaddb2c964a4550",
+      "vendored": true,
+      "role": "hook",
+      "upstream_sha256": "b9c7ea7eda1932c118fb6da80be4a454270a4ecd520fd6649f8c4da4883a7bc1",
+      "adaptation": "Alpaca project-local standalone support"
+    },
+    {
+      "upstream_path": "i-have-adhd/hooks/always-on.sh",
+      "bundle_path": "plugin/alpaca/hooks/adhd-always-on.sh",
+      "sha256": "7e644b815442f130c561abd4283e18725e9f7cd3965c2c1c413411fb1dfdddde",
+      "vendored": true,
+      "role": "hook",
+      "upstream_sha256": "c181f59b20a237e5239fbf6822cffb83293ea55e1d71bb69d84bc8aee55cea77",
+      "adaptation": "Alpaca project-local standalone support"
+    },
+    {
+      "upstream_path": "autodrive/autodrive-inject.sh",
+      "bundle_path": "plugin/alpaca/hooks/autodrive-inject.sh",
+      "sha256": "73e59290cdab1cace03d01ae0b3fa2815291eeec6686aebccd385a2af9a29c55",
+      "vendored": true,
+      "role": "hook",
+      "upstream_sha256": "a03afd284b59c80fcf445c15bf533cba4bf74cb5c80265b5b9bd60bc6e2cc30f",
+      "adaptation": "Alpaca project-local standalone support"
+    },
+    {
+      "upstream_path": "autodrive/autodrive-stop.sh",
+      "bundle_path": "plugin/alpaca/hooks/autodrive-stop.sh",
+      "sha256": "e8a7fb741a82c39714c6f4c9297c084448d439e3dc48fcfa816afe7685dd713a",
+      "vendored": true,
+      "role": "hook",
+      "upstream_sha256": "64dce1f4d9d9e2788ae2d2313a918486762e7c2e60ed7330ced6bf038c2cf9d4",
+      "adaptation": "Alpaca project-local standalone support"
+    },
+    {
+      "upstream_path": "autodrive/autodrive-set.sh",
+      "bundle_path": "plugin/alpaca/hooks/autodrive-set.sh",
+      "sha256": "c9124d6607a94dbbf7b88bb74ffbf89310eefc890a14f20732d482cec18e044a",
+      "vendored": true,
+      "role": "hook",
+      "upstream_sha256": "0ca4269b03063054c1e39fd1d08eef25f45e108a4019f97cf44e1c3c8457e30f",
+      "adaptation": "Alpaca project-local standalone support"
+    },
+    {
+      "upstream_path": "autodrive/autodrive-badge.sh",
+      "bundle_path": "plugin/alpaca/hooks/autodrive-badge.sh",
+      "sha256": "1ec43dfa34f4cd981f6224102f2dd302e6935e3d6d8ae73f801fc60ac8839f7a",
+      "vendored": true,
+      "role": "hook",
+      "upstream_sha256": "1f036ac5a66b123269d321829a1f0d9b6c587a2407a747dfda6fff9eb100f480",
+      "adaptation": "Alpaca project-local standalone support"
+    }
+  ],
+  "local_files": [
+    {
+      "bundle_path": "plugin/alpaca/.claude-plugin/plugin.json",
+      "sha256": "4b73b35647cd0535d6d7694d2dc95610d8a1abbe43c72ddc2d1d8b9dbd11a109",
+      "vendored": true,
+      "role": "local-adaptation",
+      "origin": "Alpaca"
+    },
+    {
+      "bundle_path": "plugin/alpaca/hooks/hooks.json",
+      "sha256": "44c44bea4c223145253aa9cb7eb303aaca290a650b5a0539e52880ad17444ef4",
+      "vendored": true,
+      "role": "local-adaptation",
+      "origin": "Alpaca"
+    },
+    {
+      "bundle_path": "plugin/alpaca/hooks/session_state.py",
+      "sha256": "88854f7d732ae2f3d08aaf629f3f03452ddae6770b7fdb7cb193ef643b55f3a0",
+      "vendored": true,
+      "role": "local-adaptation",
+      "origin": "Alpaca"
+    },
+    {
+      "bundle_path": "plugin/alpaca/hooks/style_inject.py",
+      "sha256": "c720f7e34242758503b769ec45c624e35c9abfb90b611c9154979427598f903e",
+      "vendored": true,
+      "role": "local-adaptation",
+      "origin": "Alpaca"
+    },
+    {
+      "bundle_path": "plugin/alpaca/plugin.json",
+      "sha256": "4b73b35647cd0535d6d7694d2dc95610d8a1abbe43c72ddc2d1d8b9dbd11a109",
+      "vendored": true,
+      "role": "local-adaptation",
+      "origin": "Alpaca"
+    },
+    {
+      "bundle_path": "plugin/alpaca/skills/caveman/skills/caveman-compress/scripts/check.py",
+      "sha256": "4db07bf18fa425cba8dd930c88eac8af808324026aab18bf0fbe0d4c2129a7ed",
+      "vendored": true,
+      "role": "local-adaptation",
+      "origin": "Alpaca"
+    },
+    {
+      "bundle_path": "plugin/alpaca/skills/sam/plain-writing-ban-list.md",
+      "sha256": "029a08ee6b96ea2c9a4ded494570b4db964249e447c4acdda9062d96b37bb99e",
+      "vendored": true,
+      "role": "local-adaptation",
+      "origin": "Alpaca"
+    },
+    {
+      "bundle_path": "plugin/alpaca/skills/sam/sam-core.md",
+      "sha256": "8460489e6437d1a4d34805355e4dbfbf599c6399382d82a04dab980563a65ba5",
+      "vendored": true,
+      "role": "local-adaptation",
+      "origin": "Alpaca"
+    },
+    {
+      "bundle_path": "plugin/alpaca/skills/vsys/vsys-home/profiles/alpaca.json",
+      "sha256": "00b820611a1021060d246ae380268be65ef20b679b80d4dd12ce812d1d728067",
+      "vendored": true,
+      "role": "local-adaptation",
+      "origin": "Alpaca"
+    }
+  ]
+}

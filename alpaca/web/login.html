@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark" data-theme-key="alpaca.login-theme">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="noindex, nofollow">
+<title>Alpaca Sign In</title>
+<link rel="stylesheet" href="/login/assets/vault.css">
+<script src="/login/assets/vault.js" defer></script>
+</head>
+<body data-page="login">
+<div class="screen">
+  <div class="corner">
+    <button type="button" class="chip-btn" data-vault-theme aria-label="Toggle color theme">Theme</button>
+  </div>
+  <main class="shell">
+    <div class="brand">
+      <div class="wordmark"><span class="wmAccent">Alpaca</span> Hub</div>
+      <div class="brandSub">The engineering harness</div>
+    </div>
+    <div class="card" id="card">
+      <h1 class="title">Sign in</h1>
+      <p class="stepSub">Enter the access code to open the workspace hub.</p>
+      <form id="login-form" autocomplete="on">
+        <label class="field" id="user-field" hidden>
+          <span class="label">User</span>
+          <input class="input" id="user" name="username" autocomplete="username" spellcheck="false">
+        </label>
+        <label class="field">
+          <span class="label">Access code</span>
+          <input class="input" id="code" name="password" type="password" autocomplete="current-password"
+                 maxlength="64" required aria-describedby="error">
+        </label>
+        <button type="submit" class="submit" id="submit">Sign in</button>
+      </form>
+      <p class="error" id="error" role="alert" hidden></p>
+    </div>
+    <p class="foot">Alpaca &middot; The engineering harness</p>
+  </main>
+</div>
+</body>
+</html>

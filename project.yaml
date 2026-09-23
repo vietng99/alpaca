@@ -1,0 +1,114 @@
+# Alpaca distribution template. `alpaca onboard` replaces this file with the project's own answers;
+# `alpaca upgrade` preserves an installed project's copy. Each installation takes its project id from
+# .alpaca/instance.json while this file stays a template. To plug in a domain, add a `profile:` key
+# naming a dotted module path importable from the project root (see alpaca/profile.py).
+name: Alpaca
+project_id: alpaca-template
+template: true
+what: The engineering harness, before onboarding.
+people: []
+tier: public
+existing_repo: false
+phases:
+  default:
+  - requirement
+  - design
+  - build
+  - verify
+  - release
+commands:
+  build: bin/alpaca-python -m compileall -q alpaca
+  test: bin/alpaca-python -m pytest
+  lint: bin/alpaca-python -m compileall -q alpaca
+  run: bin/alpaca status
+paths:
+  product_tree: .
+  artifacts: docs
+  spec_dir: design
+style:
+  presets: []
+  banned: style/banned.txt
+cwd_history: []
+default_level: L2
+oracle_classes:
+- static
+- dynamic
+- selftest
+- human
+forbidden_literals: []
+resource_class: small
+fingerprint:
+  command: git rev-parse HEAD
+  expected: unset-until-frozen
+skin:
+  adapters:
+  - artifact_shape: acceptance-table
+    key_column: item
+    step_model: step-models/requirement.json
+    register: req_key
+boundary_rules:
+  root_only: true
+  no_tmp_root: true
+  realpath_containment: true
+  atomic_writes: temp-then-rename
+non_adoptions:
+  why: Operators use native Claude Code and Codex tools; no third-party agent library is required.
+  forbidden:
+  - langchain
+  - langgraph
+  - llama_index
+  - crewai
+  - autogen
+  - celery
+  - airflow
+  - prefect
+  - dagster
+  - temporalio
+  - ray
+  - flask
+  - fastapi
+  - django
+  - tornado
+  - aiohttp
+  - uvicorn
+  - gunicorn
+  - twisted
+  - http.server
+  - socketserver
+  - wsgiref
+  sanctioned:
+  - path: alpaca/serve.py
+    names:
+    - http.server
+    - socketserver
+    - wsgiref
+    why: Optional read-only local dashboard.
+operators:
+- claude
+- codex
+wiki_providers:
+  embedder: deterministic
+  reranker: identity
+  entailer: structural
+  llm_extractor: 'off'
+budget:
+  reserve: 10
+  totals:
+    small: 100
+    medium: 500
+    large: 2000
+concurrency:
+  tiers:
+    small: 1
+    medium: 1
+    large: 1
+kicker_grace_seconds: 300
+retention:
+  store: .alpaca/store
+  max_bytes: 10485760
+  max_age_days: 30
+barrier:
+  protected_paths:
+  - .alpaca/
+  - .venv/
+  - .env

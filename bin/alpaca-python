@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Use this installation's virtual environment from any working directory.
+set -euo pipefail
+ALPACA_INSTALL_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+unset ALPACA_ROOT
+cd "$ALPACA_INSTALL_ROOT"
+# An explicit project selector enables the verified local SQLite build for this
+# process and descendants. A clean shipment has no selector and uses host SQLite.
+ALPACA_SQLITE_DIR="$ALPACA_INSTALL_ROOT/.alpaca/toolchain/sqlite"
+if [ -f "$ALPACA_SQLITE_DIR/enabled" ]; then
+  ALPACA_SQLITE_VERSION="$(cat -- "$ALPACA_SQLITE_DIR/enabled")"
+  if [[ ! "$ALPACA_SQLITE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Alpaca SQLite: invalid local runtime selector" >&2
+    exit 72
+  fi
+  ALPACA_SQLITE_LIB="$ALPACA_SQLITE_DIR/$ALPACA_SQLITE_VERSION/lib"
+  if [ "$(uname -s)" != Linux ] || [ ! -r "$ALPACA_SQLITE_LIB/libsqlite3.so.0" ]; then
+    echo "Alpaca SQLite: selected Linux runtime is unavailable" >&2
+    exit 72
+  fi
+  if [ ! -r "$ALPACA_SQLITE_LIB/libsqlite3.so.0.sha256" ]; then
+    echo "Alpaca SQLite: selected runtime checksum is unavailable" >&2
+    exit 72
+  fi
+  read -r ALPACA_SQLITE_EXPECTED < "$ALPACA_SQLITE_LIB/libsqlite3.so.0.sha256"
+  ALPACA_SQLITE_ACTUAL="$(sha256sum -- "$ALPACA_SQLITE_LIB/libsqlite3.so.0")"
+  if [[ ! "$ALPACA_SQLITE_EXPECTED" =~ ^[a-f0-9]{64}$ ]] || [ "${ALPACA_SQLITE_ACTUAL%% *}" != "$ALPACA_SQLITE_EXPECTED" ]; then
+    echo "Alpaca SQLite: selected runtime checksum mismatch" >&2
+    exit 72
+  fi
+  export LD_LIBRARY_PATH="$ALPACA_SQLITE_LIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
+if [ -x "$ALPACA_INSTALL_ROOT/.venv/bin/python" ]; then
+  exec "$ALPACA_INSTALL_ROOT/.venv/bin/python" "$@"
+fi
+exec python3 "$@"

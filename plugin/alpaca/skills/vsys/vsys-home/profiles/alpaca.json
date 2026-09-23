@@ -1,0 +1,102 @@
+{
+  "types": {
+    "constitution": {
+      "label": "Constitution",
+      "light": "#546074",
+      "dark": "#93a2b8"
+    },
+    "doctrine": {
+      "label": "Doctrine",
+      "light": "#6366f1",
+      "dark": "#8b8dff"
+    },
+    "gate": {
+      "label": "Gate",
+      "light": "#0ea371",
+      "dark": "#2fce97"
+    },
+    "instrument": {
+      "label": "Instrument",
+      "light": "#0d9488",
+      "dark": "#2dd4bf"
+    },
+    "agent": {
+      "label": "Agent",
+      "light": "#e08a00",
+      "dark": "#f4b640"
+    },
+    "ops": {
+      "label": "Ops script",
+      "light": "#0284c7",
+      "dark": "#3aa8f0"
+    },
+    "state": {
+      "label": "Runtime state",
+      "light": "#8b5cf6",
+      "dark": "#a78bfa"
+    },
+    "seam": {
+      "label": "Seam / plugin",
+      "light": "#0891b2",
+      "dark": "#22d3ee"
+    },
+    "owner": {
+      "label": "Owner hatch",
+      "light": "#e11d48",
+      "dark": "#fb6f8f"
+    },
+    "flow": {
+      "label": "Phase step",
+      "light": "#5b6675",
+      "dark": "#94a3b6"
+    }
+  },
+  "states": {
+    "specced": {
+      "label": "Specced",
+      "light": "#a97f1c",
+      "dark": "#e6c15a"
+    },
+    "built": {
+      "label": "Built",
+      "light": "#2b6fe0",
+      "dark": "#7fb0ff"
+    },
+    "verified": {
+      "label": "Verified",
+      "light": "#12a06a",
+      "dark": "#4ed6a0"
+    },
+    "overridden": {
+      "label": "Overridden",
+      "light": "#dc2652",
+      "dark": "#ff6d90"
+    }
+  },
+  "edgeKinds": {
+    "flow": "control passes from A to B",
+    "calls": "A invokes B",
+    "signs": "A signs / countersigns B",
+    "routes": "A routes or dispatches to B",
+    "reads": "A reads B",
+    "guards": "A gates / blocks B",
+    "feeds": "A supplies data to B"
+  },
+  "who": {
+    "gear": "machine acts",
+    "person": "human acts / signs"
+  },
+  "name": "alpaca",
+  "target": "system",
+  "title": "System evidence map",
+  "repoRoot": "",
+  "areas": [
+    {
+      "id": "flow",
+      "name": "Flow",
+      "type": "flow",
+      "note": "Observed components and their evidence"
+    }
+  ],
+  "bench": []
+}
