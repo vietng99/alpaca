@@ -80,6 +80,8 @@ TABLE: dict[str, dict] = {
     "proof": {"keys": ("verdict", "path", "sha256", "sections", "evidence"), "group": "record"},
     "review": {"keys": ("verdict", "card", "rows"), "group": "record"},
     "barrier": {"keys": ("verdict", "tier", "allowed"), "group": "record"},
+    # specs and runbooks
+    "runbook": {"keys": ("verdict", "runbook", "spec", "errors", "warnings", "coverage"), "group": "spec"},
     # knowledge and output
     "sort": {"keys": ("verdict", "sorted", "unsorted"), "group": "knowledge"},
     "wiki": {"keys": ("verdict", "vault", "out"), "group": "knowledge"},

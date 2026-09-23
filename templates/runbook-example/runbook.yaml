@@ -44,7 +44,7 @@ stages:
         expect: 0
     retry:
       max_attempts: 2
-      on: [install-exit]
+      on_fail: [install-exit]
 
   - id: unit-test
     title: Unit and endpoint tests
@@ -113,7 +113,7 @@ stages:
         covers: [SC-002, FR-003]
     retry:
       max_attempts: 3
-      on: [redirect-p95]
+      on_fail: [redirect-p95]
       stop_on: [redirect-codes]
       move:
         knob: WORKERS

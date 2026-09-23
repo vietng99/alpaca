@@ -151,7 +151,7 @@ def minimal(**over):
             {"id": "load", "needs": ["build"], "run": "make load W=${WORKERS}", "checks": [
                 {"id": "p95", "type": "json-field", "path": "out/load.json",
                  "field": "p95_ms", "op": "<=", "value": 50, "covers": ["SC-002"]}],
-             "retry": {"max_attempts": 3, "on": ["p95"],
+             "retry": {"max_attempts": 3, "on_fail": ["p95"],
                        "move": {"knob": "WORKERS", "by": 2}}},
         ],
     }
@@ -390,8 +390,8 @@ def test_knob_shapes(tmp_path, knob, code, where):
 
 @pytest.mark.parametrize("retry,code,where", [
     ({"max_attempts": 0}, "RANGE", "stages[1].retry.max_attempts"),
-    ({"max_attempts": 3, "on": ["build-exit"]}, "RETRY-CHECK-UNKNOWN", "stages[1].retry.on[0]"),
-    ({"max_attempts": 3, "on": ["p95"], "stop_on": ["p95"]}, "RETRY-OVERLAP", "stages[1].retry.stop_on[0]"),
+    ({"max_attempts": 3, "on_fail": ["build-exit"]}, "RETRY-CHECK-UNKNOWN", "stages[1].retry.on_fail[0]"),
+    ({"max_attempts": 3, "on_fail": ["p95"], "stop_on": ["p95"]}, "RETRY-OVERLAP", "stages[1].retry.stop_on[0]"),
     ({"max_attempts": 3, "move": {"knob": "THREADS", "by": 1}}, "KNOB-UNKNOWN", "stages[1].retry.move.knob"),
     ({"max_attempts": 3, "move": {"knob": "WORKERS", "by": 0}}, "RANGE", "stages[1].retry.move.by"),
     ({"max_attempts": 3, "move": {"knob": "WORKERS"}}, "FIELD-MISSING", "stages[1].retry.move.by"),
@@ -402,6 +402,14 @@ def test_retry_shapes(tmp_path, retry, code, where):
     data["stages"][1]["retry"] = retry
     result = runbook.check(write(tmp_path, data))
     assert (code, where) in {(e["code"], e["where"]) for e in result["errors"]}, result["errors"]
+
+
+def test_bare_on_key_reads_as_true_and_is_named(tmp_path):
+    # YAML 1.1 reads a bare `on:` key as the boolean true; the message says so.
+    text = yaml.safe_dump(minimal(), sort_keys=False).replace("on_fail:", "on:")
+    result = runbook.check(write(tmp_path, text))
+    bad = [e for e in result["errors"] if e["where"] == "stages[1].retry.true"]
+    assert bad and "on_fail" in bad[0]["message"]
 
 
 def test_retry_may_not_move_an_owner_only_knob(tmp_path):
