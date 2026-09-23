@@ -203,6 +203,53 @@ def test_a_tampered_manifest_digest_still_fails_on_an_instance(tmp_path):
     assert res.returncode == 1 and "tree_digest MISMATCH" in res.stdout, res.stdout
 
 
+@pytest.mark.parametrize("make,why", [
+    (lambda root: _w(root, "intents/new.txt", "x\n", mode=0o4777), "setuid"),
+    (lambda root: _w(root, "intents/new.txt", "x\n", mode=0o646), "other-write"),
+    (lambda root: os.symlink("../alpaca/mod.py", str(root / "intents" / "link.py")), "symlink"),
+    (lambda root: os.symlink("../alpaca", str(root / "intents" / "linkdir")), "symlink"),
+])
+def test_an_added_instance_file_with_an_unsafe_mode_or_a_symlink_still_fails(tmp_path, make, why):
+    """Review L1: an added path under intents/ is the owner's content, but not a symlink and not a
+    file with an unsafe mode bit; those are drift wherever they show."""
+    root = _written(tmp_path)
+    _onboard(root)
+    make(root)
+    res = _gen(root, "--verify")
+    assert res.returncode == 1, res.stdout
+    assert "+ on disk, not in manifest: intents/" in res.stdout, res.stdout
+    assert why in res.stdout, res.stdout
+
+
+def test_an_added_directory_symlink_is_seen_on_a_distribution_tree(tmp_path):
+    """os.walk lists a directory symlink but does not descend it; verify must still see it."""
+    root = _written(tmp_path)
+    os.symlink(".", str(root / "alpaca" / "linkdir"))
+    res = _gen(root, "--verify")
+    assert res.returncode == 1, res.stdout
+    assert "+ on disk, not in manifest: alpaca/linkdir" in res.stdout, res.stdout
+
+
+def test_the_mismatch_message_prints_the_digest_that_was_compared(tmp_path):
+    """Review L3: on an instance the compare puts the owned changes back, so the 'actual' line must
+    show that digest, not the full current tree's."""
+    import json
+    gen = _load("gen_manifest.py", "alpaca_gen_integrity_l3")
+    root = _written(tmp_path)
+    _onboard(root)
+    lock = root / "MANIFEST.json"
+    data = json.loads(lock.read_text(encoding="utf-8"))
+    compared = gen._digest(data["files"])        # the owned changes put back = the stored map
+    data["tree_digest"] = "0" * 64
+    lock.write_text(json.dumps(data), encoding="utf-8")
+    full = gen.build(str(root))[0]["tree_digest"]
+    assert full != compared
+    res = _gen(root, "--verify")
+    assert res.returncode == 1, res.stdout
+    assert "  actual : %s" % compared in res.stdout, res.stdout
+    assert "actual : %s" % full not in res.stdout, res.stdout
+
+
 # ---- release modes -------------------------------------------------------------------------------
 
 def _git(cwd, *args, umask=None):
