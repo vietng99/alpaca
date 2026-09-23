@@ -1115,9 +1115,7 @@ def make_handler(live, root, remote=False):
                                    "signed_in": bool(want) and self._authed(want)})
             if path in ("/login", "/login/"):
                 if want and self._authed(want):
-                    target = (parse_qs(urlparse(self.path).query).get("next") or ["/"])[0]
-                    if not target.startswith("/") or target.startswith("//"):
-                        target = "/"
+                    target = weblogin.safe_next((parse_qs(urlparse(self.path).query).get("next") or ["/"])[0])
                     self.send_response(302)
                     self.send_header("Location", target)
                     self.send_header("Content-Length", "0")

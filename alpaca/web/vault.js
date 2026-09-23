@@ -9,8 +9,8 @@
   'use strict';
 
   var root = document.documentElement;
-  // Each page names its own theme key and default on <html>: the sign-in page defaults to dark
-  // (key alpaca.login-theme), the hub to light and shares alpaca.theme with the cockpit.
+  // Each page names its own theme key and default on <html>: the sign-in page stores its choice
+  // under alpaca.login-theme, the hub under alpaca.hub-theme, and both default to dark.
   var THEME_KEY = root.getAttribute('data-theme-key') || 'alpaca.theme';
   var THEME_DEFAULT = root.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
   var MID = '\u00b7';
@@ -448,10 +448,14 @@
   var LOGIN_DETAILS = ['request received ' + MID + ' channel open', 'access code matched ' + MID + ' constant-time compare',
     'HMAC-SHA256 session cookie ' + MID + ' 12 h', 'workspace list resolved', 'operator access authorized'];
 
+  // The same rule as the server's weblogin.safe_next: "/" then printable ASCII with no backslash,
+  // never "//" or "/\" at the start. Control characters, spaces and anything else fall back to "/".
+  var SAFE_NEXT = /^\/(?![\/\\])[!-\[\]-~]*$/;
+  function safeNext(next) { return typeof next === 'string' && SAFE_NEXT.test(next) ? next : '/'; }
+
   function destination() {
     if (location.pathname.indexOf('/login') === 0) {
-      var next = new URLSearchParams(location.search).get('next') || '/';
-      return next.charAt(0) === '/' && next.charAt(1) !== '/' ? next : '/';
+      return safeNext(new URLSearchParams(location.search).get('next') || '/');
     }
     return location.pathname + location.search + location.hash;   // the locked page itself
   }

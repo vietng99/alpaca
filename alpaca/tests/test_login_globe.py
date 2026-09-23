@@ -132,3 +132,24 @@ def test_every_carried_ui_file_is_in_the_notices():
         assert font in notices, font
     assert "SIL Open Font License 1.1" in notices
     assert (WEB / "vendor" / "OFL.txt").is_file()
+
+
+def test_pages_show_no_em_dash():
+    for name in ("login.html", "workspaces.html"):
+        text = read(name)
+        assert "&mdash;" not in text and "&#8212;" not in text and "&#x2014;" not in text.lower(), name
+
+
+def test_theme_keys_and_default_are_described_as_they_are():
+    assert 'data-theme="dark" data-theme-key="alpaca.login-theme"' in read("login.html")
+    assert 'data-theme="dark" data-theme-key="alpaca.hub-theme"' in read("workspaces.html")
+    doc = (ROOT / "docs" / "operations-hub.md").read_text(encoding="utf-8")
+    assert "alpaca.login-theme" in doc and "alpaca.hub-theme" in doc
+    header = read("vault.js").split("(function", 1)[0] + read("vault.js").split("var THEME_KEY", 1)[0][-400:]
+    assert "defaults to light" not in header and "shares alpaca.theme" not in header
+
+
+def test_globe_loads_its_data_from_this_server_only():
+    src = read("vault-globe.js")
+    assert "CDN" not in src and "cdn" not in src.lower().replace("cdnjs", "")
+    assert "urls = ['/login/assets/countries-110m.json']" in src

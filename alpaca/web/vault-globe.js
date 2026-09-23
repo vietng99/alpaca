@@ -552,8 +552,7 @@
     // -- minimal TopoJSON decode --
     // Only the fields this decoder actually reads: topology.arcs (delta-encoded
     // integer pairs), topology.transform.{scale,translate}, and per geometry
-    // its type (Polygon / MultiPolygon) and arcs. The payload may come from a
-    // CDN, so it is untrusted input; anything else is ignored.
+    // its type (Polygon / MultiPolygon) and arcs. Anything else is ignored.
     function decodeArc(topology, i) {
       var arcRaw = topology.arcs[i];
       var sx = topology.transform.scale[0];
@@ -635,6 +634,9 @@
 
     function onResize() {
       build();
+      // build() resets the canvas size, which clears it; reduced-motion has no
+      // next frame queued, so draw the still frame again
+      if (reduced && alive) requestAnimationFrame(frame);
     }
     function onTheme() {
       pal = readPalette();
