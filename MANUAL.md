@@ -71,7 +71,7 @@ The everyday operating verbs. Small on purpose.
 ### Output and views
 
 - `alpaca export` - export the record as a static bundle.
-- `alpaca hub` - `alpaca hub publish` writes this workspace's tile to a host hub's drop directory from `data.json` or `board.json` (settings under `hub:` in project.yaml; it also runs at session end when `hub.enabled` is true); `--print` writes nothing. `alpaca hub timer` prints a systemd user service and timer that publish every 60 s. See `docs/host-hub.md`.
+- `alpaca hub` - `alpaca hub publish` writes this workspace's tile to a host hub's drop directory from `data.json` or `board.json` (settings under `hub:` in project.yaml; it also runs at session end when `hub.enabled` is true); `--print` writes nothing. `alpaca hub timer` prints a systemd user service and timer that publish every 60 s. `setup/hub-publish.py` is the same publisher as one standalone file (Python standard library only) that any member of the machine can copy to publish a workspace without installing Alpaca. See `docs/host-hub.md`.
 - `alpaca deploy` - deploy the read-only page for the owner to read while away.
 - `alpaca serve` - serve the read-only page locally.
 - `alpaca analytics` - build the analytics projection (`analytics/index.html`).

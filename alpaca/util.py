@@ -40,3 +40,21 @@ def write_text(path, text) -> None:
     u = os.umask(0); os.umask(u)
     os.chmod(tmp, 0o666 & ~u)
     os.replace(tmp, path)
+
+
+def from_caller(path):
+    """A command-line path, read from the folder the command was run in.
+
+    bin/alpaca-python changes to the install root before Python starts, and passes the folder it
+    was called from as ALPACA_CALLER_CWD. A relative path is joined to that folder, but only when
+    Python is running in the install root (the wrapper's doing); `python -m alpaca` run elsewhere
+    reads it from its own folder as usual. None and absolute paths come back unchanged."""
+    caller = os.environ.get("ALPACA_CALLER_CWD", "")
+    if not path or os.path.isabs(path) or not os.path.isabs(caller):
+        return path
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    try:
+        in_root = os.path.samefile(os.getcwd(), root)
+    except OSError:
+        in_root = False
+    return os.path.join(caller, path) if in_root else path

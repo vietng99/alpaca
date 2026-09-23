@@ -5,7 +5,8 @@ own tile to. The hub never fetches anything from a workspace and never uses a wo
 credentials: each workspace pushes one small JSON file into a shared drop directory, and the hub
 reads, checks and shows those files. Each workspace keeps its own cockpit and hostname; the hub
 only links a cockpit whose hostname its admin approved. The hub server itself is not part of this
-repository. This page covers the publishing side, `alpaca hub`.
+repository. This page covers the publishing side: `alpaca hub` for this workspace, and
+`setup/hub-publish.py` for any workspace on the machine, Alpaca or not.
 
 ## The tile
 
@@ -57,15 +58,45 @@ alpaca hub timer
 - `alpaca hub publish` writes the tile atomically (a hidden temp file in the drop, then a rename)
   and prints `published <path>`. It refuses (exit 2) while `hub.enabled` is false. `--print`
   writes the tile to stdout and nothing to the drop, whatever `hub.enabled` says. The drop is
-  `--drop`, else `$ALPACA_HUB_DROP`, else `hub.drop`, else `/srv/alpaca-hub/tiles`.
-- At session end the SessionEnd hook publishes when `hub.enabled` is true. A publish error is
-  recorded as a `hub-publish-failed` event and never breaks the hook; with `enabled: false` the
-  hook does nothing for the hub.
+  `--drop`, else `$ALPACA_HUB_DROP`, else `hub.drop`, else `/srv/alpaca-hub/tiles`. A relative
+  `--drop` is read from the folder you ran the command in.
+- At session end the SessionEnd hook publishes when `hub.enabled` is true. It first refreshes
+  `data.json` from the record, so the tile shows the state the session ended with (the ended
+  session no longer counts as live). A publish error is recorded as a `hub-publish-failed` event
+  and never breaks the hook; with `enabled: false` the hook does nothing for the hub.
 - `alpaca hub timer` prints a systemd user service and timer (`alpaca-hub-publish-<slug>`) that run
   `bin/alpaca hub publish` every 60 s. It installs nothing. To install, as yourself: save the two
   parts as the files named in the output, then
   `systemctl --user daemon-reload && systemctl --user enable --now alpaca-hub-publish-<slug>.timer`.
-  The hub marks a tile stale after a set age, so a timer keeps it fresh between sessions.
+  The hub marks a tile stale after a set age, so a timer keeps it fresh between sessions. The timer
+  publishes the last `data.json` with a new `updated` time: `updated` says the publisher is alive,
+  and the content changes when a hook writes a new projection.
+
+## The standalone publisher
+
+`setup/hub-publish.py` is one file that needs nothing but Python 3 and its standard library. Any
+member of the machine can copy it (from this repository or from a colleague) and publish a tile
+for a workspace that does not run Alpaca, as long as that workspace writes a `data.json` or
+`board.json` of the same shape. It is also the code behind `alpaca hub publish`: the verb loads
+this file, so both build and write the same tile (same fields, caps, character rule, checks and
+atomic write).
+
+```
+cp setup/hub-publish.py ~/bin/hub-publish.py
+python3 ~/bin/hub-publish.py --root /path/to/workspace --slug demo --name "Demo" \
+    --href https://demo.example.com/ [--what "one line"] [--drop DIR] [--print | --timer]
+```
+
+- `--root`, `--slug` and `--name` are required; there is no project.yaml to read them from.
+  `--slug` is lower-case letters and digits joined by single hyphens, at most 40 characters.
+- `--user` defaults to, and may only be, the user running the script.
+- The drop is `--drop`, else `$ALPACA_HUB_DROP`, else `/srv/alpaca-hub/tiles`.
+- `--print` writes the tile to stdout and nothing to the drop. For the same workspace and the
+  same settings it prints what `alpaca hub publish --print` prints, except the `updated` time.
+- `--timer` prints a systemd user service and timer (`hub-publish-<slug>`) that run the script
+  with the same arguments every 60 s (paths made absolute). It installs nothing; install it as
+  shown for `alpaca hub timer`.
+- Exit codes: 0 done, 2 refused (the reason is on stderr), 64 usage.
 
 ## Safety
 
