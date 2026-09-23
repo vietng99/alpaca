@@ -116,6 +116,49 @@ def test_manifest_verifies_on_a_fresh_clone(tmp_path):
     assert "OK -- tree matches manifest" in res.stdout
 
 
+def _git(cwd, *args, umask=None):
+    return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+                           "-c", "init.defaultBranch=main", *args], cwd=str(cwd),
+                          capture_output=True, text=True, check=True,
+                          preexec_fn=(lambda: os.umask(umask)) if umask is not None else None)
+
+
+def test_manifest_verifies_on_a_git_clone_made_under_umask_0002(tmp_path):
+    """git keeps only the exec bit, so a clone made under umask 0002 gives 0664/0775 files. The
+    manifest check must pass there (it compares only the exec bit), and an exec-bit flip must still
+    fail."""
+    src = tmp_path / "src"
+    src.mkdir()
+    _mksource(str(src))
+    _w(str(src), "alpaca/tool.sh", "#!/bin/sh\necho ok\n", mode=0o755)
+    assert _gen(str(src), "--write").returncode == 0
+    _git(src, "init", "-q")
+    _git(src, "add", "-A")
+    _git(src, "commit", "-q", "-m", "tree")
+    clone = tmp_path / "clone"
+    _git(tmp_path, "clone", "-q", str(src), str(clone), umask=0o002)
+    assert os.stat(clone / "alpaca" / "mod.py").st_mode & 0o777 == 0o664      # the host's checkout
+    assert os.stat(clone / "alpaca" / "tool.sh").st_mode & 0o777 == 0o775
+    res = _gen(str(clone), "--verify")
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "mode/type changed" not in res.stdout
+    # --restore-modes has nothing to fix on such a clone and leaves group write alone
+    res = _gen(str(clone), "--restore-modes")
+    assert res.returncode == 0 and "already correct" in res.stdout, res.stdout
+    assert os.stat(clone / "alpaca" / "mod.py").st_mode & 0o777 == 0o664
+    # the exec bit is still checked: dropping it, or adding it, is drift
+    os.chmod(clone / "alpaca" / "tool.sh", 0o664)
+    os.chmod(clone / "alpaca" / "mod.py", 0o775)
+    res = _gen(str(clone), "--verify")
+    assert res.returncode == 1
+    assert "mode/type changed: alpaca/tool.sh (f0755 -> f0644)" in res.stdout, res.stdout
+    assert "mode/type changed: alpaca/mod.py (f0644 -> f0755)" in res.stdout, res.stdout
+    # and --restore-modes puts the exec bits back
+    assert _gen(str(clone), "--restore-modes").returncode == 0
+    assert _gen(str(clone), "--verify").returncode == 0
+    assert os.stat(clone / "alpaca" / "tool.sh").st_mode & 0o100
+
+
 def test_a_memory_class_change_is_not_drift(tmp_path):
     src = tmp_path / "src"
     src.mkdir()
