@@ -113,6 +113,16 @@ barrier:
   - .alpaca/
   - .venv/
   - .env
+  terms: .alpaca/sealed-terms.txt
+  allow:
+  - '[a-z0-9._%+\-]+@(?:[a-z0-9\-]+\.)*(?:example\.(?:com|org|net)|example|invalid|test|localhost)  #
+    reserved placeholder domains (RFC 2606, RFC 6761) used by fixtures and docs; never a real mailbox'
+  - '[a-z0-9._%+\-]*@(?:pytest\.(?:fixture|mark\.[a-z_]+)|cli\.command|common\.fail|contextlib\.contextmanager)[a-z0-9_]*  #
+    the joined lane glues the end of one line to a Python decorator on the next line; not an address'
+  - '[a-z0-9._%+\-]*@reboot[a-z0-9.\-]*  # the joined lane glues prose to the crontab keyword @reboot;
+    not an address'
+  - '/home/(?:owner|someone|secret)(?:/[^\s"''<>|]*)?  # generic home folders in test fixtures; no
+    real user'
 hub:
   enabled: false
   drop: /srv/alpaca-hub/tiles

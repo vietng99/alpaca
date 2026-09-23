@@ -99,7 +99,7 @@ def test_snapshot_filters_private_records_and_retries_partial_line(tmp_path):
 def test_scoped_codex_discovery_rejects_wrong_project_and_ambiguity(tmp_path):
     root, storage = tmp_path / 'project', tmp_path / 'sessions'
     root.mkdir()
-    native = '01a0c976-06a2-7c03-8eef-96eed544e626'
+    native = '01900000-0000-7000-8000-000000000001'  # synthetic UUIDv7-shaped id
     good = write(storage / '2026' / ('rollout-' + native + '.jsonl'), [
         {'type': 'session_meta', 'payload': {'id': native, 'cwd': str(root)}}])
     write(storage / ('foreign-' + native + '.jsonl'), [

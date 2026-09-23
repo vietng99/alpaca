@@ -167,7 +167,7 @@
 <li><code>alpaca day</code> - regenerate the per-project daily digest, a view over the record, never a source.</li>
 <li><code>alpaca proof</code> - the report a task hands in: <code>new</code> scaffolds it, <code>seal</code> hashes it onto the record, <code>check</code> re-hashes it.</li>
 <li><code>alpaca review</code> - list and move the review-card rows a formation produces.</li>
-<li><code>alpaca barrier</code> - the outbound push barrier and the tier rule at the push boundary.</li>
+<li><code>alpaca barrier</code> - the outbound push barrier: <code>install</code> writes the pre-push hook that scans every commit, path name, message, ref and tag entering any remote; <code>scan &lt;rev&gt;</code> runs it by hand. The term list and the allow rules are in <code>docs/shipping.md</code>.</li>
 </ul>
 <h3>Specs and runbooks</h3>
 <ul>

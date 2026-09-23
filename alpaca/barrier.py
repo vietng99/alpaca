@@ -14,6 +14,15 @@ What it does, and why each clause is here:
     commit that added it. Each commit's files are read from the object store (`git ls-tree`), never
     from the checkout.
   * a protected PREFIX or exact PATH (project.yaml `barrier.protected_paths`) blocks the push.
+  * a commit carries more than blob bytes, so the scan also reads each PATH NAME, each commit's
+    author, committer and message, and (at the hook) every pushed REF NAME and annotated TAG
+    object. Metadata is matched against the sealed terms only; the generic shape rules (a mailbox,
+    a home path) apply to file content and path names, where fixtures live.
+  * a shape false positive is cleared only by a narrow allow rule (project.yaml `barrier.allow`,
+    `<regex>  # <reason>`), matched against the WHOLE value and never against a sealed term.
+  * a term list that is configured but absent (each clone supplies its own, outside the published
+    tree) does not block: the report says the terms were NOT checked. A list that is present but
+    unusable, an allow rule without a reason, or an unreadable project.yaml refuses the push.
   * the report names DIGESTS, never paths: a leak report that prints the offending path re-leaks
     it. Every blocked entry is identified by a sha256 digest of its path (and the commit it rode
     in on), so the report is safe to keep and to show.
@@ -41,6 +50,9 @@ R_PROTECTED = "PROTECTED-PATH-IN-PUSH"
 R_LEAK = "SEALED-TERM-IN-PUSH"
 R_SCAN_ERROR = "SCAN-ERROR-REFUSES"
 R_NO_COMMITS = "NO-COMMITS-TO-SCAN"
+R_CONFIG = "CONFIG-UNREADABLE-REFUSES"
+R_TERMS_INVALID = "TERM-LIST-INVALID-REFUSES"
+R_TERMS_UNCHECKED = "TERMS-NOT-CHECKED"
 
 HOOK_NAME = "pre-push"
 _ZERO = "0" * 40
@@ -138,30 +150,97 @@ def commits_entering(root, local_sha, remote_sha):
 
 
 # ------------------------------------------------------------------ the scan
-def scan(root, commits, protected=None, term_list=None):
+def _config(root):
+    """project.yaml, read strictly: an unreadable file raises, and the caller refuses the push. A
+    missing file is an empty configuration (no protected paths, no terms)."""
+    return project.load(root) or {}
+
+
+def _terms(root):
+    """(TermList | None, refusal_reasons, detail). A configured list that is absent is a notice (each
+    clone supplies its own); a list that is present but unusable, or a malformed allow rule,
+    refuses."""
+    tl, reasons, detail = leak_audit.load_terms_from_project(root)
+    bad = [r for r in reasons if r in (leak_audit.R_ALLOW_NO_REASON, leak_audit.R_ALLOW_BAD_REGEX,
+                                       leak_audit.R_TERMS_EMPTY, leak_audit.R_TERMS_UNDECODABLE,
+                                       leak_audit.R_TERM_TOO_SHORT)]
+    return tl, bad, detail
+
+
+def _meta_hits(term_list, text):
+    """Sealed-term hits in commit, tag or ref metadata (no shape rules: an author e-mail or a
+    trailer is a deliberate public identity, decided by the owner, not a fixture)."""
+    th, _ts = leak_audit.scan_text(term_list, text, "", shape_on=False)
+    if th:
+        return True
+    raw = text.encode("utf-8", "surrogateescape")
+    low, lown = raw.lower(), raw.replace(b"\x00", b"").lower()
+    return any(k.encode("utf-8") in low or k.encode("utf-8") in lown for _t, k in term_list.terms)
+
+
+def _commit_text(root, sha):
+    return _git(root, "cat-file", "commit", sha)
+
+
+def scan(root, commits, protected=None, term_list=None, refs=None):
     """Scan every commit entering the remote and return a Verdict.
 
     The push passes (PASS) only when no commit carries a protected path and no sealed term is
-    found in any blob. A protected prefix or exact path blocks (BLOCKED). A sealed term in a blob
-    fails (FAIL). Any error refuses (BLOCKED, fail-closed). The report names digests, never paths.
-    """
-    if protected is None:
-        protected = protected_paths(root)
-    if term_list is None:
-        term_list, _r, _d = leak_audit.load_terms_from_project(root)
+    found in any blob, path name, commit header or message, pushed ref name or tag object. A
+    protected prefix or exact path blocks (BLOCKED). A sealed term fails (FAIL). Any error refuses
+    (BLOCKED, fail-closed). The report names digests, never paths, refs or terms.
 
+    `refs` is an optional list of (ref_name, sha) pairs the push updates (the hook passes them).
+    """
     report = {"instrument": INSTRUMENT, "commits_scanned": 0, "files_scanned": 0,
-              "blocked": [], "tier": tier(root)}
-    reasons, verdicts = [], []
+              "blocked": [], "tier": "?"}
+    reasons, verdicts, detail = [], [], []
 
     try:
-        if not commits:
-            report["reason_codes"] = [R_NO_COMMITS]
-            report["detail"] = ["no commits are entering the remote; nothing to scan"]
+        cfg = _config(root)
+    except Exception as e:
+        report["reason_codes"] = [R_CONFIG]
+        report["detail"] = ["project.yaml could not be read, so the barrier cannot know what to "
+                            "refuse: %s: %s" % (type(e).__name__, e)]
+        report["verdict"] = vc.BLOCKED
+        return Verdict(vc.BLOCKED, [R_CONFIG], report)
+    report["tier"] = str(cfg.get("tier") or "public")
+    if protected is None:
+        block = cfg.get("barrier") or {}
+        protected = [str(p) for p in (block.get("protected_paths") or []) if str(p).strip()]
+    if term_list is None:
+        term_list, bad, tdetail = _terms(root)
+        if bad:
+            report["reason_codes"] = [R_TERMS_INVALID] + bad
+            report["detail"] = ["the term list or an allow rule is unusable, so the push is "
+                                "refused"] + tdetail[:10]
+            report["verdict"] = vc.BLOCKED
+            return Verdict(vc.BLOCKED, [R_TERMS_INVALID], report)
+        if term_list is None:
+            reasons.append(R_TERMS_UNCHECKED)
+            configured = (cfg.get("barrier") or {}).get("terms")
+            detail.append("sealed terms and shape rules were NOT checked: %s"
+                          % ("the configured term list %s is absent in this clone" % configured
+                             if configured else "no term list is configured"))
+
+    blob_seen, path_seen = {}, {}
+    try:
+        if not commits and not refs:
+            report["reason_codes"] = reasons + [R_NO_COMMITS]
+            report["detail"] = detail + ["no commits are entering the remote; nothing to scan"]
             report["verdict"] = vc.PASS
-            return Verdict(vc.PASS, [R_NO_COMMITS], report)
+            return Verdict(vc.PASS, reasons + [R_NO_COMMITS], report)
+
+        def leak(entry):
+            report["blocked"].append(dict(entry, reason=R_LEAK))
+            if R_LEAK not in reasons:
+                reasons.append(R_LEAK)
+            verdicts.append(vc.FAIL)
+
         for sha in commits:
             report["commits_scanned"] += 1
+            if term_list is not None and _meta_hits(term_list, _commit_text(root, sha)):
+                leak({"commit": sha[:12], "where": "commit-metadata"})
             for path, blob_sha in commit_files(root, sha):
                 report["files_scanned"] += 1
                 rule = path_is_protected(path, protected)
@@ -173,26 +252,39 @@ def scan(root, commits, protected=None, term_list=None):
                         reasons.append(R_PROTECTED)
                     verdicts.append(vc.BLOCKED)
                     continue
-                if term_list is not None:
-                    raw = blob_bytes(root, blob_sha)
-                    hits = _blob_hits(term_list, raw, path)
-                    if hits:
-                        report["blocked"].append(
-                            {"commit": sha[:12], "path_digest": _digest(path),
-                             "blob_digest": blob_sha[:12], "reason": R_LEAK})
-                        if R_LEAK not in reasons:
-                            reasons.append(R_LEAK)
-                        verdicts.append(vc.FAIL)
+                if term_list is None:
+                    continue
+                if path not in path_seen:
+                    th, _ts = leak_audit.scan_text(term_list, path, path, shape_on=True)
+                    path_seen[path] = bool(th)
+                    if th:
+                        leak({"commit": sha[:12], "path_digest": _digest(path),
+                              "where": "path-name"})
+                if blob_sha not in blob_seen:
+                    # a blob is read and judged once, however many commits carry it
+                    blob_seen[blob_sha] = bool(_blob_hits(term_list, blob_bytes(root, blob_sha), path))
+                    if blob_seen[blob_sha]:
+                        leak({"commit": sha[:12], "path_digest": _digest(path),
+                              "blob_digest": blob_sha[:12], "where": "content"})
+        for name, sha in (refs or []):
+            if term_list is None:
+                break
+            if _meta_hits(term_list, name):
+                leak({"ref_digest": _digest(name), "where": "ref-name"})
+            if sha and set(sha) != {"0"} and _git(root, "cat-file", "-t", sha).strip() == "tag":
+                if _meta_hits(term_list, _git(root, "cat-file", "tag", sha)):
+                    leak({"ref_digest": _digest(name), "where": "tag-object"})
     except Exception as e:
         # Fail-closed: a scan that could not look does not let the push through.
         reasons.append(R_SCAN_ERROR)
         report["reason_codes"] = reasons
-        report["detail"] = ["scan error refuses the push: %s: %s" % (type(e).__name__, e)]
+        report["detail"] = detail + ["scan error refuses the push: %s: %s" % (type(e).__name__, e)]
         report["verdict"] = vc.BLOCKED
         return Verdict(vc.BLOCKED, reasons, report)
 
     verdict = leak_audit.worst(verdicts) if verdicts else vc.PASS
     report["reason_codes"] = reasons
+    report["detail"] = detail
     report["verdict"] = verdict
     return Verdict(verdict, reasons, report)
 
@@ -224,8 +316,10 @@ def render(report):
                  % (report.get("commits_scanned", 0), report.get("files_scanned", 0),
                     len(report.get("blocked", []))))
     for b in report.get("blocked", []):
-        lines.append("    - refused %s in commit %s [%s]"
-                     % (b.get("path_digest") or b.get("blob_digest"), b.get("commit"),
+        lines.append("    - refused %s%s in %s [%s]"
+                     % (b.get("path_digest") or b.get("blob_digest") or b.get("ref_digest") or "-",
+                        " (%s)" % b["where"] if b.get("where") else "",
+                        "commit %s" % b["commit"] if b.get("commit") else "a pushed ref",
                         b.get("reason")))
     for d in report.get("detail", []):
         lines.append("    - %s" % d)
@@ -251,11 +345,16 @@ def hook_path(root):
 def hook_body():
     """The pre-push hook: it hands stdin (the candidate refs) to the barrier, which refuses on
     anything but PASS. It names no absolute path and no folder literal, so it is rename-safe: git
-    runs it with cwd at the repo root and the barrier discovers the root from there."""
+    runs it with cwd at the repo root and the barrier discovers the root from there. It runs under
+    the install's own launcher when the repo has one (its venv carries PyYAML), else python3; an
+    interpreter that cannot read project.yaml refuses the push rather than skipping the scan."""
     return ("#!/bin/sh\n"
             "# alpaca outbound barrier (M4.11): scan every commit entering the remote and refuse\n"
             "# mechanically on a protected path or a sealed term. The decision to push at all is\n"
             "# still a human review card (M3.5); this only stops what must not leave.\n"
+            "if [ -x bin/alpaca-python ]; then\n"
+            '  exec bin/alpaca-python -m alpaca.barrier prepush "$@"\n'
+            "fi\n"
             'exec python3 -m alpaca.barrier prepush "$@"\n')
 
 
@@ -283,33 +382,38 @@ def install(root):
 # ------------------------------------------------------------------ the hook entry
 def prepush(argv=None):
     """The pre-push hook body. Reads the candidate refs from stdin, scans every commit that would
-    enter the remote, and returns an exit code: 0 lets git proceed, non-zero refuses the push."""
+    enter the remote plus the pushed ref names and tag objects, and returns an exit code: 0 lets
+    git proceed, non-zero refuses the push."""
     import sys
     root = paths.root()
     data = sys.stdin.read() if not sys.stdin.isatty() else ""
-    worst = vc.PASS
-    any_ref = False
+    commits, seen, refs = [], set(), []
     for line in data.splitlines():
         cols = line.split()
         if len(cols) < 4:
             continue
-        any_ref = True
-        _local_ref, local_sha, _remote_ref, remote_sha = cols[:4]
+        local_ref, local_sha, remote_ref, remote_sha = cols[:4]
         if set(local_sha) == {"0"}:
             continue  # a delete pushes no commits
+        refs.append((local_ref, local_sha))
+        if remote_ref != local_ref:
+            refs.append((remote_ref, None))
         try:
-            commits = commits_entering(root, local_sha, remote_sha)
+            entering = commits_entering(root, local_sha, remote_sha)
         except Exception as e:
             print(render({"verdict": vc.BLOCKED, "detail": ["%s: %s" % (type(e).__name__, e)]}))
             return vc.emit_verdict(INSTRUMENT, vc.BLOCKED, R_SCAN_ERROR)
-        res = scan(root, commits)
-        print(render(res.report))
-        worst = leak_audit.worst([worst, res.verdict])
-    if not any_ref:
+        for c in entering:
+            if c not in seen:
+                seen.add(c)
+                commits.append(c)
+    if not refs:
         return vc.PASS
-    if worst == vc.PASS:
+    res = scan(root, commits, refs=refs)
+    print(render(res.report))
+    if res.verdict == vc.PASS:
         return vc.emit_verdict(INSTRUMENT, vc.PASS, "nothing protected or sealed is leaving")
-    return vc.emit_verdict(INSTRUMENT, worst, "push refused mechanically (still a human decision)")
+    return vc.emit_verdict(INSTRUMENT, res.verdict, "push refused mechanically (still a human decision)")
 
 
 # ------------------------------------------------------------------ CLI: alpaca barrier install|scan

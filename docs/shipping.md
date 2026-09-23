@@ -97,3 +97,70 @@ For full runtime verification in a disposable extracted copy:
 Keep the archive and receipt as the clean distribution. Run project work in the extracted copy;
 the `.alpaca/` record, generated resume files, local settings, and domain outputs belong to that
 copy. To preserve a project's runtime history, use a separate explicitly chosen backup process.
+
+## Push barrier
+
+Before a push to a shared remote, install the pre-push barrier in the repository you push from:
+
+```bash
+bin/alpaca barrier install
+```
+
+It writes `.git/hooks/pre-push` (it refuses to replace a hook it did not write). Git runs the hook
+before any object leaves, for every remote, and the hook runs `bin/alpaca-python -m alpaca.barrier
+prepush` (plain `python3` when the launcher is missing). The barrier scans every commit that would
+enter the remote, not the working tree, and refuses the push when it finds:
+
+- a protected path (`barrier.protected_paths` in `project.yaml`: `.alpaca/`, `.venv/`, `.env`);
+- a sealed term, case-insensitive, in any file, path name, author or committer, commit message,
+  pushed ref name or annotated tag;
+- a shape the term list cannot enumerate (an e-mail address, a `/home/<user>` path) in a file or a
+  path name, unless an allow rule clears that exact value.
+
+Its report names digests, never the paths, refs or terms it refused. Any error while scanning, an
+unreadable `project.yaml`, an unusable term list or an allow rule without a reason refuses the push.
+`bin/alpaca barrier scan <rev> [--since <sha>]` runs the same scan by hand. Deciding to push at all
+stays a human decision; the barrier only stops what must not leave.
+
+### The term list stays outside the published tree
+
+`barrier.terms` names `.alpaca/sealed-terms.txt`. The `.alpaca/` folder is gitignored and a protected
+path, so the list is never committed: listing the names inside the published tree would publish
+them. Each clone supplies its own list there, in the leak-audit format (one term per line, at least
+four characters, `#` starts a comment). When the file is absent the push is not blocked, but the
+report says `TERMS-NOT-CHECKED`: only protected paths were checked.
+
+The maintainers keep the forbidden-name list of this project outside the repository, in the
+workspace that holds it, at `tools/forge/forbidden.txt`, and link it into place:
+
+```bash
+mkdir -p .alpaca
+ln -s ../../tools/forge/forbidden.txt .alpaca/sealed-terms.txt   # from the repository root
+```
+
+The same list feeds the full leak audit over the tree and the git history before a first publish.
+
+### Allow rules
+
+The shape rules also fire on a few known values in this tree. `barrier.allow` in `project.yaml`
+clears them. Each rule is `<regex>  # <reason>`; the regex must match the WHOLE value the shape rule
+found (case-insensitive), and a rule clears shape hits only, never a sealed term. A rule with no
+reason, or a regex that does not compile, refuses the push. The shipped rules:
+
+| Rule clears | Reason |
+|---|---|
+| addresses at `example.com`, `example.org`, `example.net`, `*.example`, `*.invalid`, `*.test`, `*.localhost` | reserved placeholder domains (RFC 2606, RFC 6761) used by fixtures and docs |
+| `<text>@pytest.fixture`, `@pytest.mark.<name>`, `@cli.command`, `@common.fail`, `@contextlib.contextmanager` | the joined lane (whitespace removed, to catch a term split across a line break) glues the end of one line to a Python decorator on the next |
+| `<text>@reboot...` | the same gluing with the crontab keyword `@reboot` in prose |
+| `/home/owner`, `/home/someone`, `/home/secret` and paths below them | generic home folders in test fixtures; no real user |
+
+The joined lane removes whitespace, so keep a placeholder address apart from the next word with a
+quote or a bracket (`<t@example.invalid>`), as the fixtures here do. Font files and compressed
+archives do not decode as text; the barrier scans their raw bytes for the sealed terms only, so
+they need no rule.
+
+### Check that it refuses
+
+In a scratch clone with a scratch bare repository as its remote, install the barrier the same way,
+commit a file that holds one sealed term and push: the push must be refused. Remove the term, commit
+a clean change, push again: it must pass. Never add the scratch remote to the real repository.

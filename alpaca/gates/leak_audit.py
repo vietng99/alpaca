@@ -201,6 +201,7 @@ class TermList(object):
     def __init__(self):
         self.terms = []          # [(term, defanged_lower)]
         self.allow = []          # [(regex, reason, source_line)]
+        self.shape_allow = []    # [(regex, reason, rule_number)] - shape hits only, whole value
         self.refused = []        # [(raw, why)]  - reported, never silent
         self.digest = ""
         self.path = ""
@@ -260,6 +261,41 @@ def _terms_from_lines(lines, source):
     return tl, reasons, detail
 
 
+def parse_shape_allow(entries, source):
+    """Parse shape allow rules: each entry is `<regex>  # <reason>`. A rule clears a SHAPE hit only
+    (a mailbox, a home path) and only when the regex matches the WHOLE matched value, so it can never
+    hide a sealed term, and never clears a longer value that merely contains an allowed one.
+    Returns (rules, reasons, detail); a rule with no reason or a bad regex is reported, never used."""
+    rules, reasons, detail = [], [], []
+    for n, entry in enumerate(entries or [], start=1):
+        body = str(entry)
+        if "#" not in body:
+            reasons.append(R_ALLOW_NO_REASON)
+            detail.append("%s rule %d: allow rule carries no '# reason'" % (source, n))
+            continue
+        pat, reason = body.rsplit("#", 1)
+        pat, reason = pat.strip(), reason.strip()
+        if not pat or not reason:
+            reasons.append(R_ALLOW_NO_REASON)
+            detail.append("%s rule %d: allow rule has an empty pattern or reason" % (source, n))
+            continue
+        try:
+            rx = re.compile(pat, re.IGNORECASE)
+        except re.error as e:
+            reasons.append(R_ALLOW_BAD_REGEX)
+            detail.append("%s rule %d: %s" % (source, n, e))
+            continue
+        rules.append((rx, reason, n))
+    return rules, reasons, detail
+
+
+def _shape_allowed(tl, value):
+    for rx, reason, n in getattr(tl, "shape_allow", ()):
+        if rx.fullmatch(value):
+            return reason, n
+    return None, None
+
+
 def load_terms(path):
     """Parse a sealed-term list file. Returns (TermList | None, reasons, detail)."""
     if not os.path.isfile(path):
@@ -290,17 +326,26 @@ def load_terms_from_project(root):
         cfg = {}
     block = (cfg.get("barrier") or {})
     terms_file = block.get("terms")
+    inline = block.get("sealed_terms")
     if terms_file:
         p = terms_file if os.path.isabs(terms_file) else os.path.join(root, terms_file)
-        return load_terms(p)
-    inline = block.get("sealed_terms")
-    if isinstance(inline, list) and inline:
+        tl, reasons, detail = load_terms(p)
+    elif isinstance(inline, list) and inline:
         lines = [str(t) for t in inline]
         tl, reasons, detail = _terms_from_lines(lines, "project.yaml:barrier.sealed_terms")
         if tl is not None:
             tl.digest = sha256_bytes("\n".join(lines).encode("utf-8"))
-        return tl, reasons, detail
-    return None, [R_TERMS_ABSENT], ["no barrier.terms or barrier.sealed_terms in project.yaml"]
+    else:
+        tl, reasons, detail = None, [R_TERMS_ABSENT], ["no barrier.terms or barrier.sealed_terms "
+                                                       "in project.yaml"]
+    # Shape allow rules (barrier.allow) are product DATA: they name the known false positives of the
+    # generic shape rules in this tree, never a sealed term, so they live in project.yaml.
+    rules, ar, ad = parse_shape_allow(block.get("allow"), "project.yaml:barrier.allow")
+    reasons = list(reasons) + ar
+    detail = list(detail) + ad
+    if tl is not None:
+        tl.shape_allow = rules
+    return tl, reasons, detail
 
 
 # ------------------------------------------------------------------ decoding
@@ -393,7 +438,9 @@ def scan_text(tl: TermList, text: str, relpath: str, shape_on: bool):
                             break
                 else:
                     lineno, ctx = 0, m.group(0)
-                why, at = _allowed(tl, ctx or m.group(0))
+                why, at = _shape_allowed(tl, m.group(0))
+                if not why:
+                    why, at = _allowed(tl, ctx or m.group(0))
                 rec = {"file": relpath, "line": lineno, "kind": "shape", "rule": name,
                        "lane": lane, "context": (ctx or m.group(0))[:200],
                        "matched": m.group(0)[:120]}

@@ -55,7 +55,7 @@ The everyday operating verbs. Small on purpose.
 - `alpaca day` - regenerate the per-project daily digest, a view over the record, never a source.
 - `alpaca proof` - the report a task hands in: `new` scaffolds it, `seal` hashes it onto the record, `check` re-hashes it.
 - `alpaca review` - list and move the review-card rows a formation produces.
-- `alpaca barrier` - the outbound push barrier and the tier rule at the push boundary.
+- `alpaca barrier` - the outbound push barrier: `install` writes the pre-push hook that scans every commit, path name, message, ref and tag entering any remote; `scan <rev>` runs it by hand. The term list and the allow rules are in `docs/shipping.md`.
 
 ### Specs and runbooks
 
