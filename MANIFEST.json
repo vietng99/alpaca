@@ -2,7 +2,7 @@
   "product": "Alpaca",
   "description": "The engineering harness. A full-tree integrity record over the mechanism class the manifest declares; the memory class (runtime state) is excluded so the digest map describes the shipment and verifies on a fresh clone.",
   "file_count": 677,
-  "tree_digest": "e3433e340ef64a30101667e0835e609868122d351ecc8aea0cb68b43b92ab2be",
+  "tree_digest": "ec4381c46c75c046732b207a146d6679d0b05fed43b40ffd7eaada150fca19c4",
   "tree_digest_note": "sha256 over '<sha256>  <path>' lines in path order, over every mechanism-class file except MANIFEST.json itself, every __pycache__/ dir and any *.pyc. Re-derive with: python3 gen_manifest.py --verify",
   "files": {
     ".claude/settings.json": "788c9903dcfbc6c7835957d80325d4a40c0405995cce88650cc0099e5b665506",
@@ -14,7 +14,7 @@
     "LICENSE": "d551f940f687c81afdee0122d145fc033cb53a98fbf37d52e5d82c22b23a6dbe",
     "MANUAL.md": "4759dd2573fdc7f4f1cd904f260d63ad35d9214b039fdccf86c82e4fc9508317",
     "MAP.md": "5eba24062388bcb101ca0804ba131b4c4b93976e44b17b9d004b512257103a12",
-    "README.md": "48a3e8cc7681b6981a7dfe7da8ebaad8f9a6327ad07e5644dde53a484d4a650b",
+    "README.md": "c63ba50e0d2c5f58a4c9b2633f21dab55d8536a4ee55d991480155329bb1f8b5",
     "THIRD-PARTY-NOTICES.md": "e9a7fffe4bf205981247b1052666412e6b545d6680f5fd4ab6448cfe9c4ebcbd",
     "agents/_common.md": "d949f7d06d3d37c54d9e9bd7f53a1ab1d51c7cbe15ee64d96f9d12fbbbc27dbd",
     "agents/autodrive.md": "2ec622ce6e03887388acf896f7509eb818b22856abaaf7801da482c52e1e6760",
