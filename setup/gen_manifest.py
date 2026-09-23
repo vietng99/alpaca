@@ -26,8 +26,13 @@ Instance-owned files: `alpaca onboard` writes project.yaml and intents/queue.md,
 keeps project.yaml and intents/ (alpaca/upgrade.py PRESERVE). Both ship as templates in the
 mechanism class. Once a tree is onboarded (its project.yaml no longer carries the template's
 `template: true` line), `--verify` lists a content change or an added file under those paths as
-instance-owned instead of failing. A deleted file, a mode change there, and any change anywhere
-else still fail, and a distribution tree (the template marker still present) is checked in full.
+instance-owned instead of failing. A deleted file, a mode change there, an added symlink or an
+added file with an unsafe bit there, and any change anywhere else still fail, and a distribution
+tree (the template marker still present) is checked in full.
+
+Symlinks: a symlinked file records the sha256 of the bytes it points at and the marker `l`. A
+symlinked directory is not descended (os.walk does not follow it); it records the sha256 of
+"symlink:<target>" and the marker `l`, so an added one is still seen.
 
 The distribution identity is independent of the project name and extraction directory. Root
 discovery starts beside this script, or at an explicit --root, never in an ambient host session.
@@ -218,6 +223,18 @@ def build(root):
     def _on_walk_err(err):
         walk_errors.append(err)
 
+    def _add_dir_link(full):
+        rel = _rel(full, root)
+        if _is_memory(rel, memory):
+            return
+        try:
+            target = os.readlink(full)
+        except OSError as e:
+            read_errors.append((rel, e))
+            return
+        files[rel] = hashlib.sha256(("symlink:" + target).encode("utf-8")).hexdigest()
+        modes[rel] = "l"
+
     def _add_file(full):
         rel = _rel(full, root)
         if rel == LOCK_NAME or rel.endswith(".pyc") or _is_memory(rel, memory):
@@ -238,6 +255,9 @@ def build(root):
         if os.path.isdir(full):
             for base, dirs, names in os.walk(full, onerror=_on_walk_err):
                 dirs[:] = [d for d in dirs if d not in _PRUNE_DIRS]
+                for d in dirs:
+                    if os.path.islink(os.path.join(base, d)):
+                        _add_dir_link(os.path.join(base, d))     # listed, never descended
                 for name in names:
                     _add_file(os.path.join(base, name))
         elif os.path.isfile(full):
@@ -313,7 +333,15 @@ def verify(root):
     compared = dict(cur["files"])   # the current map with those changes taken back out
     for p in sorted(c - s):
         if instance and _instance_owned(p):
-            owned.append(p); compared.pop(p)
+            compared.pop(p)
+            marker = cur["file_modes"].get(p)
+            if marker in ("f0644", "f0755"):
+                owned.append(p)
+                continue
+            # the owner's content, but a symlink or an unsafe mode bit is drift wherever it shows
+            why = "a symlink" if marker == "l" else (
+                "unsafe: " + _unsafe_words(marker) if _unsafe_words(marker) else "mode %s" % marker)
+            ok = False; print("  + on disk, not in manifest: %s (instance-owned path, %s)" % (p, why))
             continue
         ok = False; print("  + on disk, not in manifest:", p)
     for p in sorted(s - c):
@@ -326,11 +354,14 @@ def verify(root):
             ok = False; print("  ~ changed:", p)
     # the stored digest must describe the tree once the instance-owned changes are taken out (on a
     # distribution tree nothing is taken out, so this is the full-tree compare)
-    if stored.get("tree_digest") != _digest(compared):
+    actual = _digest(compared)
+    if stored.get("tree_digest") != actual:
         ok = False
         print("VERIFY: tree_digest MISMATCH")
         print("  stored :", stored.get("tree_digest"))
-        print("  actual :", cur["tree_digest"])
+        print("  actual :", actual)
+        if actual != cur["tree_digest"]:
+            print("  on disk:", cur["tree_digest"], "(before the instance-owned changes are taken out)")
     if "file_modes" in stored:
         sm, cm = stored.get("file_modes", {}), cur.get("file_modes", {})
         for p in sorted(set(sm) & set(cm)):
