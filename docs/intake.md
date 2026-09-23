@@ -6,7 +6,7 @@ This page covers the last two links of the path Alpaca follows from an idea to c
 raw notes -> spec (spec-kit or OpenSpec) -> runbook -> intake (rows, task contracts, profile) -> runs with sealed proof
 ```
 
-- `alpaca start` and the skill `skills/alpaca-from-notes/SKILL.md` are the one entry point: they
+- `alpaca start` and the skill `/alpaca-from-notes` (`.claude/skills/alpaca-from-notes/SKILL.md`) are the one entry point: they
   take raw notes to a spec, the spec to a runbook, and the runbook to intake.
 - `alpaca intake` turns a spec and its runbook into the op's checklist rows, task contracts and
   profile, and keeps them in step when the spec changes.
@@ -15,9 +15,8 @@ The spec tools are described in `MANUAL.md` (Spec tools), the runbook in `docs/r
 
 ## The guided flow
 
-In Claude Code, ask Claude to follow `skills/alpaca-from-notes/SKILL.md` with the notes (or copy
-the folder into `.claude/skills/` and run `/alpaca-from-notes`). From a shell, `alpaca start`
-prints the same steps:
+In Claude Code, run `/alpaca-from-notes` with the notes: the skill ships in `.claude/skills/`, so
+every clone of the project has it. From a shell, `alpaca start` prints the same steps:
 
 ```
 alpaca start notes/link-shortener.md
@@ -40,7 +39,7 @@ The pick:
 | records OpenSpec, or has `openspec/specs/` | OpenSpec | change (or a new capability as an OpenSpec change) |
 
 The steps it prints, for a new thing: `/speckit-specify <notes>`, `/speckit-clarify`,
-the runbook forge skill (`skills/alpaca-runbook-forge/SKILL.md`), `alpaca runbook check`,
+the runbook forge skill (`/alpaca-runbook-forge`), `alpaca runbook check`,
 `alpaca op new` when no op is open, then
 `alpaca intake <spec> <runbook> --dry-run` and the same without `--dry-run`. For a change:
 `/opsx:propose <notes>`, `bin/openspec validate <id> --strict`, the runbook forge skill to update

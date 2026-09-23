@@ -1,8 +1,8 @@
 """Bounded retries, the stuck report, and halt-this-thread (M3.4).
 
-Sources: spec 5.6:415 (the Stop hook refuses an L6 stop without a done marker), 5.3:317-319
-(bank and continue), 7.5:788-798 (failure handling); absorb-gap AG-M17 (bounded retries, then a
-stuck report, then halt that thread). Alpaca-native, no vendored source.
+It covers the Stop hook that refuses an L6 stop without a done marker, bank and continue, and
+failure handling: bounded retries, then a stuck report, then halt that thread. Alpaca-native, no
+vendored source.
 
 The rule this enforces, stated once: UNATTENDED NEVER MEANS UNBOUNDED. A row that fails its
 instrument keeps being retried only up to a DECLARED bound. On the bound the thread over that row
@@ -20,7 +20,7 @@ The two instruments this module and M3.1 keep apart (do not conflate): the LEVEL
 times a failing row is retried before its thread halts. A full-autodrive level does not raise the
 bound; a high level with no bound would be the unbounded loop this module forbids.
 
-The Stop hook half (spec 5.6:415). At the full-autodrive level the Stop hook refuses a top-level
+The Stop hook half. At the full-autodrive level the Stop hook refuses a top-level
 stop while a DONE MARKER is genuinely absent, so an unattended run does not stop short of its
 goal. It does NOT refuse while a thread is HALTED: a halt is a bounded terminal state that has
 already been surfaced (the stuck report), and forcing the run onward past it is exactly the
@@ -43,7 +43,7 @@ KIND_DONE = "loop-done"
 DEFAULT_BOUND = 3
 PROJECT_KEY = "loop_bound"
 
-#: the report names at most this many attempts (the last three, spec / AG-M17).
+#: the report names at most this many attempts (the last three).
 REPORT_LAST = 3
 
 #: the full-autodrive level at or above which the Stop hook refuses a stop with no done marker.

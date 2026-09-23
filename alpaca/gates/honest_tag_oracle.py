@@ -5,8 +5,8 @@ oracle read a doctrine leaf's Status LINE, took the highest maturity RUNG it ASS
 refused the leaf when the rung's min evidence count exceeded the genuine pointers the line
 could show (a tag-to-EVIDENCE check, against the sibling's tag-to-tag check). Alpaca has no
 self-asserted status line: the maturity tag of an obligation row is DERIVED here from the
-evidence its verdict rows carry, never typed by hand (spec:290, rule 1 spec:804, "Tags are
-derived, never typed").
+evidence its verdict rows carry, never typed by hand ("Tags are derived, never typed":
+`doctrine/leaves/test-or-UNTESTED.md`, `doctrine/leaves/verification-tags.md`).
 
   derive(conn, row_id, *, session=None) -> "Specced" | "Built" | "Verified"
 
@@ -16,7 +16,7 @@ derived, never typed").
     a claim that outlives its evidence (Step 3). Because the tag is derived, a hand-typed tag
     that OUT-RANKS the derived one is an over-claim: it is overwritten and the refused attempt
     is written to the record as an event (Step 1). A row absent from the store HALTs (absence
-    blocks, spec:807). Deriving Verified REFUSES without a behavioral probe (Step 4, spec:329).
+    blocks). Deriving Verified REFUSES without a behavioral probe (Step 4).
 
 Adaptations from the earlier harness, per the plan (M1.16):
 
@@ -49,7 +49,7 @@ INSTRUMENT = "honest-tag-oracle"
 #: the event kind an over-claim overwrite is recorded under.
 KIND = "tag"
 
-# the three derived maturity tags (spec:290).
+# the three derived maturity tags.
 SPECCED = "Specced"
 BUILT = "Built"
 VERIFIED = "Verified"
@@ -66,7 +66,7 @@ R_TYPED_OVER_EVIDENCE = "TAG-TYPED-OVER-EVIDENCE"
 # The tag ladder, highest tier first: tag -> (required evidence class, min genuine pointers).
 # Specced is the floor (min 0): it owes no machine-resolvable evidence, so every extant row
 # earns it. Built needs one genuine static-check pointer; Verified needs one genuine behavioral
-# probe pointer (spec:329, refuse Verified without a behavioral probe). DATA, overridable.
+# probe pointer (refuse Verified without a behavioral probe). DATA, overridable.
 DEFAULT_TAG_LADDER = OrderedDict([
     (VERIFIED, (BEHAVIORAL_PROBE, 1)),
     (BUILT, (STATIC_CHECK, 1)),
@@ -318,7 +318,7 @@ def selftest() -> int:
     failures += _check("T-03", _honest_tag({BEHAVIORAL_PROBE: 1}, ladder) == VERIFIED,
                        "one behavioral-probe pointer earns Verified")
     failures += _check("T-04", _honest_tag({STATIC_CHECK: 9}, ladder) == BUILT,
-                       "static-check alone never reaches Verified (spec:329)")
+                       "static-check alone never reaches Verified")
     failures += _check("T-05", _rank(VERIFIED) > _rank(BUILT) > _rank(SPECCED),
                        "the ladder is strictly monotone")
     print("CONTROL TABLE -- honest-tag-oracle")

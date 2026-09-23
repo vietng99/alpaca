@@ -17,7 +17,7 @@ clauses the spec sets for M2:
   C. A lease expires under the FixedClock; the row returns to todo and the lease-expired event id
      (its integer id and its hash-chain hash) is present in BOTH the record and the exported
      data.json bytes. Because export.py surfaces no raw event id, the expiry event id reaches the
-     payload through the native channel it is meant to: a `result` message (spec 7.3) that cites
+     payload through the native channel it is meant to: a `result` message (the native channel rule) that cites
      the expiry event, folded into data.json.messages.
 
   D. A tiny wiki vault is seeded through the M2.14 absorb path and the wiki answer door is called

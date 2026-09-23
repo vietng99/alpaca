@@ -1,7 +1,7 @@
 """M3.8 proof: the dispatch protocol, the sole-spawner rule, and the heavy bracket.
 
-Drives the Done-when on BOTH the positive and the negative path (spec 5.8:493-506, 7.3:761-771;
-section 6 ADAPT row 84, the controller minus the two-human phase sign-off), a FixedClock (M2.2)
+Drives the Done-when on BOTH the positive and the negative path (the dispatch protocol and the
+controller minus the two-human phase sign-off), a FixedClock (M2.2)
 driving every lease and verdict instant:
 
   * an orchestrator posts assignments over the board; each is a `dispatch-assign` event plus a

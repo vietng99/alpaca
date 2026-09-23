@@ -64,8 +64,9 @@ def private_workspace_registry(tmp_path, monkeypatch):
     # reads a tmp path (absent unless the test writes it), never ~/.cloudflared
     monkeypatch.setenv("ALPACA_CLOUDFLARED_CONFIG", str(tmp_path / "cloudflared-config.yml"))
     # the reserved-port rules are exercised with one sample port (the default list is empty;
-    # test_reserved_ports.py covers the default and the parsing)
-    monkeypatch.setenv("ALPACA_RESERVED_PORTS", "7328")
+    # test_reserved_ports.py covers the default and the parsing). 7350 is a neutral number inside
+    # the range serve._default_port derives from (7300 and up), so the skip rule is exercised.
+    monkeypatch.setenv("ALPACA_RESERVED_PORTS", "7350")
 
 
 @pytest.fixture

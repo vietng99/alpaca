@@ -1,7 +1,7 @@
 """alpaca.surface: the operating-surface verb budget and the orphan-verb lint (M4.12).
 
-Sources: D9 (spec:158, the CLI is the workspace), spec 5.12:586-592, Q11 (spec:177); absorb-gap
-AG-M29 (a small front verb set as a tested dispatch contract with declared output keys).
+The CLI is the workspace, so its front verb set stays small and is a tested dispatch contract
+with declared output keys.
 
 The operating surface is the set of verbs `alpaca` dispatches. This module makes that surface a tested
 contract in three pieces:

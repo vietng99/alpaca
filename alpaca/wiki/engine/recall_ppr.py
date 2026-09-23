@@ -31,7 +31,7 @@ def compute_passage_scores(
     return scores
 
 
-# Alpaca M2.11 DEMAND GATE (spec 5.9:527-528). The PPR graph arm is OFF by default (the NARROW profile
+# Alpaca M2.11 DEMAND GATE. The PPR graph arm is OFF by default (the NARROW profile
 # ships vector + graph disabled); even when a caller opts the graph in, a graph is NOT built below
 # the EVENT FLOOR. Too few anchored blocks make a personalized-PageRank walk pure noise, so the
 # gate refuses and retrieval stays on the lexical seed alone. The floor is a count of active,

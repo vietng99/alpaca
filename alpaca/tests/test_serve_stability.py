@@ -82,7 +82,7 @@ def test_first_refresh_serves_the_board_before_the_fold(project, monkeypatch):
 
 
 def test_dashboard_unit_restarts_on_any_exit_on_its_exact_port(project):
-    units = serve.service_units(project, port=7328)
+    units = serve.service_units(project, port=7350)
     dashboard = next(body for name, body in units.items() if "dashboard" in name)
     assert "Restart=always" in dashboard
     assert "Environment=ALPACA_SERVE_STRICT_PORT=1" in dashboard
@@ -91,13 +91,13 @@ def test_dashboard_unit_restarts_on_any_exit_on_its_exact_port(project):
 def test_a_reload_successor_does_not_exit_as_already_running(project, monkeypatch):
     calls = []
     monkeypatch.setattr(serve.cli, "_root", lambda: project)
-    monkeypatch.setattr(serve, "is_running", lambda root: {"url": "http://127.0.0.1:7328/", "port": 7328, "remote": True})
+    monkeypatch.setattr(serve, "is_running", lambda root: {"url": "http://127.0.0.1:7350/", "port": 7350, "remote": True})
     monkeypatch.setattr(serve, "files_auth", lambda root: ":pin")
     monkeypatch.setattr(serve, "_run", lambda root, port, keep=False, remote=False: calls.append(port))
     args = type("A", (), {"stop": False, "status": False, "write_services": False, "remote": True,
-                          "port": 7328, "detach": False, "keep": True})()
+                          "port": 7350, "detach": False, "keep": True})()
     serve.cmd_serve(args)
     assert calls == [], "without a handed-over socket a live server means already running"
     monkeypatch.setenv(serve.LISTEN_FD_ENV, "99")
     serve.cmd_serve(args)
-    assert calls == [7328]
+    assert calls == [7350]

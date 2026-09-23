@@ -37,7 +37,7 @@ _FORBIDDEN_PREFIXES = (".alpaca/", "analytics/", ".git/", "dist/", ".claude/work
 _FORBIDDEN_EXACT = {"RESUME.md", "board.json", "data.json", ".claude/settings.local.json"}
 # A file the harness cannot boot without, one per support tree the manifest does not enumerate.
 _LOAD_BEARING = ("bin/alpaca", "ALPACA-MANIFEST", "CLAUDE.md", "MAP.md", "doctrine/CORE-CARD.md",
-                 "plugin/alpaca", "skills/", "setup/make_release.py", "contracts/", "alpaca/cli.py")
+                 "plugin/alpaca", ".claude/skills/alpaca-from-notes/SKILL.md", "setup/make_release.py", "contracts/", "alpaca/cli.py")
 
 
 def _members(archive):

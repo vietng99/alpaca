@@ -280,6 +280,89 @@ def test_a_path_only_the_live_manifest_names_is_carried_over(trees):
     assert util.read_text(os.path.join(root, "legacy.txt")) == "kept\n"
 
 
+def _write_lock(base, shipped):
+    """A live MANIFEST.json recording the shipped bytes of each path in `shipped` (rel -> text)."""
+    import json
+    files = {rel: util.sha256_hex(text.encode("utf-8")) for rel, text in shipped.items()}
+    util.write_text(os.path.join(base, "MANIFEST.json"), json.dumps({"files": files}) + "\n")
+
+
+def _retire_trees(trees):
+    """A live install whose manifest still lists skills/ and a release that dropped it (review L2).
+    MANIFEST.json records the bytes the old release shipped there."""
+    root, source = trees
+    _write_manifest(root, ["ALPACA-MANIFEST", "bin/alpaca", "alpaca/", "skills/"], [".alpaca/"])
+    _write_manifest(source, ["ALPACA-MANIFEST", "bin/alpaca", "alpaca/", ".claude/skills/alpaca-op/"],
+                    [".alpaca/"])
+    util.write_text(os.path.join(source, ".claude", "skills", "alpaca-op", "SKILL.md"), "op NEW\n")
+    util.write_text(os.path.join(root, "skills", "old-intake", "SKILL.md"), "intake OLD\n")
+    util.write_text(os.path.join(root, "skills", "old-op", "SKILL.md"), "op OLD\n")
+    util.write_text(os.path.join(root, "skills", "old-op", "notes.md"), "edited here\n")
+    util.write_text(os.path.join(root, "skills", "mine", "SKILL.md"), "the project's own\n")
+    _write_lock(root, {"skills/old-intake/SKILL.md": "intake OLD\n",
+                       "skills/old-op/SKILL.md": "op OLD\n",
+                       "skills/old-op/notes.md": "as shipped\n",
+                       "bin/alpaca": "whatever\n"})
+    return root, source
+
+
+def test_a_path_the_release_dropped_loses_its_shipped_files(trees):
+    """Review L2: a mechanism path only the live manifest names was dropped by the release. Its
+    files that still hold the shipped bytes (MANIFEST.json) are removed; a file the project edited
+    or added there stays."""
+    root, source = _retire_trees(trees)
+    p = upgrade.plan(root, source)
+    assert "skills/" in p.dropped and "skills/" not in p.mechanism
+    assert sorted(p.remove) == ["skills/old-intake/SKILL.md", "skills/old-op/SKILL.md"]
+    assert sorted(p.dropped_kept) == ["skills/mine/SKILL.md", "skills/old-op/notes.md"]
+    upgrade.apply(root, source, clock=FixedClock(step=1))
+    assert not os.path.lexists(os.path.join(root, "skills", "old-intake"))
+    assert not os.path.lexists(os.path.join(root, "skills", "old-op", "SKILL.md"))
+    assert util.read_text(os.path.join(root, "skills", "old-op", "notes.md")) == "edited here\n"
+    assert util.read_text(os.path.join(root, "skills", "mine", "SKILL.md")) == "the project's own\n"
+    assert util.read_text(os.path.join(root, ".claude", "skills", "alpaca-op", "SKILL.md")) == "op NEW\n"
+
+
+def test_the_plan_verb_names_the_files_a_release_drops(trees, capsys, tmp_path, monkeypatch):
+    import argparse
+    monkeypatch.chdir(tmp_path)
+    root, source = _retire_trees(trees)
+    args = argparse.Namespace(target=root, source=source, plan=True, recover=False)
+    assert upgrade._cmd_upgrade(args) == 0
+    out = capsys.readouterr().out
+    assert "dropped by the release, will be removed: skills/old-intake/SKILL.md" in out
+    assert "dropped by the release, kept (not the shipped bytes): skills/mine/SKILL.md" in out
+    assert os.path.isfile(os.path.join(root, "skills", "old-intake", "SKILL.md"))
+
+
+@pytest.mark.parametrize("phase", upgrade.PHASES)
+def test_a_crash_leaves_the_dropped_files_fully_old_or_fully_new(trees, phase):
+    root, source = _retire_trees(trees)
+    with pytest.raises(upgrade._KillInjected):
+        upgrade.apply(root, source, kill_at=phase, clock=FixedClock(step=1))
+    upgrade.recover(root)
+    gone = not os.path.lexists(os.path.join(root, "skills", "old-intake", "SKILL.md"))
+    assert gone == (phase in upgrade._FORWARD_FROM), phase
+    assert util.read_text(os.path.join(root, "skills", "mine", "SKILL.md")) == "the project's own\n"
+
+
+def test_a_directory_the_release_splits_keeps_the_files_it_still_lists(trees):
+    """The live manifest lists docs/ as a whole; the release lists docs/guide.md alone. The guide is
+    refreshed, a shipped docs file the release no longer lists is removed."""
+    root, source = trees
+    _write_manifest(root, ["ALPACA-MANIFEST", "bin/alpaca", "alpaca/", "docs/"], [".alpaca/"])
+    _write_manifest(source, ["ALPACA-MANIFEST", "bin/alpaca", "alpaca/", "docs/guide.md"], [".alpaca/"])
+    util.write_text(os.path.join(root, "docs", "guide.md"), "guide OLD\n")
+    util.write_text(os.path.join(root, "docs", "old.md"), "old\n")
+    util.write_text(os.path.join(source, "docs", "guide.md"), "guide NEW\n")
+    _write_lock(root, {"docs/guide.md": "guide OLD\n", "docs/old.md": "old\n"})
+    p = upgrade.plan(root, source)
+    assert p.remove == ["docs/old.md"]
+    upgrade.apply(root, source, clock=FixedClock(step=1))
+    assert util.read_text(os.path.join(root, "docs", "guide.md")) == "guide NEW\n"
+    assert not os.path.lexists(os.path.join(root, "docs", "old.md"))
+
+
 def test_memory_named_by_either_manifest_is_never_touched(trees):
     """The release moves data.json to memory while the live manifest still calls it mechanism:
     the upgrade must not overwrite it."""

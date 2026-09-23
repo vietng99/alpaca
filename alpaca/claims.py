@@ -1,7 +1,7 @@
 """Claims, leases, expiry and takeover, keyed on the worker (M2.5).
 
-Spec 5.7:460-462 (claims and leases), 5.4:352-354 (worker-pool recovery), M2 done-when
-("a lease expires and the row returns"). A claim is a lease on one row held by a WORKER, not
+Claims and leases, and worker-pool recovery (`doctrine/leaves/worker-pool-recovery.md`): a lease
+expires and the row returns. A claim is a lease on one row held by a WORKER, not
 a session: the same worker across two sessions renews the same lease, while a different worker
 is a concurrency event or a takeover. Every claim carries a FENCE token, a monotonic integer
 that a takeover bumps, so a late writer from a superseded lease is refused.

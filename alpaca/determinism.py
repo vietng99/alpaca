@@ -1,4 +1,4 @@
-"""The deterministic middle (AG-M20): one owner for hashes, canonical serialization, numbers
+"""The deterministic middle: one owner for hashes, canonical serialization, numbers
 and ordering, so a re-run is byte-reproducible regardless of PYTHONHASHSEED, dict insertion
 order or the process locale.
 

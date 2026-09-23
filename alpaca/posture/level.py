@@ -1,8 +1,8 @@
 """The autodrive level in force, mirrored into the record and read at every gate (M3.1).
 
-Sources: spec 5.6:389-401, the 7.4 table (spec:775-786), D16 (spec:164), Q16 (spec:182),
-absorb-gap AG-A7 (the autodrive ladder is TWO instruments; the session-posture half is the half
-Alpaca kept here).
+The rule is `doctrine/leaves/autodrive-levels.md` and `doctrine/leaves/level-gated-advance.md`.
+The autodrive ladder is two instruments; the session-posture half is the one kept here (the
+standing-authority half is alpaca/posture/authority.py).
 
 The `/autodrive` skill (D16) is shipped unchanged: `/autodrive L<n> "<goal>"` sets a sticky
 per-session level and goal in the config dir, and its hooks inject the level contract. Alpaca adds
@@ -42,10 +42,10 @@ ACTOR = "autodrive"
 #: there is no separate override ledger, so the change lives on the board as this one row.
 DECISION_KIND = "level"
 
-#: the autodrive ladder band (L1-L6, spec 5.6:390). A level off the band is refused.
+#: the autodrive ladder band (L1-L6). A level off the band is refused.
 MIN_LEVEL, MAX_LEVEL = 1, 6
 
-#: the fresh-install default-level when project.yaml states none (spec 5.6:398).
+#: the fresh-install default-level when project.yaml states none.
 DEFAULT_FALLBACK = 2
 
 

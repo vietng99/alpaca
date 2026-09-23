@@ -1,9 +1,9 @@
 """barrier.py - the outbound push barrier and the tier rule at the push boundary (M4.11).
 
 The barrier is the mechanical control at the moment the bytes leave. It is NOT the decision to
-push: a push to a shared remote stays a human decision at every autodrive level, so the decision
-stays a review card (M3.5). The barrier only REFUSES mechanically when what is leaving carries
-something it must not.
+push: a push to a shared remote stays a human decision at every autodrive level (CLAUDE.md boot
+rule 3, `doctrine/leaves/hitl-decision-gate.md`), so the decision stays a review card (M3.5). The
+barrier only REFUSES mechanically when what is leaving carries something it must not.
 
 What it does, and why each clause is here:
 

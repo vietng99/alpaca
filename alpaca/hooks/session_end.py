@@ -53,10 +53,15 @@ def handle(payload):
 
 def _publish_hub_tile(root, conn, sid):
     """Publish this workspace's hub tile when project.yaml says hub.enabled: true (alpaca/hub_publish.py).
-    Fail-open: a publish error is recorded as a hub-publish-failed event and never breaks the hook;
-    with hub publishing off nothing happens at all."""
+    data.json is refreshed from the record first, so the tile shows the state this session ended
+    with (the session row is already closed) rather than the last Stop hook's. Fail-open: a publish
+    error is recorded as a hub-publish-failed event and never breaks the hook; with hub publishing
+    off nothing happens at all."""
     try:
-        from alpaca import hub_publish
+        from alpaca import export, hub_publish
+        if not hub_publish.enabled(root):
+            return
+        export.write_if_changed(root)
         hub_publish.at_session_end(root)
     except Exception as e:
         try:

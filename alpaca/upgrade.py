@@ -16,6 +16,10 @@ build. Recovery runs on next start (through the CLI), never on demand, so a cras
 leave a half tree behind a working CLI. The schema migration (M2.1) runs as one phase, with the
 hash chain verified before and after, so `.alpaca/` survives unchanged in meaning.
 
+A mechanism path the live manifest names and the release no longer names is dropped. The files
+under it that still hold the bytes the installed release shipped (the live MANIFEST.json) are
+removed at promotion; a file the project edited or added there stays, and the plan names both.
+
 Interfaces (consumed by `alpaca doctor`, the CLI and the manual):
 
   plan(root, source)    -> Plan            read-only, writes nothing
@@ -72,7 +76,9 @@ class Plan:
     """What an upgrade would do, computed read-only. `refresh` paths are overwritten from source,
     `merge` paths (CLAUDE.md) are merged by markers, `preserve` paths (project.yaml) are kept as
     they are, `memory` paths are never touched, and `modified` lists the refresh paths whose live
-    content differs from the incoming source: a local edit reported before it is replaced."""
+    content differs from the incoming source: a local edit reported before it is replaced.
+    `dropped` lists the mechanism paths only the live manifest names; `remove` is the files under
+    them that still hold the shipped bytes (removed at promotion), `dropped_kept` the rest."""
 
     mechanism: list = field(default_factory=list)
     memory: list = field(default_factory=list)
@@ -81,6 +87,10 @@ class Plan:
     preserve: list = field(default_factory=list)
     modified: list = field(default_factory=list)
     missing_in_source: list = field(default_factory=list)
+    dropped: list = field(default_factory=list)
+    remove: list = field(default_factory=list)
+    dropped_kept: list = field(default_factory=list)
+    remove_sha: dict = field(default_factory=dict)
 
 
 def _rel_norm(rel):
@@ -121,8 +131,9 @@ def _classes_for(root, source, p):
     """Fill p.mechanism and p.memory from BOTH manifests. The incoming source manifest names what
     the new release ships, so a path a release adds (a new launcher, a new docs page) is installed
     on its first upgrade; reading only the live manifest would skip it until a second upgrade.
-    Paths only the live manifest names are kept in the plan, so the staged build carries them
-    over unchanged. A path either manifest calls memory is never treated as mechanism."""
+    A path only the live manifest names goes to p.dropped: the release no longer ships it, so it is
+    neither staged nor refreshed (see _plan_dropped). A path either manifest calls memory is never
+    treated as mechanism."""
     src, live = manifest.classes(source), manifest.classes(root)
     seen = set()
     for rel in src["memory"] + live["memory"]:
@@ -131,12 +142,91 @@ def _classes_for(root, source, p):
             p.memory.append(rel)
     memory = set(seen)
     seen = set()
-    for rel in src["mechanism"] + live["mechanism"]:
+    for rel in src["mechanism"]:
         n = _rel_norm(rel)
         if n in seen or n in memory:
             continue
         seen.add(n)
         p.mechanism.append(rel)
+    for rel in live["mechanism"]:
+        n = _rel_norm(rel)
+        if n in seen or n in memory:
+            continue
+        seen.add(n)
+        p.dropped.append(rel)
+
+
+def _under(rel, prefixes):
+    return any(rel == q or rel.startswith(q + "/") for q in prefixes)
+
+
+def _file_sha(path):
+    try:
+        with open(path, "rb") as fh:
+            return util.sha256_hex(fh.read())
+    except OSError:
+        return None
+
+
+def _plan_dropped(root, p):
+    """Sort the files under each dropped path into p.remove (a regular file whose bytes are the ones
+    the installed release shipped, per the live MANIFEST.json) and p.dropped_kept (everything else:
+    a local edit, a project's own file, a symlink, or no MANIFEST.json to compare with). A file that
+    also falls under a path the release still ships, or under memory, is left to those rules."""
+    import json
+    try:
+        with open(os.path.join(root, "MANIFEST.json"), encoding="utf-8") as fh:
+            shipped = json.load(fh).get("files")
+    except (OSError, ValueError, AttributeError):
+        shipped = None
+    shipped = shipped if isinstance(shipped, dict) else {}
+    keep_out = [_rel_norm(r) for r in p.mechanism] + [_rel_norm(r) for r in p.memory]
+    real_root = os.path.realpath(root)
+    for rel in p.dropped:
+        n = _rel_norm(rel)
+        if not n or os.path.isabs(n) or ".." in n.split("/"):
+            continue
+        full = os.path.join(root, n)
+        if not os.path.realpath(full).startswith(real_root + os.sep):
+            continue
+        if os.path.isdir(full) and not os.path.islink(full):
+            found = []
+            for dp, dn, fn in os.walk(full):
+                dn.sort()
+                for f in sorted(fn):
+                    found.append(os.path.relpath(os.path.join(dp, f), root).replace(os.sep, "/"))
+        elif os.path.lexists(full):
+            found = [n]
+        else:
+            found = []
+        for f in found:
+            if _under(f, keep_out):
+                continue
+            fp = os.path.join(root, f)
+            sha = None if os.path.islink(fp) else _file_sha(fp)
+            if sha is not None and shipped.get(f) == sha:
+                p.remove.append(f)
+                p.remove_sha[f] = sha
+            else:
+                p.dropped_kept.append(f)
+
+
+def _remove_dropped(root, remove_sha, dropped):
+    """Remove each listed file that still holds the recorded bytes, then every directory under a
+    dropped path that is left empty. Idempotent, so a roll forward can run it again."""
+    dirs = [_rel_norm(r) for r in dropped]
+    for rel, sha in sorted(remove_sha.items()):
+        fp = os.path.join(root, rel)
+        if os.path.islink(fp) or not os.path.isfile(fp) or _file_sha(fp) != sha:
+            continue
+        os.remove(fp)
+        d = os.path.dirname(rel)
+        while d and _under(d, dirs):
+            full = os.path.join(root, d)
+            if not os.path.isdir(full) or os.path.islink(full) or os.listdir(full):
+                break
+            os.rmdir(full)
+            d = os.path.dirname(d)
 
 
 def plan(root, source) -> Plan:
@@ -144,6 +234,7 @@ def plan(root, source) -> Plan:
     source = os.path.abspath(source)
     p = Plan(mechanism=[], memory=[])
     _classes_for(root, source, p)
+    _plan_dropped(root, p)
     for rel in p.mechanism:
         n = _rel_norm(rel)
         if n in PRESERVE:
@@ -325,7 +416,8 @@ def apply(root, source, kill_at=None, clock=None):
     def enter(phase):
         _write_journal(root, {"phase": phase,
                               "started": clock() if clock is not None else util.now_iso(),
-                              "source": source, "mechanism": p.mechanism})
+                              "source": source, "mechanism": p.mechanism,
+                              "dropped": p.dropped, "remove": p.remove_sha})
         if kill_at == phase:
             raise _KillInjected(phase)
 
@@ -335,7 +427,7 @@ def apply(root, source, kill_at=None, clock=None):
 
     enter("backup")
     _clean_dir(backup)
-    for rel in p.mechanism:
+    for rel in p.mechanism + p.dropped:
         if os.path.lexists(os.path.join(root, _rel_norm(rel))):
             _copy_into(root, rel, backup)
 
@@ -353,11 +445,13 @@ def apply(root, source, kill_at=None, clock=None):
     for rel in p.mechanism:
         if os.path.lexists(os.path.join(staged, _rel_norm(rel))):
             _install(root, staged, rel)
+    _remove_dropped(root, p.remove_sha, p.dropped)
 
     enter("done")
     _cleanup(root)
     return {"ok": True, "source": source, "plan": p,
-            "refreshed": list(p.refresh), "preserved": list(p.preserve)}
+            "refreshed": list(p.refresh), "preserved": list(p.preserve),
+            "removed": list(p.remove)}
 
 
 # --------------------------------------------------------------------------- recover
@@ -375,7 +469,7 @@ def _roll_back(root, journal):
     the originals from the backup (a no-op when the tree is already untouched) and discard the
     staged build. The tree ends fully old."""
     backup = _backup_dir(root)
-    for rel in journal.get("mechanism", []):
+    for rel in journal.get("mechanism", []) + journal.get("dropped", []):
         if os.path.lexists(os.path.join(backup, _rel_norm(rel))):
             _copy_into(backup, rel, root)
 
@@ -387,6 +481,7 @@ def _roll_forward(root, journal):
     for rel in journal.get("mechanism", []):
         if os.path.lexists(os.path.join(staged, _rel_norm(rel))):
             _install(root, staged, rel)
+    _remove_dropped(root, journal.get("remove") or {}, journal.get("dropped", []))
 
 
 def recover(root):
@@ -440,10 +535,15 @@ def _cmd_upgrade(args):
     if getattr(args, "plan", False):
         for rel in p.modified:
             print("  local edit will be replaced: %s" % rel)
+        for rel in p.remove:
+            print("  dropped by the release, will be removed: %s" % rel)
+        for rel in p.dropped_kept:
+            print("  dropped by the release, kept (not the shipped bytes): %s" % rel)
         return vc.emit_verdict(
             "alpaca-upgrade-plan", vc.PASS,
-            "refresh=%d merge=%d preserve=%d modified=%d memory-untouched=%d" % (
-                len(p.refresh), len(p.merge), len(p.preserve), len(p.modified), len(p.memory)))
+            "refresh=%d merge=%d preserve=%d modified=%d remove=%d memory-untouched=%d" % (
+                len(p.refresh), len(p.merge), len(p.preserve), len(p.modified), len(p.remove),
+                len(p.memory)))
     try:
         apply(root, source)
     except UpgradeLocked as e:

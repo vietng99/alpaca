@@ -19,7 +19,7 @@ LIVE = """tunnel: 0a1b2c3d-0000-4000-8000-000000000000
 credentials-file: {home}/.cloudflared/0a1b2c3d-0000-4000-8000-000000000000.json
 ingress:
   - hostname: example.com
-    service: http://127.0.0.1:7328
+    service: http://127.0.0.1:7350
 {extra}  - service: http_status:404
 """
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

@@ -1,12 +1,12 @@
 """Phase entry by level and phase sign-out (M1.15).
 
-Ported from the earlier harness gates/phase_gate.py and de-signed for Alpaca per spec 5.2 item 8 and D2
-(spec:151). Two adaptations replace the earlier harness signing machinery wholesale:
+Ported from the earlier harness gates/phase_gate.py and de-signed for Alpaca (entry by level, no
+signatures). Two adaptations replace the earlier harness signing machinery wholesale:
 
   * `enter(conn, op, phase, level)` is a LEVEL COMPARISON, not a grant check: entry is allowed
     iff the level in force reaches the phase's declared entry level AND the previous phase is
     discharged. The earlier harness L6-grant read (`breakglass.grant_live`), the grant descriptor and the
-    grant minting are all GONE (D1: no signing anywhere, no break-glass token).
+    grant minting are all GONE (no signing anywhere, no break-glass token).
   * `sign_out(conn, op, phase, state)` keeps the ported content guards 0-3 and drops the whole
     boundary-signature branch (`_verify_boundary_sig`, sigkey, the solo/dev OVERRIDDEN path) and
     the L6-grant minting a clean PLAN sign-out used to emit. The four guards, in order:
@@ -15,8 +15,8 @@ Ported from the earlier harness gates/phase_gate.py and de-signed for Alpaca per
         2) every step carries its exit evidence ............. FAIL    (an unbacked "done")
         3) no open flow-break/fundamental/owner-choice q ..... FAIL   (an owner question unresolved)
 
-    (TD guard 4, the tapeout OVERRIDDEN-row check, was break-glass machinery; D1 drops the
-    OVERRIDDEN concept with the rest of signing, so there is no guard 4 in Alpaca.)
+    (The earlier harness guard 4, a release-time OVERRIDDEN-row check, was break-glass machinery;
+    Alpaca drops the OVERRIDDEN concept with the rest of signing, so there is no guard 4.)
 
 A skipped phase is recorded as skipped with a reason (Q9): `skip(conn, op, phase, reason)`.
 
@@ -215,7 +215,7 @@ def assert_no_open_blocking_question(state):
 def sign_out(conn, op, phase, state, *, mode="review", session="instrument", record=True) -> dict:
     """Close a phase boundary. Runs the ported content guards 0-3 IN ORDER (block-then-reject: a
     coverage gap outranks a content refusal), then records the clean close as an event. There is
-    no boundary-signature branch and no grant minting (D1). Returns {verdict: PASS, reason,
+    no boundary-signature branch and no grant minting. Returns {verdict: PASS, reason,
     phase, mode} on a clean close; raises Halt on any guard.
     """
     if phase not in defaults.LADDER:

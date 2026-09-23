@@ -1,8 +1,8 @@
 """Formation manifest: the loader, the registry, and the blind-pair rule (M3.7).
 
-Sources: spec 5.8:480-492 (formation manifest, agent briefs, blind pairs), D7 (spec:156, keep
-the protocol ahead of the catalogue), section 6 KEEP rows 12 and 97-105 (the blind-pairs
-mechanism and the agent briefs / doctrine-slot / packs). The manifest SHAPE is ported
+It keeps the protocol ahead of the catalogue, and carries the blind-pairs mechanism
+(`doctrine/leaves/blind-pairs.md`) and the agent briefs, doctrine slot and packs. The manifest
+SHAPE is ported
 generically from the earlier harness `doctrine.template.md` DOCTRINE-SLOT (roles, phases, gate_map,
 terminal), with the DV specifics dropped: no seam ops, no domain vocabulary, no RTL skin.
 

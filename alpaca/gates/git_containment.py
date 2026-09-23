@@ -9,7 +9,7 @@ disables the SYSTEM file only; it does nothing about a repo-local config. So the
 a foreign tree cannot be a flag -- it is a SCAN of the actual config bytes, plus an explicit
 two-key override for the rare case an owner has consciously accepted one of these keys.
 
-The keys that execute (absorb-gap AG-M13):
+The keys that execute:
 
   core.hooksPath        points git's hook lookup at an arbitrary directory, so `git commit`
                         (and friends) run a script the tree shipped, not one you installed.

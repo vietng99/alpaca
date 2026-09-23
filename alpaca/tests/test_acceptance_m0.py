@@ -1,4 +1,4 @@
-"""M0 done-when (spec section 10): copy, rename, onboard, doctor, crash, resume, analytics."""
+"""M0 done-when: copy, rename, onboard, doctor, crash, resume, analytics."""
 import json, os, shutil, subprocess, sys
 from alpaca import manifest
 from alpaca.tests import proofkit

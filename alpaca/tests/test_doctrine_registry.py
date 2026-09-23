@@ -1,6 +1,6 @@
 """M4.14 proof - the doctrine set, its registry, and the registration check.
 
-Done-when (checklist M4.14): every leaf named in spec 5.13 exists as a file and is registered in
+Done-when (checklist M4.14): every leaf of the doctrine set exists as a file and is registered in
 BOTH directions with its status re-derived from its own bytes, and the registration check BLOCKS
 on an empty population. This module drives that on the POSITIVE path (the live shipped tree) and
 on the NEGATIVE path (throwaway roots the test builds), so no assertion is a tautological pass:
@@ -68,11 +68,11 @@ def test_the_four_shipped_by_other_tasks_are_registered_when_present():
         assert shipped in targets, "a present leaf must be registered: %s" % shipped
 
 
-# The exact leaf set named in spec 5.13 (kept leaves renamed where noted, the six Alpaca operator
+# The exact doctrine leaf set (kept leaves renamed where noted, the six Alpaca operator
 # leaves, the five new leaves). A missing name here is a Done-when failure, not a silent pass: this
 # is what keeps the registry test from resting only on whatever files happen to be on disk.
-SPEC_5_13_LEAVES = (
-    # kept (25), renamed where the spec text notes it (honest-verification -> verification-tags)
+DOCTRINE_LEAVES = (
+    # kept (25), renamed where noted (honest-verification -> verification-tags)
     "file-as-truth", "provenance-or-die", "test-or-UNTESTED", "verification-tags", "halt-on-drift",
     "crash-only-resume", "double-dispatch", "movement-gate-pin-sentinel", "audit-first-primacy",
     "hitl-decision-gate", "harness-navigation", "harness-distillation", "workspace-isolation",
@@ -88,17 +88,17 @@ SPEC_5_13_LEAVES = (
 )
 
 
-def test_every_spec_5_13_leaf_is_present_and_registered():
-    # Done-when: every leaf named in spec 5.13 exists as a file AND is registered in both
+def test_every_doctrine_leaf_is_present_and_registered():
+    # Done-when: every leaf of the doctrine set exists as a file AND is registered in both
     # directions. Enumerated by name so a leaf that is silently missing (as operate-in-place was)
     # fails here instead of passing on a filesystem-derived population.
-    assert len(SPEC_5_13_LEAVES) == 36
+    assert len(DOCTRINE_LEAVES) == 36
     on_disk = set(_leaf_basenames())
     targets = set(_index_targets())
-    missing_file = [n for n in SPEC_5_13_LEAVES if (n + ".md") not in on_disk]
-    unregistered = [n for n in SPEC_5_13_LEAVES if (n + ".md") not in targets]
-    assert missing_file == [], "spec 5.13 leaves with no file: %s" % missing_file
-    assert unregistered == [], "spec 5.13 leaves with no registry row: %s" % unregistered
+    missing_file = [n for n in DOCTRINE_LEAVES if (n + ".md") not in on_disk]
+    unregistered = [n for n in DOCTRINE_LEAVES if (n + ".md") not in targets]
+    assert missing_file == [], "doctrine leaves with no file: %s" % missing_file
+    assert unregistered == [], "doctrine leaves with no registry row: %s" % unregistered
     assert reg.check(REPO) == vc.PASS
 
 

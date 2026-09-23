@@ -1,7 +1,7 @@
 """M4.11 proof: the outbound barrier and the tier rule at the push boundary.
 
 Every claim in the Done-when is driven on a POSITIVE and a NEGATIVE path against a LOCAL BARE
-REMOTE (spec 5.11, rule 8:816-817):
+REMOTE (a push to a shared remote stays a human decision: CLAUDE.md boot rule 3):
 
   * a clean push passes; a push carrying a protected prefix or exact path is BLOCKED;
   * EVERY COMMIT entering the remote is scanned, not just the working tree: a secret deleted from

@@ -1,9 +1,8 @@
 """The resolve log and the resolve pass: serial-with-resolve, made a record (M4.5).
 
-Sources: spec 5.4:345-346 (serial-with-resolve), 5.7:460-462 (claims detect the collision);
-absorb-gap AG-M23 (a named artifact with typed events and a pass that consumes it), AG-A4
-(the claim and the first beat land before the first mutation; a hard lock is refused, and why).
-The doctrine leaf is `doctrine/leaves/serial-with-resolve.md`: the code is the mechanism, the leaf
+Claims detect the collision; the resolve log is a named artifact with typed events and a pass
+that consumes it; the claim and the first beat land before the first mutation, and a hard lock is
+refused (and the log says why). The doctrine leaf is `doctrine/leaves/serial-with-resolve.md`: the code is the mechanism, the leaf
 is the reason, so the two never drift.
 
 The named artifact is the RESOLVE LOG. It is not a file: it lives on the same append-only,

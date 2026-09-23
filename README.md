@@ -35,12 +35,23 @@ Claude Code has native lifecycle hooks. Codex follows AGENTS.md and uses explici
 - `.alpaca/`: fresh per-installation runtime created on use; never shipped.
 - `MANUAL.md` and `docs/manual.html`: command reference and phone-readable manual.
 - `doctrine/`, `MAP.md`, `contracts/`, `formations/`: the rules, the boot router, and the work shapes.
-- `plugin/alpaca/` and `skills/`: optional bundled skills.
-- `docs/runbook-format.md`, `templates/runbook-example/` and `skills/alpaca-runbook-forge/`: the runbook format (a domain's stages, checks, knobs, retry rules and owner gates), a worked example, and the skill that writes a runbook from a spec. `alpaca runbook check` checks one.
+- `.claude/skills/alpaca-*`: Alpaca's own skills (`/alpaca-first-chat`, `/alpaca-onboard`, `/alpaca-op`, `/alpaca-from-notes`, `/alpaca-runbook-forge`). They are project skills, so Claude Code offers them in any clone with nothing to install.
+- `plugin/alpaca/`: optional bundled skills (load with `claude --plugin-dir ./plugin/alpaca`, see `docs/operators.md`).
+- `docs/runbook-format.md`, `templates/runbook-example/` and `/alpaca-runbook-forge`: the runbook format (a domain's stages, checks, knobs, retry rules and owner gates), a worked example, and the skill that writes a runbook from a spec. `alpaca runbook check` checks one.
 - `alpaca intake <spec> <runbook>`: turns a spec-kit or OpenSpec spec and its runbook into the op's checklist rows (one per success criterion or scenario), one task contract per stage and per owner gate, and the profile stages; after a spec change it supersedes only the rows that changed. `--dry-run` shows the plan. See `docs/intake.md`.
-- `skills/alpaca-from-notes/` and `alpaca start <notes>`: the one entry point from raw notes. It picks spec-kit for a new thing and OpenSpec for a change (you can override), then walks the notes to a spec, a runbook and intake.
+- `/alpaca-from-notes` and `alpaca start <notes>`: the one entry point from raw notes. It picks spec-kit for a new thing and OpenSpec for a change (you can override), then walks the notes to a spec, a runbook and intake.
 
 See `docs/DESIGN.md` for architecture, and `docs/operators.md`, `docs/operations-hub.md`, `docs/host-hub.md`, `docs/observability-operations.md`, and `docs/shipping.md` for operation details.
+
+## Choices kept on purpose
+
+- The wiki's generic marking rules keep their Vietnamese text. `alpaca/wiki/ingest/firewall.py`
+  matches classification markings in several languages (Chinese, Russian and Vietnamese next to the
+  English ones), and `alpaca/wiki/engine/echo.py` reads Vietnamese attribution cues next to the
+  English ones. The text is there so those markings and cues are caught; it is not a leftover.
+- There is no migration path from an install of the earlier internal harness that Alpaca grew
+  from. Start a project from a fresh clone of Alpaca and onboard it; a record from that earlier
+  install is not converted.
 
 ## Development and shipment
 

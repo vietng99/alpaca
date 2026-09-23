@@ -1,6 +1,6 @@
 """M3.11 -- banned words as a shipped mechanism.
 
-Proof test for the Done-when (spec 5.6:418-443, P-003, P-010):
+Proof test for the Done-when:
 
   * ONE lint implementation (`literal_guard.lint(text, rules) -> matches`) serves the
     Stop hook, the door check (`literal_guard.lint_files`) and `alpaca style humanize`;

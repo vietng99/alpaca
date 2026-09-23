@@ -1,6 +1,6 @@
 """host_residue: a read-only MEASUREMENT of the local-only host residue (M4.13).
 
-Ported from the earlier harness `host_residue.py` (section 6 KEEP row 72). The shipment refuses to manage
+Ported from the earlier harness `host_residue.py`. The shipment refuses to manage
 the local-only host artifact `.claude/settings.local.json` (it is host-local operator state, never
 overwritten by an install). But refusal-to-MANAGE must not become refusal-to-MEASURE: before this
 instrument existed nothing opened the live file to look at its permission allow-list, so a

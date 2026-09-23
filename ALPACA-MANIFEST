@@ -14,10 +14,12 @@
 # writing over it (see alpaca/manifest.py collisions); the memory class is never a collision and
 # never a copy source.
 #
-# P-001 keeps project.yaml in [mechanism] (human-owned, carries the project id analytics keys on).
-# P-002 moves the self-tests under alpaca/tests/ (so they cannot collide with a product's own tests/)
-# and takes design/ and docs/ out of the mechanism class as whole directories; the operating
-# guides under docs/ are listed one by one below, and design/ stays in the repo as prose only.
+# project.yaml is in [mechanism] (human-owned, it carries the project id analytics keys on); once a
+# project is onboarded, project.yaml and intents/ are its own (alpaca upgrade keeps them, and
+# setup/gen_manifest.py --verify lists their changes as instance-owned). The self-tests live under
+# alpaca/tests/ so they cannot collide with a product's own tests/. docs/ is not a mechanism
+# directory as a whole: the operating guides under docs/ are listed one by one below. Alpaca's own
+# skills are listed one by one under .claude/skills/; the rest of .claude/skills/ is the project's.
 [mechanism]
 .gitignore
 AGENTS.md
@@ -48,7 +50,11 @@ step-models/
 templates/
 vendor/
 plugin/alpaca/
-skills/
+.claude/skills/alpaca-first-chat/
+.claude/skills/alpaca-onboard/
+.claude/skills/alpaca-op/
+.claude/skills/alpaca-from-notes/
+.claude/skills/alpaca-runbook-forge/
 docs/manual.html
 docs/projection-ruling.md
 docs/spec-shape.md

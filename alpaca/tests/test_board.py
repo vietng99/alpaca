@@ -4,7 +4,7 @@ Asserts the Done-when on BOTH the positive and the negative path:
 
   * the four column mappings are DERIVED, never stored: open is todo, open with a live
     claim is doing, discharged or waived is done, blocked or failed is blocked WITH the
-    reason (spec 5.7:453-459).
+    reason.
   * a hand-written `status` column on the row is IGNORED: the view re-derives from the
     verdict rows and the live claims, so a column can never be a claim that outlives its
     evidence.

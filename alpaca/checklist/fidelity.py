@@ -105,7 +105,7 @@ def _norm_taxonomy(taxonomy) -> set:
 def load_taxonomy(root) -> list:
     """Read the oracle taxonomy from `project.yaml`'s `oracle_classes`.
 
-    The taxonomy is DATA (spec:245-247), never compiled in. An absent or empty list is a
+    The taxonomy is DATA (project.yaml `oracle_classes`), never compiled in. An absent or empty list is a
     refusal, not a silent empty codomain: `dispose` cannot adjudicate an oracle class against
     nothing, so BLOCK here rather than pass every item vacuously.
     """

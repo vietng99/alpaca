@@ -37,7 +37,7 @@ ROW_SCHEMA = "alpaca-row/v1"
 #: the genesis link for the per-batch row chain; the empty-input hash, as in alpaca.db.
 GENESIS = util.sha256_hex(b"")
 
-#: the statement floor from the row schema (spec:284): a checkable claim, not a stub.
+#: the statement floor from the row schema: a checkable claim, not a stub.
 STATEMENT_MIN_ALNUM = 12
 STATEMENT_MIN_WORDS = 3
 

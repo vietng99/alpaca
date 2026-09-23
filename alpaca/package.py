@@ -1,8 +1,8 @@
 """Op-close package: a content-addressed archive of a closed op (M4.8).
 
-Sources: spec 7.2:754 (an op is closed when done_when is met, its rows are discharged and its wiki
-op page is written), spec 5.1:218; absorb-gap AG-M12 (a content-addressed archive: a bundle plus
-its digest plus an explicit restore line).
+An op is closed when its done_when is met, its rows are discharged and its wiki op page is
+written. The package is a content-addressed archive of that op: a bundle, its digest and an
+explicit restore line.
 
 `close(conn, op, out_dir) -> {bundle, sha256, restore_cmd, ...}` emits, for one op:
 

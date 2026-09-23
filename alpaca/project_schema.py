@@ -1,14 +1,14 @@
 """project.yaml schema, the skin adapter seam, and the eight-op map (M1.8).
 
 `project.yaml` is the seam that tells Alpaca what build, test, run, lint and drift mean for
-this project without a plugin document (spec 5.11:545-566). This module validates that
+this project without a plugin document. This module validates that
 file against its required key set and produces a clear error per missing or malformed
 key. It is consumed by the doors (M1.15), the fidelity instrument (M1.12) and `alpaca doctor`.
 
-The oracle taxonomy is DATA here, never code (spec:245-247): the schema checks that the
+The oracle taxonomy is DATA here, never code: the schema checks that the
 oracle-class list is present and non-empty, never that it holds a particular member.
 
-The TD eight seam ops map onto the file (spec 5.11, Step 5): preflight, build, run and
+The eight seam ops of the earlier harness map onto the file: preflight, build, run and
 test are commands; signature is the fingerprint command and is_drift its frozen expected
 value; resource_class and boundary_check are entries. `seam_map` returns that mapping.
 
@@ -25,7 +25,7 @@ from alpaca.gates import verdict
 
 INSTRUMENT = "project-schema"
 
-#: commands the seam must name (spec 5.11, Step 1: build, test, lint, run).
+#: commands the seam must name (build, test, lint, run).
 REQUIRED_COMMANDS = ("build", "test", "lint", "run")
 #: paths the seam must name (product tree, artifacts, spec dir).
 REQUIRED_PATHS = ("product_tree", "artifacts", "spec_dir")
@@ -130,7 +130,7 @@ def _phases_ok(phases) -> bool:
 
 
 def seam_map(doc) -> dict:
-    """Map the eight TD seam ops onto project.yaml (spec 5.11, Step 5).
+    """Map the eight seam ops onto project.yaml.
 
     preflight, build, run and test are commands; signature is the fingerprint command
     and is_drift its frozen expected value; resource_class and boundary_check are entries.
@@ -154,7 +154,7 @@ def seam_map(doc) -> dict:
 
 def skin_adapter(doc) -> list:
     """The skin adapter seam: the declared mapping from a project's artifact shapes to a
-    step model and a register (spec 5.11). Returns the normalized adapter list.
+    step model and a register. Returns the normalized adapter list.
 
     The mapping is declared, never guessed. A missing `skin.adapters` section, an empty
     list, or an adapter missing any of artifact_shape / key_column / step_model / register

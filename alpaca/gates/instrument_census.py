@@ -12,7 +12,7 @@ a unit test cannot masquerade as production wiring:
 
   * production caller - a NON-test module that imports the instrument's module or names its
     file path (how a door, a CLI or a sibling gate actually reaches it). This is the caller
-    that satisfies the "present != wired" invariant (spec:300-307); `wiring_audit` folds it.
+    that satisfies the "present != wired" invariant; `wiring_audit` folds it.
   * test caller       - a file under `tests/` (or a `test_*.py` / `conftest.py`) that imports
     the instrument. A unit test exercising a gate is NOT the same as the gate being wired into
     a production path, so it is listed separately and never counts as independent wiring.

@@ -61,7 +61,7 @@ The everyday operating verbs. Small on purpose.
 
 - `alpaca runbook` - `alpaca runbook check <file> [--spec <path>]` refuses a malformed runbook and, with a spec-kit or OpenSpec spec, fails when a success criterion or scenario has no check. Read-only; see `docs/runbook-format.md`.
 - `alpaca intake` - `alpaca intake <spec> <runbook> [--op <op>] [--dry-run]` checks the runbook against a spec-kit or OpenSpec spec, then gives the op one checklist row per success criterion or scenario, one task contract per runbook stage and per owner gate, and the profile stages. A rerun after a spec change supersedes only the rows whose criterion changed, withdraws removed ones, adds new ones and keeps the rest with their verdicts. See `docs/intake.md`.
-- `alpaca start` - `alpaca start <notes> [--kit spec-kit|openspec] [--prepare]` is the one entry point from raw notes: it picks spec-kit for a new thing or OpenSpec for a change, prepares the project, and prints the steps to a spec, a runbook and intake. The skill `skills/alpaca-from-notes/SKILL.md` walks them.
+- `alpaca start` - `alpaca start <notes> [--kit spec-kit|openspec] [--prepare]` is the one entry point from raw notes: it picks spec-kit for a new thing or OpenSpec for a change, prepares the project, and prints the steps to a spec, a runbook and intake. The skill `/alpaca-from-notes` (`.claude/skills/alpaca-from-notes/SKILL.md`) walks them.
 
 ### Knowledge
 
@@ -71,7 +71,7 @@ The everyday operating verbs. Small on purpose.
 ### Output and views
 
 - `alpaca export` - export the record as a static bundle.
-- `alpaca hub` - `alpaca hub publish` writes this workspace's tile to a host hub's drop directory from `data.json` or `board.json` (settings under `hub:` in project.yaml; it also runs at session end when `hub.enabled` is true); `--print` writes nothing. `alpaca hub timer` prints a systemd user service and timer that publish every 60 s. See `docs/host-hub.md`.
+- `alpaca hub` - `alpaca hub publish` writes this workspace's tile to a host hub's drop directory from `data.json` or `board.json` (settings under `hub:` in project.yaml; it also runs at session end when `hub.enabled` is true); `--print` writes nothing. `alpaca hub timer` prints a systemd user service and timer that publish every 60 s. `setup/hub-publish.py` is the same publisher as one standalone file (Python standard library only) that any member of the machine can copy to publish a workspace without installing Alpaca. See `docs/host-hub.md`.
 - `alpaca deploy` - deploy the read-only page for the owner to read while away.
 - `alpaca serve` - serve the read-only page locally.
 - `alpaca analytics` - build the analytics projection (`analytics/index.html`).
@@ -87,7 +87,7 @@ Use the clean archive produced by `setup/ship.py`. Extract it into a new directo
 
 Nothing in the tree names the harness folder or bakes in an absolute path, so you can rename the folder or move it and the harness keeps working. The root is discovered by walking up to the directory that holds `ALPACA-MANIFEST`, the marker that says "this directory is the harness root".
 
-Two file classes travel differently. The mechanism class (the code, the doctrine, the contracts) is replaced wholesale on an upgrade. The memory class (`RESUME.md` and the record under `.alpaca/`) is yours and is never overwritten; `alpaca upgrade` refreshes the mechanism paths and leaves the memory paths untouched. `project.yaml` ships as a template with no project identity filled in. Each installation receives a fresh project-local identity in `.alpaca/instance.json`. Runtime record, resume pad, analytics and tool installations never travel in the clean archive. An in-place upgrade preserves the target's configuration and record.
+Two file classes travel differently. The mechanism class (the code, the doctrine, the contracts) is replaced wholesale on an upgrade. The memory class (`RESUME.md` and the record under `.alpaca/`) is yours and is never overwritten; `alpaca upgrade` refreshes the mechanism paths and leaves the memory paths untouched. `project.yaml` ships as a template with no project identity filled in. Each installation receives a fresh project-local identity in `.alpaca/instance.json`. Runtime record, resume pad, analytics and tool installations never travel in the clean archive. An in-place upgrade preserves the target's configuration and record. When a release stops listing a mechanism path an older release shipped (the top-level skills folder of earlier releases, for example), the upgrade removes the files there that still hold the shipped bytes recorded in `MANIFEST.json`; a file you edited or added there stays, and `alpaca upgrade --plan` names both.
 
 ## First chat and onboarding
 

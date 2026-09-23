@@ -1,6 +1,6 @@
 """M3.9 -- the six shipped formations register, and every gate they name is wired.
 
-Proof test for the Done-when (spec 5.8:499-503, D7 spec:156, section 6 KEEP rows 131-132):
+Proof test for the Done-when (every shipped formation is registered):
 
   * all six manifests (solo, builder-verifier, fan-out, bug-loop, nuclear, napalm)
     load via `alpaca.formation.manifest.load` and register through `manifest.registry(root)`

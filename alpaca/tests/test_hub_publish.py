@@ -384,7 +384,9 @@ def test_session_end_publishes_when_enabled(project, drop):
     run = end_session(project)
     assert run.returncode == 0 and run.stdout == "", run.stderr
     tile = json.load(open(os.path.join(drop, "%s--ended.json" % ME)))
-    assert hub_accepts(tile) and tile["status"]["headline"] == "op-2: Build the demo"
+    # the session end refreshes data.json from the record first (the record has no op; the stale
+    # copy written above named op-2), see test_hub_publish_standalone.py
+    assert hub_accepts(tile) and tile["status"]["headline"] == "No open operation."
     assert db.events(db.connect(project), kind="hub-publish-failed") == []
 
 

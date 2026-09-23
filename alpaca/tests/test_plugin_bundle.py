@@ -1,6 +1,6 @@
 """M3.10 -- the skills plugin bundled from the canonical shared source.
 
-Proof test for the Done-when (P-010 spec:911, spec 5.12:590-592, section 6 row 716):
+Proof test for the Done-when (the fifteen skills of the plugin bundle):
 
   * all fifteen skills named by P-010 are present in the bundle at the entry-point
     path the plan table records for each: SKILL.md at the skill root for eleven of
@@ -16,9 +16,9 @@ Proof test for the Done-when (P-010 spec:911, spec 5.12:590-592, section 6 row 7
   * the eleven hook locations are flattened into one plugin/alpaca/hooks/ and the flattening
     is traceable back to each hook's upstream path;
   * the plugin hooks are registered under the M1.5 fail-open and timeout contract;
-  * the bundle contains no skill not named in P-010 or section 6 row 716;
-  * the five Alpaca-native skills alpaca-intake, alpaca-onboard, alpaca-op,
-    alpaca-runbook-forge and alpaca-from-notes ship under skills/.
+  * the bundle contains no skill beyond those fifteen;
+  * the five Alpaca-native skills alpaca-first-chat, alpaca-onboard, alpaca-op,
+    alpaca-runbook-forge and alpaca-from-notes ship under .claude/skills/.
 
 Every control asserts the POSITIVE and the NEGATIVE path, so none is a tautological pass.
 """
@@ -270,16 +270,16 @@ def test_plugin_json_is_valid():
 # ---------------------------------------------------------------- native skills
 
 def test_alpaca_native_skills_ship():
-    for name in ("alpaca-intake", "alpaca-onboard", "alpaca-op", "alpaca-runbook-forge",
+    for name in ("alpaca-first-chat", "alpaca-onboard", "alpaca-op", "alpaca-runbook-forge",
                  "alpaca-from-notes"):
-        p = os.path.join(REPO, "skills", name, "SKILL.md")
+        p = os.path.join(REPO, ".claude", "skills", name, "SKILL.md")
         # positive: each Alpaca-native skill ships a SKILL.md.
         assert os.path.isfile(p), "Alpaca-native skill missing: %s" % name
         with open(p, encoding="utf-8") as f:
             head = f.read(400)
         assert head.lstrip().startswith("---"), "%s needs YAML front matter" % name
-    # negative: they live under skills/, not inside the vendored plugin bundle.
-    assert not os.path.exists(os.path.join(PLUGIN, "skills", "alpaca-intake"))
+    # negative: they live under .claude/skills/, not inside the vendored plugin bundle.
+    assert not os.path.exists(os.path.join(PLUGIN, "skills", "alpaca-first-chat"))
 
 
 # ---------------------------------------------------------------- no stowaways
@@ -307,12 +307,10 @@ def test_bundle_skill_dirs_are_all_named(rows):
 def test_alpaca_manifest_documents_the_plugin_tree():
     with open(os.path.join(REPO, "ALPACA-MANIFEST"), encoding="utf-8") as f:
         text = f.read()
-    # positive: the manifest acknowledges the vendored bundle as harness-owned. M3.10
-    # documents plugin/alpaca/ and skills/ here; M4.1 promotes them to a formal mechanism class
-    # alongside the doctor rework (listing them as bare mechanism paths now would fail
-    # doctor's existence check on the minimal synthetic fixtures).
+    # positive: the manifest lists the vendored bundle and each Alpaca-native skill as
+    # harness-owned mechanism paths.
     assert "plugin/alpaca/" in text, "ALPACA-MANIFEST must document the plugin bundle"
-    assert "skills/" in text, "ALPACA-MANIFEST must document the Alpaca-native skills tree"
+    assert ".claude/skills/alpaca-from-notes/" in text, "ALPACA-MANIFEST must list the Alpaca-native skills"
     # negative: the manifest still has its two class sections intact.
     assert "[mechanism]" in text and "[memory]" in text
 

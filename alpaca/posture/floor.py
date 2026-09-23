@@ -1,18 +1,18 @@
 """The floor, the two change classes, and de-escalation (M3.3).
 
-Sources: spec 5.6:402-409 (the floor, the two change classes), P6:105, rules 5-8 (spec:810-817),
-Q18 (spec:188), section 6 REBUILD row 90 (changeclass rebuilt Alpaca-native), absorb-gap AG-M31
-(a de-escalation is always allowed and does not discharge an obligation).
+The rule is `doctrine/leaves/two-change-classes.md` (the floor, the two change classes, and
+de-escalation: a drop to a safer level is always allowed and does not discharge an obligation);
+CLAUDE.md boot rules 3 and 6 state it for every session.
 
 Two instruments live here, both pure:
 
   * `classify(root, path) -> "agent-writable" | "human-owned"`. Every write splits into two
     change classes (TD C0-C3 reduced to two). Agent-writable is the product tree, the `.alpaca/`
     runtime, the wiki and the rows. Human-owned is the authority surface: `contracts/`,
-    `project.yaml`, `doctrine/` and the boot block (rule 7, spec:812-815). The split is read
+    `project.yaml`, `doctrine/` and the boot block (CLAUDE.md boot rule 6). The split is read
     BY PATH FROM THE MANIFEST (`ALPACA-MANIFEST`), so which paths the harness owns is the shipped
     tree's own answer and the classification cannot drift from it. `doctrine/` is an authority
-    surface by rule 7 whether or not the manifest lists it yet, so it is always human-owned.
+    surface by boot rule 6 whether or not the manifest lists it yet, so it is always human-owned.
 
   * `check(action, level) -> "allow" | "review-card" | "refuse"`. The verdict a write path or
     the review card reads. A human-owned write is a review card up to L4 and an agent write with
@@ -52,16 +52,16 @@ REFUSE = "refuse"
 MIN_LEVEL, MAX_LEVEL = 1, 6
 
 #: the level at which an agent writes a human-owned surface itself, with the diff recorded, rather
-#: than raising a review card (Q18, rule 7 spec:812-815).
+#: than raising a review card (CLAUDE.md boot rule 6).
 AGENT_WRITE_FROM = 5
 
-#: the authority surface names (rule 7). Matched against the manifest's [mechanism] entries so
+#: the authority surface names (boot rule 6). Matched against the manifest's [mechanism] entries so
 #: the classification tracks the shipped tree; `doctrine` is added by rule even if the manifest
 #: omits it. A name ending a dir is a prefix; a plain file name matches only itself.
 HUMAN_OWNED_NAMES = frozenset({"contracts", "project.yaml", "doctrine", "CLAUDE.md", "AGENTS.md"})
 
-#: default-deny categories that refuse at EVERY level (the floor, spec 5.6:402-406). The seventh
-#: category from the spec, writing the agent's own authority surface, is not here: it is the
+#: default-deny categories that refuse at EVERY level (the floor). The seventh category, writing
+#: the agent's own authority surface, is not here: it is the
 #: human-owned change class, handled through `classify` (review card up to L4, agent write at
 #: L5+). These six are flat refusals.
 DENY_CATEGORIES = frozenset({
@@ -111,13 +111,13 @@ def _manifest_mechanism(root: str) -> list:
 def _human_owned_prefixes(root: str) -> set:
     """The human-owned path prefixes for this root, read FROM THE MANIFEST so they cannot drift
     from the shipped tree. A manifest entry whose name is an authority surface (HUMAN_OWNED_NAMES)
-    is included; `doctrine` is always included by rule 7, whether or not the manifest lists it."""
+    is included; `doctrine` is always included by boot rule 6, whether or not the manifest lists it."""
     prefixes = set()
     for entry in _manifest_mechanism(root):
         base = entry.rstrip("/")
         if base in HUMAN_OWNED_NAMES:
             prefixes.add(base)
-    prefixes.add("doctrine")  # authority surface by rule 7 even before the manifest lists it
+    prefixes.add("doctrine")  # authority surface by boot rule 6 even before the manifest lists it
     return prefixes
 
 

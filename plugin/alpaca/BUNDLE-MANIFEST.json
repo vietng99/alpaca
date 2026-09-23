@@ -5,8 +5,7 @@
   "license_review": "Four skills carry an upstream MIT LICENSE file (caveman, humanizer, eli5, i-have-adhd). The other eleven (spear, sang, sam, flare, autodrive, timebomb, capture, vsys, nuclear, napalm, html-safe) are the owner's own work and are part of Alpaca under the root LICENSE (MIT). THIRD-PARTY-NOTICES.md is the inventory.",
   "transcript_parser_debt": {
     "choice": "replaced-by-drain",
-    "note": "The remember/capture-side transcript parser that read zero exchanges on the current model format is not revived here; the M2 session drain and alpaca sort path is the shipped capture route, and the record is its sink.",
-    "spec": "spec:871"
+    "note": "The remember/capture-side transcript parser that read zero exchanges on the current model format is not revived here; the M2 session drain and alpaca sort path is the shipped capture route, and the record is its sink."
   },
   "hook_flattening": {
     "plugin/alpaca/hooks/sam-inject.sh": "sam/hooks/sam-inject.sh",

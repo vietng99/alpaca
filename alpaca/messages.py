@@ -9,7 +9,7 @@ from a watermark.
 Seven kinds: claim, handoff, question, result, blocker, decision, note.
 Three `to` forms: an agent name, a task/row/op id, or the literal `broadcast`.
 
-The native channel rule (spec 7.3:763-768): a subagent return carries a POINTER to a board row or
+The native channel rule (`doctrine/leaves/file-as-truth.md`): a subagent return carries a POINTER to a board row or
 a message id, never the content. A pointer, when given, must resolve, or the message is refused
 before anything is written, so a dangling pointer never enters the record. A pointer resolves when
 it is a `local:<relpath>` evidence file that exists on disk, a `remote:<ref>` opaque reference, a

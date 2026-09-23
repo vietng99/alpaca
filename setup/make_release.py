@@ -7,7 +7,7 @@ run `alpaca init` and `alpaca onboard`, and the harness boots as a fresh project
 
 This is the fresh-INSTALL companion to package_candidate.py, which refreshes only the manifest
 mechanism class in place (an upgrade). A full install also needs the git-tracked support trees the
-manifest does not enumerate as bare mechanism paths (doctrine/, MAP.md, plugin/, skills/,
+manifest does not enumerate as bare mechanism paths (doctrine/, MAP.md, plugin/, .claude/skills/,
 formations/, agents/, setup/), so the source set is the whole TRACKED tree.
 
 The tracked set is the boundary because it is the one line that already excludes every runtime
@@ -29,8 +29,8 @@ Excluded from every release (all gitignored, so absent from the tracked set):
   * the host-local settings file and the agent worktrees dir under .claude/;
   * the dist/ output dir itself.
 
-Determinism: tar members are path-sorted; uid/gid, names and mtimes are normalised; the gzip
-timestamp and filename are absent. A rebuild from the same tree is byte-for-byte equal, so the
+Determinism: tar members are path-sorted; modes are 0644 or 0755 (the owner exec bit, as git keeps
+it); uid/gid, names and mtimes are normalised; the gzip timestamp and filename are absent. A rebuild from the same tree is byte-for-byte equal, so the
 receipt sha256 is stable and a downstream consumer can compare bytes.
 
 Rename-safe: no folder-name literal and no absolute path is baked in. The root is discovered at
@@ -100,7 +100,10 @@ def _sha_bytes(data):
 
 
 def _mode_of(path):
-    return stat.S_IMODE(os.lstat(path).st_mode)
+    """The tar mode of a member: 0755 when the owner exec bit is set, else 0644. This is what git
+    keeps; group write from the checkout's umask, other-write, setuid, setgid and sticky never
+    travel, so the same commit gives the same archive on any host."""
+    return 0o755 if os.lstat(path).st_mode & stat.S_IXUSR else 0o644
 
 
 def _tracked_files(root):

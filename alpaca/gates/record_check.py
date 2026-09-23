@@ -2,7 +2,7 @@
 
 Built for Alpaca against the events and rows tables. A derived document - a projection such as
 RESUME.md, CHECKLIST.md or a page - is NOT the record; it is a claim ABOUT the record (the
-record is the only truth, spec:34; projections are rendered and never hand-edited). A projection
+record is the only truth; projections are rendered and never hand-edited). A projection
 can drift from the record it was rendered from, or be hand-edited to assert something the record
 never said. This instrument re-derives the truth from the ledger and refuses a claim the record
 does not back:
@@ -53,7 +53,7 @@ _VOCAB = "|".join(STATUS_WORDS + TAG_WORDS)
 _CLAIM_RE = re.compile(
     r"(?:^|[\s|*>-])([A-Za-z][\w.:\-]*?)\s*(?::|=|->|\|)\s*(" + _VOCAB + r")\b")
 
-#: projection files check(root) scans when present. These are rendered documents (spec:34).
+#: projection files check(root) scans when present. These are rendered documents.
 _PROJECTIONS = ("RESUME.md", "CHECKLIST.md", "board.json", "data.json",
                 os.path.join("analytics", "index.html"))
 

@@ -1,6 +1,6 @@
 """M3.8 proof: the controller sequencer and its crash-only replay from events.
 
-Ports the earlier harness controller sequencer MINUS the two-human phase sign-off (section 6 ADAPT row 84),
+Ports the earlier harness controller sequencer MINUS the two-human phase sign-off,
 with the workspace guard first and every step reflected into the record (Step 2). The state store
 is the Alpaca record itself: `controller.run` reads which steps already reached PASS from the events and
 resumes at the first non-done step, so a controller killed mid-plan replays to the same state and

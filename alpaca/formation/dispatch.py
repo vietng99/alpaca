@@ -1,8 +1,7 @@
 """The dispatch protocol, the sole-spawner rule, and the heavy bracket (M3.8).
 
-Sources: spec 5.8:493-506 (dispatch protocol, heavy-verify bracket, sole-spawner), 7.3:761-771;
-section 6 ADAPT row 84 (the earlier harness controller, with the two-human phase sign-off removed);
-The earlier harness inventory row 84. Built on the M3.7 formation manifest and the M2.5 claims.
+Adapted from the earlier harness controller, with the two-human phase sign-off removed. Built on the
+M3.7 formation manifest and the M2.5 claims.
 
 WHAT THIS IS. An orchestrator hands work to workers over the record, and folds their verdicts back.
 Nothing here is a new store: an assignment, a spawn, a spawn refusal, a reopen and a fold are each

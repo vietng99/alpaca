@@ -1,7 +1,8 @@
 """t-089 security review: one test per finding (H1-H3, M1-M5, L1-L3, L5).
 
 Every test runs with a fake HOME holding a fake ~/.cloudflared and a tmp registry
-($ALPACA_WORKSPACES); no test binds a port other than an ephemeral one, and no test touches 7328.
+($ALPACA_WORKSPACES); no test binds a port other than an ephemeral one. 7350 is the sample
+reserved port set in conftest.py.
 """
 import http.server
 import json
@@ -26,7 +27,7 @@ credentials-file: /creds/0a1b2c3d.json
 protocol: http2
 ingress:
   - hostname: example.com
-    service: http://127.0.0.1:7328
+    service: http://127.0.0.1:7350
   - service: http_status:404
 """
 
@@ -336,16 +337,16 @@ def run_watchdog(tmp_path, pairs, codes, ticks, routed=None):
 
 def test_m2_an_unapplied_hostname_answering_404_is_not_a_miss(tmp_path):
     pairs = [("http://127.0.0.1:7391/", "https://new.example.org/", False),
-             ("http://127.0.0.1:7328/", "https://example.com/", True)]
-    codes = {"http://127.0.0.1:7328/": 200, "http://127.0.0.1:7391/": 200,
+             ("http://127.0.0.1:7350/", "https://example.com/", True)]
+    codes = {"http://127.0.0.1:7350/": 200, "http://127.0.0.1:7391/": 200,
              "https://example.com/": 200, "https://new.example.org/": 404}
     assert run_watchdog(tmp_path, pairs, codes, [1000, 1200, 1400, 1600]) == 0
 
 
 def test_m2_restart_only_when_every_checked_public_url_fails(tmp_path):
-    pairs = [("http://127.0.0.1:7328/", "https://example.com/", True),
+    pairs = [("http://127.0.0.1:7350/", "https://example.com/", True),
              ("http://127.0.0.1:7391/", "https://a.example.org/", True)]
-    one_down = {"http://127.0.0.1:7328/": 200, "http://127.0.0.1:7391/": 200,
+    one_down = {"http://127.0.0.1:7350/": 200, "http://127.0.0.1:7391/": 200,
                 "https://example.com/": 530, "https://a.example.org/": 200}
     assert run_watchdog(tmp_path, pairs, one_down, [1000, 1200, 1400]) == 0
     all_down = dict(one_down, **{"https://a.example.org/": 530})
@@ -362,7 +363,7 @@ def test_m2_the_watchdog_checks_the_live_config_hostnames(tmp_path):
     root = instance(tmp_path, "a")
     workspace.add(root, port=7391, hostname="new.example.org")
     result = maintenance.write_services(root, tunnel="main", watchdog_state=str(tmp_path / "st"))
-    assert result["watchdog"]["pairs"] == [["http://127.0.0.1:7328/", "https://example.com/", True],
+    assert result["watchdog"]["pairs"] == [["http://127.0.0.1:7350/", "https://example.com/", True],
                                            ["http://127.0.0.1:7391/", "https://new.example.org/", False]]
 
 
@@ -404,20 +405,20 @@ def test_m5_path_rules_and_the_live_catch_all_are_kept(tmp_path, host):
     (host / ".cloudflared" / "config.yml").write_text(
         "tunnel: t\ncredentials-file: /c.json\ningress:\n"
         "  - path: ^/status$\n    service: http://127.0.0.1:9101\n"
-        "  - hostname: example.com\n    service: http://127.0.0.1:7328\n"
+        "  - hostname: example.com\n    service: http://127.0.0.1:7350\n"
         "    originRequest:\n      noTLSVerify: true\n"
         "  - service: http_status:503\n")
     a = instance(tmp_path, "a")
     workspace.add(a, port=7391, hostname="a.example.org")
     rules = yaml.safe_load(workspace.render("main")["text"])["ingress"]
     assert rules == [{"path": "^/status$", "service": "http://127.0.0.1:9101"},
-                     {"hostname": "example.com", "service": "http://127.0.0.1:7328",
+                     {"hostname": "example.com", "service": "http://127.0.0.1:7350",
                       "originRequest": {"noTLSVerify": True}},
                      {"hostname": "a.example.org", "service": "http://127.0.0.1:7391"},
                      {"service": "http_status:503"}]
 
 
-# ---- L1: a bind scan never lands on 7328 --------------------------------------------------------
+# ---- L1: a bind scan never lands on the reserved port --------------------------------------------------------
 
 def test_l1_bind_scan_skips_the_reserved_port(monkeypatch):
     tried = []
@@ -428,12 +429,12 @@ def test_l1_bind_scan_skips_the_reserved_port(monkeypatch):
     monkeypatch.setattr(serve, "_Server", Fake)
     monkeypatch.delenv("ALPACA_SERVE_STRICT_PORT", raising=False)
     monkeypatch.delenv(serve.LISTEN_FD_ENV, raising=False)
-    _httpd, port = serve._bind(7328)
-    assert port == 7329 and 7328 not in tried
+    _httpd, port = serve._bind(7350)
+    assert port == 7351 and 7350 not in tried
     monkeypatch.setenv("ALPACA_SERVE_STRICT_PORT", "1")
     tried.clear()
-    _httpd, port = serve._bind(7328)                    # strict and asked for: a dashboard unit's own case
-    assert port == 7328 and tried == [7328]
+    _httpd, port = serve._bind(7350)                    # strict and asked for: a dashboard unit's own case
+    assert port == 7350 and tried == [7350]
 
 
 # ---- L2: no $ in a unit path --------------------------------------------------------------------

@@ -122,17 +122,34 @@ def expected_mode(manifest, rel):
     return int(manifest["file_modes"][rel][1:], 8)
 
 
+#: mode bits a shipped file never carries (setup/gen_manifest.py UNSAFE_BITS).
+UNSAFE_BITS = stat.S_IWOTH | stat.S_ISUID | stat.S_ISGID | stat.S_ISVTX
+
+
 def same_exec_bit(got_mode, want_mode):
-    """Modes compare by the owner exec bit only, the one bit git keeps (setup/gen_manifest.py
+    """True when the owner exec bits agree, the one bit git keeps (setup/gen_manifest.py
     _type_mode): a checkout under umask 0002 gives 0664/0775 files, which are not drift."""
     return bool(got_mode & stat.S_IXUSR) == bool(want_mode & stat.S_IXUSR)
 
 
+def mode_ok(got_mode, want_mode):
+    """A file mode that matches its recorded mode: the same owner exec bit and no unsafe bit
+    (other-write, setuid, setgid, sticky). Group write alone is the checkout's umask."""
+    return same_exec_bit(got_mode, want_mode) and not got_mode & UNSAFE_BITS
+
+
+def file_marker(mode):
+    """The marker gen_manifest gives a regular file of this mode: f0755 or f0644 from the owner
+    exec bit, plus any unsafe bit (so a world-writable file never matches a recorded f0644)."""
+    return "f%04o" % ((0o755 if mode & stat.S_IXUSR else 0o644) | (mode & UNSAFE_BITS))
+
+
 def norm_marker(marker):
-    """A manifest marker as gen_manifest records it today (f0644 or f0755)."""
+    """A manifest marker as gen_manifest compares it today (older full modes such as f0664 keep
+    only the exec bit and the unsafe bits)."""
     if isinstance(marker, str) and marker.startswith("f") and len(marker) == 5:
         try:
-            return "f0755" if int(marker[1:], 8) & stat.S_IXUSR else "f0644"
+            return file_marker(int(marker[1:], 8))
         except ValueError:
             pass
     return marker
@@ -157,7 +174,7 @@ def verify_selected_tree(tree, exact=False):
             errors.append("hash mismatch: %s" % rel)
         got_mode = stat.S_IMODE(status.st_mode)
         want_mode = expected_mode(manifest, rel)
-        if not same_exec_bit(got_mode, want_mode):
+        if not mode_ok(got_mode, want_mode):
             errors.append("mode mismatch: %s (%04o != %04o)" % (rel, got_mode, want_mode))
     if exact:
         actual = set()
@@ -359,7 +376,7 @@ def actual_marker(path):
     except FileNotFoundError:
         return None
     if stat.S_ISREG(status.st_mode):
-        return "f0755" if status.st_mode & stat.S_IXUSR else "f0644"
+        return file_marker(stat.S_IMODE(status.st_mode))
     if stat.S_ISLNK(status.st_mode):
         return "l"
     return "?%04o" % stat.S_IMODE(status.st_mode)

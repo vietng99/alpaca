@@ -41,7 +41,7 @@ def test_default_services_do_not_add_a_tunnel(project):
     result = write_services(project)
     assert len(result['units']) == 4
     assert not any('tunnel' in name for name in result['units'])
-    assert result['port'] != 7328 and result['installed'] is False
+    assert result['port'] != 7350 and result['installed'] is False
 
 
 def test_web_up_script_starts_only_this_instances_units(project):
@@ -93,7 +93,7 @@ def test_watchdog_is_generated_from_the_registry_without_fixed_names(project, tm
     assert result['watchdog']['pairs'] == [['http://127.0.0.1:7394/', 'https://a.example.org/', False],
                                            ['http://127.0.0.1:7395/', 'https://b.example.org/', False]]
     assert 'UNIT=alpaca-tunnel-edge.service' in script and 'STATE=' + str(tmp_path / 'state' / 'wd') in script
-    for fixed in ('7328', 'example.com', '0123456789ab'):
+    for fixed in ('7350', 'example.com', '0123456789ab'):
         assert fixed not in script
     folder = Path(result['directory'])
     service = (folder / 'alpaca-tunnel-edge-watchdog.service').read_text()
