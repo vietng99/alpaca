@@ -461,6 +461,7 @@ class _Scan(object):
         self.objs = _Objects(root)
         self.blob_seen, self.path_seen, self.commit_seen = set(), set(), set()
         self.tag_seen, self.tree_seen = set(), set()
+        self.sent_blobs = None     # with an object walk: the blobs the push sends (the rest are there)
 
     def _block(self, entry, reason, code):
         self.report["blocked"].append(dict(entry, reason=reason))
@@ -502,7 +503,7 @@ class _Scan(object):
                 th, _ts = leak_audit.scan_text(self.tl, name, name, shape_on=True)
                 if th or leak_audit.byte_hits(self.tl, [path]):
                     self.leak(dict(where, path_digest=_digest(path), where="path-name"))
-            if typ == "blob":
+            if typ == "blob" and (self.sent_blobs is None or obj in self.sent_blobs):
                 self.blob(obj, name, where)
 
     def blob(self, sha, name, where):
@@ -640,6 +641,9 @@ def scan(root, commits, protected=None, term_list=None, refs=None, objects=None,
         for sha in commits or []:
             s.commit(sha)
         typed = [(sha, path, s.objs.info(sha)[0]) for sha, path in (objects or [])]
+        if objects is not None and not commits:
+            # a blob the remote already has is not sent; its path names are still read
+            s.sent_blobs = {sha for sha, _path, typ in typed if typ == "blob"}
         for sha, path, typ in typed:                          # commits first: they mark root trees
             if typ == "commit":
                 s.object(sha, path, typ)

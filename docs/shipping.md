@@ -106,39 +106,86 @@ Before a push to a shared remote, install the pre-push barrier in the repository
 bin/alpaca barrier install
 ```
 
-It writes `.git/hooks/pre-push` (it refuses to replace a hook it did not write). Git runs the hook
-before any object leaves, for every remote, and the hook runs `bin/alpaca-python -m alpaca.barrier
-prepush` (plain `python3` when the launcher is missing). The barrier scans every commit that would
-enter the remote, not the working tree, and refuses the push when it finds:
+It writes `.git/hooks/pre-push` (it refuses to replace a hook it did not write) and pins a copy of
+the barrier in the git directory (`.git/alpaca-barrier/`: the `alpaca` package code, the `barrier`
+and `tier` settings of `project.yaml`, and a stamp with their digests). Git runs the hook before any
+object leaves, for every remote and from every worktree, and the hook runs the pinned copy
+(`bin/alpaca-python` when the checkout has it, plain `python3` otherwise), never the checked-out
+code. So checking out an older commit, or a `project.yaml` without the barrier block, does not
+change what is checked; the report notes when the checkout differs from the pinned copy. Run the
+install again after you change the barrier settings or update Alpaca. A pinned copy that was
+edited after the install refuses the push.
 
-- a protected path (`barrier.protected_paths` in `project.yaml`: `.alpaca/`, `.venv/`, `.env`);
-- a sealed term, case-insensitive, in any file, path name, author or committer, commit message,
-  pushed ref name or annotated tag;
+The barrier reads every object the push would send (`git rev-list --objects <local> --not
+<remote>`), not the working tree, and refuses the push when it finds:
+
+- a protected path (`barrier.protected_paths` in `project.yaml`: `.alpaca/`, `.venv/`, `.env`,
+  `.env.local`, `.env.*.local`). Case does not matter. A folder rule (`.alpaca/`) also matches a
+  folder of that name deeper in the tree, a name rule (`.env`) matches that name anywhere
+  (`sub/.env`), and `*` or `?` match within one path part. `.env.example` is not protected;
+- a sealed term, case-insensitive, in any file, in a member of a compressed file, in any path name
+  (files, links, folders and submodule entries), in an author, committer or tagger, in a commit or
+  tag message (every tag of a tag chain), or in a pushed ref name;
 - a shape the term list cannot enumerate (an e-mail address, a `/home/<user>` path) in a file or a
-  path name, unless an allow rule clears that exact value.
+  path name, unless an allow rule clears that exact value; an author, committer or tagger e-mail
+  that has the shape of a real address, unless an allow rule names it;
+- a file it cannot read in full: a compressed file it cannot open, or a file larger than 16 MB (it
+  scans the raw bytes of such a file for the terms, but not its text), unless
+  `barrier.allow_blobs` names the file's blob digest with a reason.
 
-Its report names digests, never the paths, refs or terms it refused. Any error while scanning, an
-unreadable `project.yaml`, an unusable term list or an allow rule without a reason refuses the push.
-`bin/alpaca barrier scan <rev> [--since <sha>]` runs the same scan by hand. Deciding to push at all
-stays a human decision; the barrier only stops what must not leave.
+Compressed files are recognised by their first bytes, not their names, and opened with the Python
+standard library: gzip, tar, zip, xz, bzip2, zstd and WOFF fonts, nested up to four levels, at most
+64 MB per member and 256 MB per file. Inside them only the sealed terms are checked, not the shape
+rules (vendored packages carry their authors' addresses). A WOFF2 font needs the `brotli` module;
+without it the three fonts under `alpaca/web/vendor/` are passed by their `barrier.allow_blobs`
+entries, which name each file's digest and why.
+
+Git runs the barrier with replace refs switched off (`GIT_NO_REPLACE_OBJECTS`), since a push sends
+the real objects, not a local replacement. A grafts file (`.git/info/grafts`) or a shallow clone
+refuses the push: to cut old history before a first publish, rewrite it for real (a new root
+commit), not with `git replace --graft`.
+
+Its report names digests and line numbers, never the paths, refs or terms it refused. Any error
+while scanning, an unreadable `project.yaml`, an unusable term list, an allow rule without a reason
+or an absent term list refuses the push. `bin/alpaca barrier scan <rev> [--since <sha>]` runs the
+same scan by hand, with the checked-out settings. Deciding to push at all stays a human decision;
+the barrier only stops what must not leave.
 
 ### The term list stays outside the published tree
 
 `barrier.terms` names `.alpaca/sealed-terms.txt`. The `.alpaca/` folder is gitignored and a protected
 path, so the list is never committed: listing the names inside the published tree would publish
-them. Each clone supplies its own list there, in the leak-audit format (one term per line, at least
-four characters, `#` starts a comment). When the file is absent the push is not blocked, but the
-report says `TERMS-NOT-CHECKED`: only protected paths were checked.
+them. Each clone supplies its own list there, in the main worktree (a linked worktree reads the
+main worktree's list). When the configured list is absent, or a link that points nowhere, the
+push is refused (`TERM-LIST-MISSING-REFUSES`). To push without a list, set
+`barrier.terms_optional: true`: the push then passes with protected paths and shape rules checked,
+and the report and the gate line say the sealed terms were NOT checked.
 
-The maintainers keep the forbidden-name list of this project outside the repository, in the
-workspace that holds it, at `tools/forge/forbidden.txt`, and link it into place:
+The list format, one entry per line:
+
+| Line | Meaning |
+|---|---|
+| `<term>` | a case-insensitive substring, at least four characters; `  # note` after it is ignored |
+| `re: <regex>` | a case-insensitive regular expression, for a whole word (`\bname\b`) or a path prefix too short or too common for a substring; `#re: <regex>` is the older spelling |
+| `!include: <file>` | another list, relative to this list's own folder (up to four levels) |
+| `# ...` | a comment (a `#` followed by a space, or alone) |
+
+A line the barrier cannot use refuses the push: a term shorter than four characters, a regex that
+does not compile or matches an empty string, an include that is absent or loops, a line that looks
+like a directive the barrier does not know (`#word:` or `!word:`). The refusal names the line
+number only.
+
+The maintainers keep the lists of this project outside the repository, in the workspace that
+holds it: `tools/forge/forbidden.txt` (the forbidden names) and `tools/forge/host-terms.txt` (the
+host name, user names, tunnel and registry ids, addresses and account terms of the machine the
+project is built on), both included by `tools/forge/sealed-terms.txt`, which is linked into place:
 
 ```bash
 mkdir -p .alpaca
-ln -s ../../tools/forge/forbidden.txt .alpaca/sealed-terms.txt   # from the repository root
+ln -s ../../tools/forge/sealed-terms.txt .alpaca/sealed-terms.txt   # from the repository root
 ```
 
-The same list feeds the full leak audit over the tree and the git history before a first publish.
+The same lists feed the full leak audit over the tree and the git history before a first publish.
 
 ### Allow rules
 
@@ -150,14 +197,39 @@ reason, or a regex that does not compile, refuses the push. The shipped rules:
 | Rule clears | Reason |
 |---|---|
 | addresses at `example.com`, `example.org`, `example.net`, `*.example`, `*.invalid`, `*.test`, `*.localhost` | reserved placeholder domains (RFC 2606, RFC 6761) used by fixtures and docs |
-| `<text>@pytest.fixture`, `@pytest.mark.<name>`, `@cli.command`, `@common.fail`, `@contextlib.contextmanager` | the joined lane (whitespace removed, to catch a term split across a line break) glues the end of one line to a Python decorator on the next |
-| `<text>@reboot...` | the same gluing with the crontab keyword `@reboot` in prose |
+| `<text>@pytest.fixture`, `@pytest.mark.<name>`, `@cli.command`, `@common.fail`, `@contextlib.contextmanager`, each optionally followed by `def<name>` | the joined lane (whitespace removed, to catch a term split across a line break) glues the end of one line to a Python decorator on the next, and to the `def` after it |
+| `<text>@rebootweb-upscriptunder.alpaca` | the same gluing, in one docstring that names the crontab keyword `@reboot`; this one value only |
 | `/home/owner`, `/home/someone`, `/home/secret` and paths below them | generic home folders in test fixtures; no real user |
 
 The joined lane removes whitespace, so keep a placeholder address apart from the next word with a
-quote or a bracket (`<t@example.invalid>`), as the fixtures here do. Font files and compressed
-archives do not decode as text; the barrier scans their raw bytes for the sealed terms only, so
-they need no rule.
+quote or a bracket (`<t@example.invalid>`), as the fixtures here do.
+
+The public identity chosen for the published history (the author and committer e-mail) needs an
+allow rule of its own when it has the shape of a real address: a rule whose regex matches that
+one address exactly (with each `.` and `+` escaped), and a reason such as `the public identity of
+this repository`.
+
+`barrier.allow_blobs` lists blobs the barrier may pass although it cannot read them in full, as
+`<blob sha>  # <reason>` (`git rev-parse <rev>:<path>` prints the digest). The raw bytes of such a
+blob are still scanned for the terms.
+
+### What a pre-push hook cannot stop
+
+The barrier is a pre-push hook, so it stops `git push` and nothing else:
+
+- `git push --no-verify` skips every pre-push hook, and `core.hooksPath` pointed elsewhere skips
+  this one. Hooks are not cloned: each clone installs its own.
+- Other ways out are not pushes: a bundle, `git format-patch`, `git archive`, an upload through a
+  hosting site's web page or API, a release file. Run the leak audit on what those carry.
+- Push options (`git push -o`) go to the server and are never shown to the hook.
+- A term the text cannot show as a string: split by code (`"na" + "me"`), split across comment
+  markers, written as an HTML entity, percent-encoded or in base64, or inside a compressed stream
+  with no magic bytes (raw deflate, raw brotli, PNG image data, PDF streams). The look-alike folding
+  covers Cyrillic and Greek letters and the invisible characters, not the whole Unicode confusable
+  table.
+
+For the first publish, run the full leak audit over the tree and the history as well; the barrier
+is the last guard, not the only one.
 
 ### Check that it refuses
 
