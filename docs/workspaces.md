@@ -18,7 +18,7 @@ one host registry file, and it prints the rest as owner steps.
   `$ALPACA_WORKSPACES` or `~/.config/alpaca/workspaces.json` (mode 0600):
   `{"version": 1, "workspaces": [{"id", "name", "root", "port", "hostname", "href"}]}`.
   `id` is the first 12 hex of sha256 of the real root, the same id the unit names carry
-  (`alpaca-<id>-dashboard.service`). Only `alpaca workspace add` and `alpaca workspace remove` write it.
+  (`alpaca-<id>-dashboard.service`). Only `alpaca workspace add`, `move` and `remove` write it.
 - **One combined config.** `alpaca workspace render-ingress` turns the registry into one cloudflared
   config, emitted with `yaml.safe_dump`. Every rule of the live file is kept unchanged and in its
   order (hostname rules, path-only rules, the live catch-all), its settings (for example
@@ -75,6 +75,7 @@ one host registry file, and it prints the rest as owner steps.
 alpaca workspace add [--name N] [--port P] [--hostname H] [--no-live-config]
 alpaca workspace list
 alpaca workspace remove [--id ID]
+alpaca workspace move (--from OLD_ROOT | --id ID) [--name N] [--no-live-config]
 alpaca workspace render-ingress --tunnel NAME [--out FILE] [--config FILE]
                             [--tunnel-id ID] [--credentials-file FILE]
 alpaca collect services [--port P] [--tunnel NAME] [--cloudflared PATH]
@@ -162,3 +163,22 @@ repository or DNS, and they are the owner's decision.
 
 To take an instance off: `bin/alpaca workspace remove`, render again, and the owner applies the new
 config and deletes the DNS record.
+
+## Moving a workspace folder
+
+The instance id is derived from the real root, so a moved folder is a new instance to the
+registry. Do not `remove` the old entry and `add` again: once the old entry is gone, its live
+ingress rule looks like another service's rule and `add` refuses the port. Instead:
+
+1. `bin/alpaca serve --stop` in the old folder, then move the folder.
+2. From the new folder: `bin/alpaca workspace move --from <old root>` (or `--id <old id>`, from
+   `bin/alpaca workspace list`). It replaces the old entry with one for the new root that keeps
+   the port, the hostname and the name, and adopts the live rule that routes that hostname to that
+   port as this instance's own, so the tunnel config does not change (`"adopted_rule": true`).
+3. `bin/alpaca collect services` again (the unit names carry the id, which changed), reinstall the
+   units, and start the server with `bin/alpaca serve --remote`.
+
+`move` refuses when the old root still exists (that is a copy, not a move), when this folder is
+already registered, and when anything other than the old entry claims the port or hostname: an
+entry, a malformed entry, or a live rule other than the old entry's own. A refused `add` that
+collides with an entry whose root no longer exists names the `move` command to run.

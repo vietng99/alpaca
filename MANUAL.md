@@ -71,6 +71,7 @@ The everyday operating verbs. Small on purpose.
 ### Output and views
 
 - `alpaca export` - export the record as a static bundle.
+- `alpaca hub` - `alpaca hub publish` writes this workspace's tile to a host hub's drop directory from `data.json` or `board.json` (settings under `hub:` in project.yaml; it also runs at session end when `hub.enabled` is true); `--print` writes nothing. `alpaca hub timer` prints a systemd user service and timer that publish every 60 s. See `docs/host-hub.md`.
 - `alpaca deploy` - deploy the read-only page for the owner to read while away.
 - `alpaca serve` - serve the read-only page locally.
 - `alpaca analytics` - build the analytics projection (`analytics/index.html`).
@@ -285,9 +286,10 @@ work an op opens from lives in `intents/queue.md`.
   A structurally valid backup can still contain explicitly declared historical evidence gaps.
 
 - `alpaca workspace` registers this instance in the host workspace registry (`add`, `list`,
-  `remove`) and renders one combined cloudflared config for every registered hostname
-  (`render-ingress`), which the owner applies. See `docs/workspaces.md` for the pathway from a
-  local root to a cockpit on localhost and on a public hostname.
+  `remove`, and `move` after its folder was moved) and renders one combined cloudflared config
+  for every registered hostname (`render-ingress`), which the owner applies. See
+  `docs/workspaces.md` for the pathway from a local root to a cockpit on localhost and on a
+  public hostname.
 
 See `docs/observability-operations.md` for collection contracts, service setup, failure recovery,
 retention budgets and the restore rehearsal. The optional project SQLite runtime is described

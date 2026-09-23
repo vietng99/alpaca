@@ -196,7 +196,7 @@ cover.
 
 | field | required | meaning |
 |---|---|---|
-| `script` | yes | the script, relative to the runbook folder; it must exist and be executable |
+| `script` | yes | the script, relative to the runbook folder; it must exist and be executable; a fixed path (no `${NAME}`) |
 | `args` | no | arguments, text or numbers; `${NAME}` is replaced |
 | `timeout` | no | seconds (default 60) |
 
@@ -366,6 +366,7 @@ Every error is reported at once, one per line: `ERROR <code> <where>: <message>`
 | `PATH-ESCAPES` | an absolute path, or one that leaves the runbook folder |
 | `PLUGIN-MISSING` | a plugin script does not exist |
 | `PLUGIN-NOT-EXECUTABLE` | a plugin script is not executable |
+| `PLUGIN-SCRIPT-VARIABLE` | a plugin `script` holds `${NAME}` (only `args` are replaced) |
 | `KNOB-TYPE-UNKNOWN` | a knob `type` outside the list above |
 | `KNOB-DEFAULT-TYPE` | a knob default does not fit its type |
 | `KNOB-DEFAULT-RANGE` | a knob default is outside `min`..`max` or not one of `values` |

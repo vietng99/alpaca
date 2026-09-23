@@ -113,3 +113,10 @@ barrier:
   - .alpaca/
   - .venv/
   - .env
+hub:
+  enabled: false
+  drop: /srv/alpaca-hub/tiles
+  slug: null
+  name: null
+  href: null
+  what: null

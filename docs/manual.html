@@ -183,6 +183,7 @@
 <h3>Output and views</h3>
 <ul>
 <li><code>alpaca export</code> - export the record as a static bundle.</li>
+<li><code>alpaca hub</code> - <code>alpaca hub publish</code> writes this workspace's tile to a host hub's drop directory from <code>data.json</code> or <code>board.json</code> (settings under <code>hub:</code> in project.yaml; it also runs at session end when <code>hub.enabled</code> is true); <code>--print</code> writes nothing. <code>alpaca hub timer</code> prints a systemd user service and timer that publish every 60 s. See <code>docs/host-hub.md</code>.</li>
 <li><code>alpaca deploy</code> - deploy the read-only page for the owner to read while away.</li>
 <li><code>alpaca serve</code> - serve the read-only page locally.</li>
 <li><code>alpaca analytics</code> - build the analytics projection (<code>analytics/index.html</code>).</li>
@@ -263,7 +264,7 @@
 <li><code>alpaca backup</code> creates and verifies coordinated SQLite snapshots plus replayable files, reports recorded verification, and restores only into an empty isolated destination. A structurally valid backup can still contain explicitly declared historical evidence gaps.</li>
 </ul>
 <ul>
-<li><code>alpaca workspace</code> registers this instance in the host workspace registry (<code>add</code>, <code>list</code>, <code>remove</code>) and renders one combined cloudflared config for every registered hostname (<code>render-ingress</code>), which the owner applies. See <code>docs/workspaces.md</code> for the pathway from a local root to a cockpit on localhost and on a public hostname.</li>
+<li><code>alpaca workspace</code> registers this instance in the host workspace registry (<code>add</code>, <code>list</code>, <code>remove</code>, and <code>move</code> after its folder was moved) and renders one combined cloudflared config for every registered hostname (<code>render-ingress</code>), which the owner applies. See <code>docs/workspaces.md</code> for the pathway from a local root to a cockpit on localhost and on a public hostname.</li>
 </ul>
 <p>See <code>docs/observability-operations.md</code> for collection contracts, service setup, failure recovery, retention budgets and the restore rehearsal. The optional project SQLite runtime is described in <code>setup/sqlite-runtime.md</code>. Raw native reasoning is excluded from new analytical capture.</p>
 </main>

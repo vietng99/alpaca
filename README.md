@@ -18,7 +18,7 @@ bin/alpaca onboard --name my-project --who alex:owner --what "One line on what t
 bin/alpaca doctor
 ```
 
-`--who` takes `name:role` pairs separated by commas. Add `--task "..."` once per open task and `--preset plain-writing` to turn on the plain-writing rules. Onboarding writes these answers into the shipped `project.yaml` and keeps every other key of it. After onboarding, `bin/alpaca doctor` prints no ERROR line; the WARN "no transcript dir yet" clears after the first Claude Code session.
+`--who` takes `name:role` pairs separated by commas. Add `--task "..."` once per open task and `--preset plain-writing` to turn on the plain-writing rules. Onboarding writes these answers into the shipped `project.yaml` and keeps every other key of it. Onboarding keeps the template's `commands` (they build and test Alpaca itself) unless it finds a Makefile, a package.json or a pytest.ini of the project's own, so edit `commands` in project.yaml to name your project's build, test, lint and run. After onboarding, `bin/alpaca doctor` prints no ERROR line; the WARN "no transcript dir yet" clears after the first Claude Code session.
 
 ## Start from a release archive
 
@@ -40,7 +40,7 @@ Claude Code has native lifecycle hooks. Codex follows AGENTS.md and uses explici
 - `alpaca intake <spec> <runbook>`: turns a spec-kit or OpenSpec spec and its runbook into the op's checklist rows (one per success criterion or scenario), one task contract per stage and per owner gate, and the profile stages; after a spec change it supersedes only the rows that changed. `--dry-run` shows the plan. See `docs/intake.md`.
 - `skills/alpaca-from-notes/` and `alpaca start <notes>`: the one entry point from raw notes. It picks spec-kit for a new thing and OpenSpec for a change (you can override), then walks the notes to a spec, a runbook and intake.
 
-See `docs/DESIGN.md` for architecture, and `docs/operators.md`, `docs/operations-hub.md`, `docs/observability-operations.md`, and `docs/shipping.md` for operation details.
+See `docs/DESIGN.md` for architecture, and `docs/operators.md`, `docs/operations-hub.md`, `docs/host-hub.md`, `docs/observability-operations.md`, and `docs/shipping.md` for operation details.
 
 ## Development and shipment
 

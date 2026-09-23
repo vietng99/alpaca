@@ -122,6 +122,22 @@ def expected_mode(manifest, rel):
     return int(manifest["file_modes"][rel][1:], 8)
 
 
+def same_exec_bit(got_mode, want_mode):
+    """Modes compare by the owner exec bit only, the one bit git keeps (setup/gen_manifest.py
+    _type_mode): a checkout under umask 0002 gives 0664/0775 files, which are not drift."""
+    return bool(got_mode & stat.S_IXUSR) == bool(want_mode & stat.S_IXUSR)
+
+
+def norm_marker(marker):
+    """A manifest marker as gen_manifest records it today (f0644 or f0755)."""
+    if isinstance(marker, str) and marker.startswith("f") and len(marker) == 5:
+        try:
+            return "f0755" if int(marker[1:], 8) & stat.S_IXUSR else "f0644"
+        except ValueError:
+            pass
+    return marker
+
+
 def verify_selected_tree(tree, exact=False):
     tree = Path(tree)
     manifest, _ = read_manifest(tree)
@@ -141,7 +157,7 @@ def verify_selected_tree(tree, exact=False):
             errors.append("hash mismatch: %s" % rel)
         got_mode = stat.S_IMODE(status.st_mode)
         want_mode = expected_mode(manifest, rel)
-        if got_mode != want_mode:
+        if not same_exec_bit(got_mode, want_mode):
             errors.append("mode mismatch: %s (%04o != %04o)" % (rel, got_mode, want_mode))
     if exact:
         actual = set()
@@ -343,7 +359,7 @@ def actual_marker(path):
     except FileNotFoundError:
         return None
     if stat.S_ISREG(status.st_mode):
-        return "f%04o" % stat.S_IMODE(status.st_mode)
+        return "f0755" if status.st_mode & stat.S_IXUSR else "f0644"
     if stat.S_ISLNK(status.st_mode):
         return "l"
     return "?%04o" % stat.S_IMODE(status.st_mode)
@@ -358,7 +374,7 @@ def cutover_plan(archive, live):
         marker = actual_marker(target)
         if marker is None:
             plan.append(("NEW", rel))
-        elif marker != manifest["file_modes"][rel] or sha_file(target) != manifest["files"][rel]:
+        elif marker != norm_marker(manifest["file_modes"][rel]) or sha_file(target) != manifest["files"][rel]:
             plan.append(("CHANGED", rel))
     live_manifest = live / MANIFEST_NAME
     if not live_manifest.exists():
@@ -382,7 +398,7 @@ def assert_live_overwrites_are_audited(live, plan):
         if rel not in old["files"]:
             errors.append("existing collision absent from live manifest: %s" % rel)
             continue
-        if actual_marker(target) != old.get("file_modes", {}).get(rel):
+        if actual_marker(target) != norm_marker(old.get("file_modes", {}).get(rel)):
             errors.append("live mode/type drift from baseline: %s" % rel)
         elif sha_file(target) != old["files"][rel]:
             errors.append("live hash drift from baseline: %s" % rel)

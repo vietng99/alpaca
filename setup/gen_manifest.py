@@ -24,7 +24,7 @@ Usage:
     python3 gen_manifest.py                 # verify against the stored MANIFEST.json
     python3 gen_manifest.py --verify        # same (explicit)
     python3 gen_manifest.py --write         # regenerate MANIFEST.json from the current tree
-    python3 gen_manifest.py --restore-modes # chmod manifest-listed files back to recorded modes
+    python3 gen_manifest.py --restore-modes # put back the recorded exec bit on manifest-listed files
     python3 gen_manifest.py --selftest      # end-to-end drift-class controls via the real CLI
     (--root <dir> overrides the discovered root on any of the above)
 """
@@ -101,14 +101,29 @@ def _sha_file(path):
 
 def _type_mode(path):
     """A compact, NON-following type/permission marker for one path, so an exec-bit flip or a
-    regular-file/symlink swap whose bytes are identical is still visible."""
+    regular-file/symlink swap whose bytes are identical is still visible.
+
+    A regular file records only what git keeps: f0755 when the owner exec bit is set, else f0644.
+    Group and other bits come from the umask of whoever checked the tree out (0664 under umask
+    0002), so they are neither recorded nor compared."""
     st = os.lstat(path)
     m = st.st_mode
     if stat.S_ISLNK(m):
         return "l"
     if stat.S_ISREG(m):
-        return "f%04o" % stat.S_IMODE(m)
+        return "f0755" if m & stat.S_IXUSR else "f0644"
     return "?%04o" % stat.S_IMODE(m)
+
+
+def _norm(marker):
+    """A stored marker in the form _type_mode gives today: an older manifest that recorded full
+    modes (f0664, f0775) compares by its owner exec bit only."""
+    if isinstance(marker, str) and marker.startswith("f") and len(marker) == 5:
+        try:
+            return "f0755" if int(marker[1:], 8) & stat.S_IXUSR else "f0644"
+        except ValueError:
+            pass
+    return marker
 
 
 def _rel(path, root):
@@ -242,8 +257,8 @@ def verify(root):
     if "file_modes" in stored:
         sm, cm = stored.get("file_modes", {}), cur.get("file_modes", {})
         for p in sorted(set(sm) & set(cm)):
-            if sm[p] != cm[p]:
-                ok = False; print("  M mode/type changed: %s (%s -> %s)" % (p, sm[p], cm[p]))
+            if _norm(sm[p]) != cm[p]:
+                ok = False; print("  M mode/type changed: %s (%s -> %s)" % (p, _norm(sm[p]), cm[p]))
     if stored.get("product") != _product_name(root):
         ok = False; print("VERIFY: product is %r, expected %r" % (stored.get("product"), _product_name(root)))
     print("VERIFY: %s (%d files)"
@@ -252,8 +267,8 @@ def verify(root):
 
 
 def restore_modes(root):
-    """Install-time self-heal: chmod every manifest-listed regular file whose on-disk mode differs
-    from the recorded mode back to that mode. Idempotent and narrow by construction: it only ever
+    """Install-time self-heal: chmod every manifest-listed regular file whose owner exec bit differs
+    from the recorded mode to that mode. Idempotent and narrow by construction: it only ever
     touches a path already in the manifest, only to the octal the manifest already records."""
     lock = os.path.join(root, LOCK_NAME)
     if not os.path.exists(lock):
@@ -281,7 +296,9 @@ def restore_modes(root):
             continue
         checked += 1
         current = stat.S_IMODE(os.lstat(full).st_mode)
-        if current != desired:
+        # only the exec bit is recorded (see _type_mode): a file whose exec bit already matches is
+        # left as the checkout made it, group write included
+        if bool(current & stat.S_IXUSR) != bool(desired & stat.S_IXUSR):
             os.chmod(full, desired)
             changed.append((rel, current, desired))
     if changed:

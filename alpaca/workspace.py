@@ -19,10 +19,11 @@ Verbs (docs/workspaces.md walks the whole pathway):
     alpaca workspace add [--name N] [--port P] [--hostname H]   register this instance
     alpaca workspace list                                       print the registry
     alpaca workspace remove [--id ID]                           drop this instance (or ID)
+    alpaca workspace move (--from OLD_ROOT | --id ID) [--name N]  re-register a moved folder
     alpaca workspace render-ingress --tunnel NAME [--out FILE] [--config FILE]
                                 [--tunnel-id ID] [--credentials-file FILE]
 
-Only `add` and `remove` write, and only the registry. `render-ingress` reads the live
+Only `add`, `move` and `remove` write, and only the registry. `render-ingress` reads the live
 cloudflared config (never writes it), writes the combined config to --out (default
 `.alpaca/services/cloudflared-<tunnel>.yml`), prints a unified diff against the live file, and prints
 (never runs) the DNS route commands and the copy step. Applying it is an owner decision.
@@ -486,7 +487,8 @@ def add(root, *, name=None, port=None, hostname=None, config=None, no_live_confi
                                      "choose another --port" % chosen)
             holder = next((e for e in others if int(e["port"]) == chosen), None)
             if holder:
-                raise ValueError("port %d is registered to %s (%s)" % (chosen, holder.get("name"), holder["id"]))
+                raise ValueError("port %d is registered to %s (%s)%s" % (chosen, holder.get("name"), holder["id"],
+                                                                        _moved_hint(holder)))
             if chosen in live_ports:
                 raise ValueError("port %d is served by a live ingress rule of %s" % (chosen, _cfg))
             if chosen in raw_ports:
@@ -494,7 +496,8 @@ def add(root, *, name=None, port=None, hostname=None, config=None, no_live_confi
         if host:
             holder = next((e for e in others if e.get("hostname") == host), None)
             if holder:
-                raise ValueError("hostname %s is registered to %s (%s)" % (host, holder.get("name"), holder["id"]))
+                raise ValueError("hostname %s is registered to %s (%s)%s" % (host, holder.get("name"), holder["id"],
+                                                                            _moved_hint(holder)))
             if host in raw_hosts:
                 raise ValueError("hostname %s is claimed by a malformed registry entry; repair or remove it first" % host)
             if host in live_hosts or (own_rule is not None and _host_of(own_rule) == host and int(mine["port"]) != chosen):
@@ -524,6 +527,105 @@ def add(root, *, name=None, port=None, hostname=None, config=None, no_live_confi
     return {"registry": path, "workspace": item, "added": mine is None,
             "local": "http://127.0.0.1:%d/" % chosen,
             "next": ["bin/alpaca collect services", "bin/alpaca workspace render-ingress --tunnel <name>"]}
+
+
+def _moved_hint(holder):
+    """A hint for a refusal caused by an entry whose root no longer exists (a moved folder)."""
+    if os.path.isdir(holder["root"]):
+        return ""
+    return ("; its root %s no longer exists: if this folder was moved from there, run "
+            "`alpaca workspace move --from %s`" % (holder["root"], holder["root"]))
+
+
+def move(root, *, from_root=None, ident=None, name=None, config=None, no_live_config=False):
+    """Re-register a workspace whose folder was moved: the entry registered for the old root (by
+    `from_root` or `ident`) is replaced by one for this root that keeps its port, hostname and
+    name. The live cloudflared rule that routes that hostname to that port is adopted as this
+    workspace's own, so nothing in the tunnel config changes.
+
+    Refuses: neither `from_root` nor `ident`; no entry for them; an old root that still exists (a
+    copy, not a move); this root already registered; any other claim on the port or hostname (an
+    entry, a malformed entry, or a live rule other than the old entry's own); a hostname without a
+    web login here; and any change when the live cloudflared config cannot be read, unless
+    no_live_config says this host has no tunnel config yet. Writes only the registry."""
+    from alpaca import serve
+    root = os.path.realpath(root)
+    ident_new = instance_id(root)
+    if not from_root and not ident:
+        raise ValueError("name the old registration: --from <old root> or --id <old id>")
+    if name is not None:
+        valid_name(name)
+    path = registry_path()
+    with _locked(path):
+        entries, bad, items, _p = _read(path)
+        if from_root:
+            wanted = {os.path.abspath(os.path.expanduser(from_root)),
+                      os.path.realpath(os.path.expanduser(from_root))}
+            old = next((e for e in entries if e["root"] in wanted), None)
+            label = "root %s" % from_root
+        else:
+            old = next((e for e in entries if e["id"] == ident), None)
+            label = "id %s" % ident
+        if old is None:
+            raise ValueError("no registry entry for %s in %s (see `alpaca workspace list`)" % (label, path))
+        if old["id"] == ident_new:
+            raise ValueError("the entry for %s already names this folder; nothing was moved" % label)
+        if os.path.isdir(old["root"]):
+            raise ValueError("the registered root %s still exists; `workspace move` is for a folder that "
+                             "was moved (for a second copy, use `alpaca workspace add` from it)" % old["root"])
+        if any(e["id"] == ident_new for e in entries):
+            raise ValueError("this folder already has a registry entry (%s); remove it first with "
+                             "`alpaca workspace remove`" % ident_new)
+        keep_raw = [items[p["index"]] for p in bad if not _is_own(p, root)]
+        _warn([p for p in bad if not _is_own(p, root)], path)
+        raw_ports = {i.get("port") for i in keep_raw if isinstance(i, dict) and isinstance(i.get("port"), int)}
+        raw_hosts = {i.get("hostname") for i in keep_raw if isinstance(i, dict) and isinstance(i.get("hostname"), str)}
+        others = [e for e in entries if e["id"] not in (old["id"], ident_new)]
+        if no_live_config:
+            _cfg, _text, live = read_live(config, required=False)
+            if _text:
+                raise ValueError("--no-live-config was given but %s exists; drop the flag" % _cfg)
+        else:
+            _cfg, _text, live = read_live(config)
+        rules = _live_rules(live)
+        port, host = int(old["port"]), old.get("hostname")
+        own_rule = next((r for r in rules if host and _applied(r, old)), None)
+        foreign = [r for r in rules if r is not own_rule]
+        holder = next((e for e in others if int(e["port"]) == port), None)
+        if holder:
+            raise ValueError("port %d is registered to %s (%s)" % (port, holder.get("name"), holder["id"]))
+        if port in raw_ports:
+            raise ValueError("port %d is claimed by a malformed registry entry; repair or remove it first" % port)
+        if port in {_local_port(r.get("service")) for r in foreign}:
+            raise ValueError("port %d is served by a live ingress rule of %s that is not this workspace's own"
+                             % (port, _cfg))
+        if host:
+            holder = next((e for e in others if e.get("hostname") == host), None)
+            if holder:
+                raise ValueError("hostname %s is registered to %s (%s)" % (host, holder.get("name"), holder["id"]))
+            if host in raw_hosts:
+                raise ValueError("hostname %s is claimed by a malformed registry entry; repair or remove it first" % host)
+            if host in {_host_of(r) for r in foreign}:
+                raise ValueError("hostname %s is already routed by the live cloudflared config %s to another "
+                                 "service; the live rule stays" % (host, _cfg))
+            if not serve.files_auth(root):
+                raise ValueError("a public hostname needs a web login here: the moved folder has no "
+                                 ".alpaca/files-auth (write user:code there, mode 0600)")
+            running = serve.is_running(root)
+            if running and not running.get("remote"):
+                raise ValueError("this instance already runs a server without --remote (pid %s, port %s); "
+                                 "restart it with `alpaca serve --stop` then `alpaca serve --remote`"
+                                 % (running.get("pid"), running.get("port")))
+        item = {"id": ident_new, "name": valid_name(str(name or old["name"])), "root": root, "port": port,
+                "hostname": host}
+        item["href"] = href_of(item)
+        entries = sorted(others + [item], key=lambda e: (str(e.get("name")), e["id"]))
+        _save(entries + keep_raw, path)
+    steps = ["bin/alpaca collect services  (the unit names carry the instance id, which changed)"]
+    if host and own_rule is None:
+        steps.append("bin/alpaca workspace render-ingress --tunnel <name>  (%s is not routed yet)" % host)
+    return {"registry": path, "workspace": item, "moved_from": {"id": old["id"], "root": old["root"]},
+            "adopted_rule": own_rule is not None, "local": "http://127.0.0.1:%d/" % port, "next": steps}
 
 
 def remove(root, ident=None):
@@ -668,6 +770,9 @@ def cmd_workspace(args):
             result = listing(root)
         elif action == "remove":
             result = remove(root, args.id)
+        elif action == "move":
+            result = move(root, from_root=args.from_root, ident=args.id, name=args.name,
+                          no_live_config=args.no_live_config)
         else:
             result = render_ingress(root, args.tunnel, out=args.out, config=args.config,
                                     tunnel_id=args.tunnel_id, credentials=args.credentials_file)
@@ -703,6 +808,13 @@ def _parser(sub):
     verbs.add_parser("list", help="print the host registry")
     r = verbs.add_parser("remove", help="drop this instance (or --id) from the registry")
     r.add_argument("--id", help="instance id to drop (default: this instance)")
+    m = verbs.add_parser("move", help="re-register this instance after its folder was moved, keeping the "
+                         "port and hostname of the old entry and adopting its live ingress rule")
+    m.add_argument("--from", dest="from_root", help="the root the old entry names (the folder before the move)")
+    m.add_argument("--id", help="the old entry's instance id (instead of --from)")
+    m.add_argument("--name", help="tile name (default: the old entry's name)")
+    m.add_argument("--no-live-config", action="store_true",
+                   help="this host has no cloudflared config yet")
     g = verbs.add_parser("render-ingress", help="render one combined cloudflared config; never applies it")
     g.add_argument("--tunnel", required=True, help="existing tunnel name or UUID")
     g.add_argument("--out", help="output file (default: .alpaca/services/cloudflared-<tunnel>.yml)")

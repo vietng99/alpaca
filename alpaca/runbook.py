@@ -68,7 +68,8 @@ ERROR_CODES = (
     "FIELD-UNKNOWN", "FIELD-EMPTY", "FIELD-TYPE", "FIELD-NOT-LIST", "VERSION-UNSUPPORTED",
     "ID-INVALID", "ID-DUPLICATE", "NEEDS-UNKNOWN", "RUN-MISSING", "CHECKS-EMPTY",
     "CHECK-TYPE-UNKNOWN", "REGEX-INVALID", "OP-UNKNOWN", "VALUE-NOT-NUMBER", "RANGE",
-    "PATH-ESCAPES", "PLUGIN-MISSING", "PLUGIN-NOT-EXECUTABLE", "KNOB-TYPE-UNKNOWN",
+    "PATH-ESCAPES", "PLUGIN-MISSING", "PLUGIN-NOT-EXECUTABLE", "PLUGIN-SCRIPT-VARIABLE",
+    "KNOB-TYPE-UNKNOWN",
     "KNOB-DEFAULT-TYPE", "KNOB-DEFAULT-RANGE", "KNOB-UNKNOWN", "KNOB-OWNER-ONLY",
     "KNOB-NOT-NUMBER", "MOVE-NOT-INT", "RETRY-CHECK-UNKNOWN", "RETRY-OVERLAP", "VAR-UNKNOWN",
     "SPEC-MISSING", "SPEC-EMPTY", "SPEC-MIXED", "SPEC-UNCOVERED", "COVERS-UNKNOWN",
@@ -560,6 +561,11 @@ class _Checker:
                 self.r.error("FIELD-TYPE", "%s.args[%d]" % (at, n), "each argument is text or a number")
         self.variables([a for a in args if isinstance(a, str)], at + ".args")
         self.whole(chk, "timeout", at, 1, 24 * 3600)
+        if script and VAR.search(script):
+            # evaluate runs the script path as written; only args get ${NAME} replaced
+            self.r.error("PLUGIN-SCRIPT-VARIABLE", at + ".script", "a plugin `script` is a fixed path; "
+                         "${...} is replaced in `args` only, found %r" % script)
+            return
         if not script or not self.local_path(script, at + ".script", "script"):
             return
         if self.check_files:
