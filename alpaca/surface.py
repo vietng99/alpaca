@@ -87,6 +87,7 @@ TABLE: dict[str, dict] = {
     "sort": {"keys": ("verdict", "sorted", "unsorted"), "group": "knowledge"},
     "wiki": {"keys": ("verdict", "vault", "out"), "group": "knowledge"},
     "export": {"keys": ("verdict", "out"), "group": "output"},
+    "hub": {"keys": ("verdict", "tile", "path"), "group": "output"},
     "deploy": {"keys": ("verdict", "target"), "group": "output"},
     "serve": {"keys": ("verdict", "url"), "group": "output"},
     "analytics": {"keys": ("verdict", "index"), "group": "output"},

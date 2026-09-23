@@ -1,4 +1,4 @@
-"""SessionEnd: close the session row, render the pad, rebuild analytics/index.html."""
+"""SessionEnd: close the session row, publish the hub tile when enabled, render the pad, rebuild analytics/index.html."""
 from alpaca.hooks import common
 
 def handle(payload):
@@ -15,6 +15,7 @@ def handle(payload):
             db.patch(conn, "sessions", "sid", sid, {"ended": now})
         else:
             db.upsert(conn, "sessions", "sid", {"sid": sid, "started": now, "ended": now})
+    _publish_hub_tile(root, conn, sid)
     from alpaca import observability
     if observability.enabled(root):
         conn.close()
@@ -49,6 +50,22 @@ def handle(payload):
         if payload.get("_strict"):
             raise
     return {"ended": now}
+
+def _publish_hub_tile(root, conn, sid):
+    """Publish this workspace's hub tile when project.yaml says hub.enabled: true (alpaca/hub_publish.py).
+    Fail-open: a publish error is recorded as a hub-publish-failed event and never breaks the hook;
+    with hub publishing off nothing happens at all."""
+    try:
+        from alpaca import hub_publish
+        hub_publish.at_session_end(root)
+    except Exception as e:
+        try:
+            from alpaca import db
+            db.append_event(conn, session=sid, actor="alpaca", kind="hub-publish-failed",
+                            data={"error": "%s: %s" % (type(e).__name__, e)})
+        except Exception:
+            pass
+
 
 @common.fail_open
 def main():
