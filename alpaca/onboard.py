@@ -32,15 +32,40 @@ def _mapping(doc: dict, key: str) -> dict:
     value = doc.get(key)
     return value if isinstance(value, dict) else {}
 
+def _shipped_hashes(root) -> dict:
+    """path -> sha256 of the shipped bytes, from MANIFEST.json; {} when it is absent or unreadable."""
+    import json
+    try:
+        with open(os.path.join(root, "MANIFEST.json"), encoding="utf-8") as fh:
+            files = json.load(fh).get("files")
+    except (OSError, ValueError, AttributeError):
+        return {}
+    return files if isinstance(files, dict) else {}
+
 def _sensed_commands(root, draft: dict, template_commands: dict) -> dict:
     """The sensed commands that replace a template value. A command sensed from a file the harness
     itself ships (a mechanism path such as pytest.ini) describes the harness, not the project, and
     the template already names that command, so the template's value stays. A command sensed from
-    a project file (a Makefile, package.json) still wins."""
+    a project file (a Makefile, package.json) still wins, and so does one sensed from a mechanism
+    path whose bytes are not the shipped ones in MANIFEST.json: a project that kept its own
+    pytest.ini when the harness was added keeps its own test command."""
     own = {entry.rstrip("/") for entry in manifest.mechanism(root)}
+    shipped = _shipped_hashes(root)
     traces = draft.get("traces") or {}
+
+    def harness_file(rel):
+        if rel not in own:
+            return False
+        if rel not in shipped:
+            return True
+        try:
+            with open(os.path.join(root, rel), "rb") as fh:
+                return util.sha256_hex(fh.read()) == shipped[rel]
+        except OSError:
+            return True
+
     return {name: value for name, value in draft["commands"].items()
-            if name not in template_commands or traces.get(name) not in own}
+            if name not in template_commands or not harness_file(traces.get(name))}
 
 def _merge(template: dict, defaults: dict, answers: dict) -> dict:
     """Template keys first, in the template's order, with the `template` marker removed; a

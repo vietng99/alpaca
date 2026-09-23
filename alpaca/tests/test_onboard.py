@@ -143,3 +143,47 @@ def test_onboard_template_keeps_its_commands_over_the_harness_own_files(project)
     cli.main(["init"])
     assert cli.main(["onboard", "--name", "d", "--who", "a:owner", "--what", "w"]) == 0
     assert _raw(project)["commands"] == _template()["commands"]
+
+
+def _manifest_with(project, rel, body):
+    """A MANIFEST.json recording `body` as the shipped bytes of `rel`."""
+    import hashlib
+    import json
+    with open(os.path.join(project, "MANIFEST.json"), "w", encoding="utf-8") as fh:
+        json.dump({"files": {rel: hashlib.sha256(body).hexdigest()}}, fh)
+
+
+def test_onboard_keeps_the_projects_own_pytest_ini_command(project):
+    # The harness added to an existing repository that keeps its own pytest.ini (a collision the
+    # owner resolved in favor of the project's file): that file describes the project, so its
+    # sensed `python3 -m pytest` wins over the template's harness command.
+    with open(os.path.join(REPO, "pytest.ini"), "rb") as fh:
+        shipped = fh.read()
+    _manifest_with(project, "pytest.ini", shipped)
+    shutil.copy(os.path.join(REPO, "project.yaml"), os.path.join(project, "project.yaml"))
+    with open(os.path.join(project, "pytest.ini"), "w", encoding="utf-8") as fh:
+        fh.write("[pytest]\ntestpaths = tests\n")
+    cli.main(["init"])
+    assert cli.main(["onboard", "--name", "d", "--who", "a:owner", "--what", "w"]) == 0
+    commands = _raw(project)["commands"]
+    assert commands["test"] == "python3 -m pytest"
+    assert commands["build"] == _template()["commands"]["build"]
+
+
+def test_onboard_keeps_the_template_command_over_the_shipped_pytest_ini(project):
+    # guard: the harness's own pytest.ini, byte for byte as MANIFEST.json records it, still says
+    # nothing about the project
+    with open(os.path.join(REPO, "pytest.ini"), "rb") as fh:
+        shipped = fh.read()
+    _manifest_with(project, "pytest.ini", shipped)
+    shutil.copy(os.path.join(REPO, "project.yaml"), os.path.join(project, "project.yaml"))
+    shutil.copy(os.path.join(REPO, "pytest.ini"), os.path.join(project, "pytest.ini"))
+    cli.main(["init"])
+    assert cli.main(["onboard", "--name", "d", "--who", "a:owner", "--what", "w"]) == 0
+    assert _raw(project)["commands"] == _template()["commands"]
+
+
+def test_readme_says_to_edit_the_template_commands_after_onboarding():
+    with open(os.path.join(REPO, "README.md"), encoding="utf-8") as fh:
+        quickstart = fh.read().split("## Quickstart", 1)[1].split("\n## ", 1)[0]
+    assert "edit `commands` in project.yaml" in quickstart

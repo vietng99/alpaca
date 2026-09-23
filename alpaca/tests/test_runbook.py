@@ -371,6 +371,17 @@ def test_plugin_script_may_not_leave_the_runbook_folder(tmp_path):
         (e["code"], e["where"]) for e in result["errors"]}
 
 
+def test_plugin_script_may_not_hold_a_variable(tmp_path):
+    # `evaluate` runs the script path as written (it replaces ${NAME} only in args), so a script
+    # named through a variable would never run as meant: refuse it when the runbook is checked
+    data = minimal()
+    data["stages"][0]["checks"] = [{"id": "c", "type": "plugin", "script": "checks/${EVIDENCE_DIR}.py"}]
+    result = runbook.check(write(tmp_path, data), check_files=False)
+    assert ("PLUGIN-SCRIPT-VARIABLE", "stages[0].checks[0].script") in {
+        (e["code"], e["where"]) for e in result["errors"]}, result["errors"]
+    assert result["verdict"] == "FAIL"
+
+
 @pytest.mark.parametrize("knob,code,where", [
     ({"id": "W", "description": "d", "type": "int", "default": 20, "min": 1, "max": 8},
      "KNOB-DEFAULT-RANGE", "knobs[0].default"),
