@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gen_manifest.py -- (re)generate and verify this distribution's MANIFEST.json (M4.15).
+"""gen_manifest.py -- (re)generate and verify this distribution's MANIFEST.json.
 
 Ported UNCHANGED IN PURPOSE from the earlier harness gen_manifest.py and re-based onto Alpaca: the walk is no
 longer a whole-tree scan with a hard-coded ignore list, it is driven by the harness manifest
@@ -17,6 +17,18 @@ Algorithm (kept identical to the value stored in MANIFEST.json so old and new ag
 Excluded from the walk: MANIFEST.json itself (a file cannot contain its own hash), every
 `__pycache__/` dir, any `*.pyc`, the `.git` dir, and every memory-class path.
 
+Modes: a file records f0755 (owner exec bit set) or f0644, the one bit git keeps, so a checkout under
+any umask verifies. Other-write, setuid, setgid and the sticky bit are never recorded: `--write`
+refuses a tree that has them, and `--verify` reports them as mode drift (a checkout never makes
+them, so they are someone's change).
+
+Instance-owned files: `alpaca onboard` writes project.yaml and intents/queue.md, and `alpaca upgrade`
+keeps project.yaml and intents/ (alpaca/upgrade.py PRESERVE). Both ship as templates in the
+mechanism class. Once a tree is onboarded (its project.yaml no longer carries the template's
+`template: true` line), `--verify` lists a content change or an added file under those paths as
+instance-owned instead of failing. A deleted file, a mode change there, and any change anywhere
+else still fail, and a distribution tree (the template marker still present) is checked in full.
+
 The distribution identity is independent of the project name and extraction directory. Root
 discovery starts beside this script, or at an explicit --root, never in an ambient host session.
 
@@ -24,7 +36,7 @@ Usage:
     python3 gen_manifest.py                 # verify against the stored MANIFEST.json
     python3 gen_manifest.py --verify        # same (explicit)
     python3 gen_manifest.py --write         # regenerate MANIFEST.json from the current tree
-    python3 gen_manifest.py --restore-modes # put back the recorded exec bit on manifest-listed files
+    python3 gen_manifest.py --restore-modes # put back the recorded exec bit, clear unsafe bits
     python3 gen_manifest.py --selftest      # end-to-end drift-class controls via the real CLI
     (--root <dir> overrides the discovered root on any of the above)
 """
@@ -33,6 +45,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import stat
 import sys
 
@@ -54,6 +67,16 @@ def _product_name(root):
 
 # Dirs never descended into, wherever they occur under a mechanism path.
 _PRUNE_DIRS = frozenset(("__pycache__", ".git"))
+
+#: Mode bits a mechanism file never carries. They are not recorded; seen on disk they are drift.
+UNSAFE_BITS = stat.S_IWOTH | stat.S_ISUID | stat.S_ISGID | stat.S_ISVTX
+_UNSAFE_NAMES = ((stat.S_IWOTH, "other-write"), (stat.S_ISUID, "setuid"),
+                 (stat.S_ISGID, "setgid"), (stat.S_ISVTX, "sticky"))
+
+#: The paths an onboarded instance owns: onboarding writes project.yaml and intents/queue.md, and
+#: `alpaca upgrade` keeps both (alpaca/upgrade.py PRESERVE; a test keeps the two lists equal).
+INSTANCE_OWNED = ("project.yaml", "intents")
+_TEMPLATE_MARK = re.compile(r"^template:[ \t]*true[ \t]*(#.*)?$", re.M)
 
 
 def discover_root(start=None):
@@ -99,31 +122,67 @@ def _sha_file(path):
     return h.hexdigest()
 
 
+def _file_marker(mode):
+    """f0755 or f0644 from the owner exec bit, plus any unsafe bit that is set (f0646, f4755)."""
+    base = 0o755 if mode & stat.S_IXUSR else 0o644
+    return "f%04o" % (base | (mode & UNSAFE_BITS))
+
+
 def _type_mode(path):
     """A compact, NON-following type/permission marker for one path, so an exec-bit flip or a
     regular-file/symlink swap whose bytes are identical is still visible.
 
-    A regular file records only what git keeps: f0755 when the owner exec bit is set, else f0644.
-    Group and other bits come from the umask of whoever checked the tree out (0664 under umask
-    0002), so they are neither recorded nor compared."""
+    A regular file records what git keeps: f0755 when the owner exec bit is set, else f0644. Group
+    bits come from the umask of whoever checked the tree out (0664 under umask 0002), so they are
+    neither recorded nor compared. The unsafe bits (UNSAFE_BITS) show in the marker, so a
+    world-writable or setuid file never matches a recorded f0644 or f0755."""
     st = os.lstat(path)
     m = st.st_mode
     if stat.S_ISLNK(m):
         return "l"
     if stat.S_ISREG(m):
-        return "f0755" if m & stat.S_IXUSR else "f0644"
+        return _file_marker(stat.S_IMODE(m))
     return "?%04o" % stat.S_IMODE(m)
 
 
 def _norm(marker):
     """A stored marker in the form _type_mode gives today: an older manifest that recorded full
-    modes (f0664, f0775) compares by its owner exec bit only."""
+    modes (f0664, f0775) compares by its owner exec bit and its unsafe bits only."""
     if isinstance(marker, str) and marker.startswith("f") and len(marker) == 5:
         try:
-            return "f0755" if int(marker[1:], 8) & stat.S_IXUSR else "f0644"
+            return _file_marker(int(marker[1:], 8))
         except ValueError:
             pass
     return marker
+
+
+def _unsafe_words(marker):
+    """The unsafe bits a marker shows, as words ("other-write, setuid"), or ""."""
+    try:
+        mode = int(marker[1:], 8) if isinstance(marker, str) and marker.startswith("f") else 0
+    except ValueError:
+        return ""
+    return ", ".join(word for bit, word in _UNSAFE_NAMES if mode & bit)
+
+
+def onboarded(root):
+    """True when the tree is an onboarded instance: project.yaml exists and no longer carries the
+    distribution template's `template: true` line (alpaca onboard removes it)."""
+    try:
+        with open(os.path.join(root, "project.yaml"), encoding="utf-8") as fh:
+            text = fh.read()
+    except (OSError, UnicodeDecodeError):
+        return False
+    return not _TEMPLATE_MARK.search(text)
+
+
+def _instance_owned(rel):
+    return any(rel == p or rel.startswith(p + "/") for p in INSTANCE_OWNED)
+
+
+def _digest(files):
+    lines = ["%s  %s\n" % (files[p], p) for p in sorted(files)]
+    return hashlib.sha256("".join(lines).encode("utf-8")).hexdigest()
 
 
 def _rel(path, root):
@@ -185,8 +244,7 @@ def build(root):
             _add_file(full)
         # a listed-but-absent path is simply not measured (a synthetic tree may omit it).
 
-    lines = ["%s  %s\n" % (files[p], p) for p in sorted(files)]
-    tree_digest = hashlib.sha256("".join(lines).encode("utf-8")).hexdigest()
+    tree_digest = _digest(files)
     m = {
         "product": _product_name(root),
         "description": DESCRIPTION,
@@ -217,6 +275,13 @@ def write(root):
     if blocked:
         print(blocked)
         return 2
+    unsafe = sorted(p for p, marker in m["file_modes"].items() if _unsafe_words(marker))
+    if unsafe:
+        print("gen_manifest: BLOCKED -- refusing to record unsafe modes; chmod these files first "
+              "(or run --restore-modes against an existing manifest)")
+        for p in unsafe:
+            print("  ! %s (%s)" % (p, _unsafe_words(m["file_modes"][p])))
+        return 2
     with open(os.path.join(root, LOCK_NAME), "w", encoding="utf-8") as f:
         json.dump(m, f, indent=2)
         f.write("\n")
@@ -241,35 +306,54 @@ def verify(root):
         print("VERIFY: BLOCKED (%d files measured)" % cur["file_count"])
         return 2
     ok = True
-    if stored.get("tree_digest") != cur["tree_digest"]:
-        ok = False
-        print("VERIFY: tree_digest MISMATCH")
-        print("  stored :", stored.get("tree_digest"))
-        print("  actual :", cur["tree_digest"])
-    s, c = set(stored.get("files", {})), set(cur["files"])
+    sf = stored.get("files", {}) if isinstance(stored.get("files"), dict) else {}
+    s, c = set(sf), set(cur["files"])
+    instance = onboarded(root)
+    owned = []                      # instance-owned changes on an onboarded tree: listed, not drift
+    compared = dict(cur["files"])   # the current map with those changes taken back out
     for p in sorted(c - s):
+        if instance and _instance_owned(p):
+            owned.append(p); compared.pop(p)
+            continue
         ok = False; print("  + on disk, not in manifest:", p)
     for p in sorted(s - c):
         ok = False; print("  - in manifest, not on disk:", p)
     for p in sorted(s & c):
-        if stored["files"][p] != cur["files"][p]:
+        if sf[p] != cur["files"][p]:
+            if instance and _instance_owned(p):
+                owned.append(p); compared[p] = sf[p]
+                continue
             ok = False; print("  ~ changed:", p)
+    # the stored digest must describe the tree once the instance-owned changes are taken out (on a
+    # distribution tree nothing is taken out, so this is the full-tree compare)
+    if stored.get("tree_digest") != _digest(compared):
+        ok = False
+        print("VERIFY: tree_digest MISMATCH")
+        print("  stored :", stored.get("tree_digest"))
+        print("  actual :", cur["tree_digest"])
     if "file_modes" in stored:
         sm, cm = stored.get("file_modes", {}), cur.get("file_modes", {})
         for p in sorted(set(sm) & set(cm)):
             if _norm(sm[p]) != cm[p]:
-                ok = False; print("  M mode/type changed: %s (%s -> %s)" % (p, _norm(sm[p]), cm[p]))
+                unsafe = _unsafe_words(cm[p])
+                ok = False; print("  M mode/type changed: %s (%s -> %s)%s"
+                                  % (p, _norm(sm[p]), cm[p], " unsafe: " + unsafe if unsafe else ""))
     if stored.get("product") != _product_name(root):
         ok = False; print("VERIFY: product is %r, expected %r" % (stored.get("product"), _product_name(root)))
-    print("VERIFY: %s (%d files)"
-          % ("OK -- tree matches manifest" if ok else "FAIL", cur["file_count"]))
+    for p in sorted(owned):
+        print("  i instance-owned: %s (onboarded instance; onboarding and the owner write it)" % p)
+    note = ""
+    if owned:
+        note = "; %d instance-owned file(s) differ from the template" % len(owned)
+    print("VERIFY: %s (%d files%s)"
+          % ("OK -- tree matches manifest" if ok else "FAIL", cur["file_count"], note))
     return 0 if ok else 1
 
 
 def restore_modes(root):
     """Install-time self-heal: chmod every manifest-listed regular file whose owner exec bit differs
-    from the recorded mode to that mode. Idempotent and narrow by construction: it only ever
-    touches a path already in the manifest, only to the octal the manifest already records."""
+    from the recorded mode to that mode, and clear any unsafe bit (UNSAFE_BITS). Idempotent and
+    narrow by construction: it only ever touches a path already in the manifest."""
     lock = os.path.join(root, LOCK_NAME)
     if not os.path.exists(lock):
         print("RESTORE-MODES: MANIFEST.json absent -- cannot know the recorded modes"); return 2
@@ -296,11 +380,16 @@ def restore_modes(root):
             continue
         checked += 1
         current = stat.S_IMODE(os.lstat(full).st_mode)
-        # only the exec bit is recorded (see _type_mode): a file whose exec bit already matches is
-        # left as the checkout made it, group write included
+        # only the exec bit is recorded (see _type_mode): a file whose exec bit already matches and
+        # that has no unsafe bit is left as the checkout made it, group write included
         if bool(current & stat.S_IXUSR) != bool(desired & stat.S_IXUSR):
-            os.chmod(full, desired)
-            changed.append((rel, current, desired))
+            target = desired & ~UNSAFE_BITS
+        elif current & UNSAFE_BITS:
+            target = current & ~UNSAFE_BITS
+        else:
+            continue
+        os.chmod(full, target)
+        changed.append((rel, current, target))
     if changed:
         for rel, cur, des in changed:
             print("  restored %s: %04o -> %04o" % (rel, cur, des))
@@ -403,6 +492,20 @@ def selftest():
         rc, out = _run(T, "--verify")
         return rc == 1 and "mode/type changed" in out, "rc=%d" % rc
     _ctl("G-04", "exec-bit flip (byte-identical) -> FAIL (1) [mode axis]", _c04)
+
+    def _c05():
+        T = _mktree("c05")
+        os.chmod(os.path.join(T, "a.txt"), 0o666)
+        rc, out = _run(T, "--verify")
+        return rc == 1 and "other-write" in out, "rc=%d" % rc
+    _ctl("G-05", "other-write on a file (byte-identical) -> FAIL (1) [mode axis]", _c05)
+
+    def _c07():
+        T = _mktree("c07")
+        os.chmod(os.path.join(T, "run.sh"), 0o4644)
+        rc, out = _run(T, "--verify")
+        return rc == 1 and "setuid" in out, "rc=%d" % rc
+    _ctl("G-07", "setuid on a file (byte-identical) -> FAIL (1) [mode axis]", _c07)
 
     def _c06():
         T = _mktree("c06")
