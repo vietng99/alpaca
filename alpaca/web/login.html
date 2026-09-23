@@ -7,36 +7,64 @@
 <meta name="robots" content="noindex, nofollow">
 <title>Alpaca Sign In</title>
 <link rel="stylesheet" href="/login/assets/vault.css">
+<script src="/login/assets/vault-globe.js" defer></script>
 <script src="/login/assets/vault.js" defer></script>
 </head>
 <body data-page="login">
 <div class="screen">
-  <div class="corner">
-    <button type="button" class="chip-btn" data-vault-theme aria-label="Toggle color theme">Theme</button>
+  <div class="fx" aria-hidden="true">
+    <canvas id="globe" class="canvas-fill"></canvas>
+    <div class="screenVeil"></div>
+    <span class="scanline"></span>
+    <span class="gridGlow"></span>
   </div>
+  <div id="relay" class="relayFeed" aria-hidden="true"></div>
+
+  <div class="corner">
+    <button type="button" class="chip-btn" data-vault-theme aria-label="Toggle color theme">
+      <svg class="theme-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.2 14.6A8.4 8.4 0 0 1 9.4 3.8a8.4 8.4 0 1 0 10.8 10.8z"/></svg>
+      <svg class="theme-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>
+      Theme
+    </button>
+  </div>
+
   <main class="shell">
     <div class="brand">
       <div class="wordmark"><span class="wmAccent">Alpaca</span> Hub</div>
-      <div class="brandSub">The engineering harness</div>
+      <div class="brandSub"><span class="brandPulse" aria-hidden="true"></span>Alpaca &middot; Secure Access</div>
     </div>
-    <div class="card" id="card">
-      <h1 class="title">Sign in</h1>
-      <p class="stepSub">Enter the access code to open the workspace hub.</p>
-      <form id="login-form" autocomplete="on">
-        <label class="field" id="user-field" hidden>
-          <span class="label">User</span>
-          <input class="input" id="user" name="username" autocomplete="username" spellcheck="false">
-        </label>
-        <label class="field">
-          <span class="label">Access code</span>
-          <input class="input" id="code" name="password" type="password" autocomplete="current-password"
-                 maxlength="64" required aria-describedby="error">
-        </label>
-        <button type="submit" class="submit" id="submit">Sign in</button>
-      </form>
-      <p class="error" id="error" role="alert" hidden></p>
+
+    <div class="cardWrap">
+      <canvas id="rings" class="rings" aria-hidden="true"></canvas>
+      <div class="card" id="card">
+        <span class="runBorder" aria-hidden="true"></span>
+        <span class="cardScan" aria-hidden="true"></span>
+        <div class="sysbar" aria-hidden="true">
+          <span class="sysbarDot"></span><span>SECURE TERMINAL &middot; ALPACA-NET</span>
+          <span class="sysbarSpacer"></span><span>HMAC SESSION</span>
+        </div>
+        <h1 class="title">Operations access</h1>
+        <p class="quote">&ldquo;Restricted terminal. Authorized personnel only.&rdquo;</p>
+        <p class="stepSub">Enter the access code to open the workspace hub.</p>
+        <form id="login-form" autocomplete="on">
+          <label class="field" id="user-field" hidden>
+            <span class="label">User</span>
+            <input class="input" id="user" name="username" autocomplete="username" spellcheck="false">
+          </label>
+          <label class="field">
+            <span class="label">Access code</span>
+            <input class="input codeInput" id="code" name="password" type="password" inputmode="numeric"
+                   autocomplete="current-password" maxlength="64" required placeholder="&bull;&bull;&bull;&bull;&bull;&bull;"
+                   aria-describedby="error">
+          </label>
+          <button type="submit" class="submit" id="submit"><span class="spin" aria-hidden="true"></span>Unlock</button>
+        </form>
+        <p class="error" id="error" role="alert" hidden></p>
+      </div>
     </div>
+
     <p class="foot">Alpaca &middot; The engineering harness</p>
+    <div class="syslog" id="syslog" aria-hidden="true"></div>
   </main>
 </div>
 </body>

@@ -734,6 +734,8 @@ def files_read(root, rel):
 
 #: Files the public sign-in page and the workspace hub may load before a session exists.
 LOGIN_ASSETS = {"vault.css": "text/css; charset=utf-8", "vault.js": "text/javascript; charset=utf-8",
+                "vault-globe.js": "text/javascript; charset=utf-8",
+                "countries-110m.json": "application/json",
                 "vendor/plex-sans.woff2": "font/woff2", "vendor/plex-sans-medium.woff2": "font/woff2",
                 "vendor/plex-mono.woff2": "font/woff2"}
 
@@ -1113,9 +1115,7 @@ def make_handler(live, root, remote=False):
                                    "signed_in": bool(want) and self._authed(want)})
             if path in ("/login", "/login/"):
                 if want and self._authed(want):
-                    target = (parse_qs(urlparse(self.path).query).get("next") or ["/"])[0]
-                    if not target.startswith("/") or target.startswith("//"):
-                        target = "/"
+                    target = weblogin.safe_next((parse_qs(urlparse(self.path).query).get("next") or ["/"])[0])
                     self.send_response(302)
                     self.send_header("Location", target)
                     self.send_header("Content-Length", "0")

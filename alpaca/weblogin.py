@@ -24,6 +24,7 @@ This module never writes the record. The key file is runtime state beside `files
 import hashlib
 import hmac
 import os
+import re
 import secrets
 import threading
 import time
@@ -36,6 +37,20 @@ WINDOW_S = 15 * 60           # throttle window
 CLIENT_MAX = 8               # failures one client may make per window
 GLOBAL_MAX = 60              # failures all clients together may make per window
 KEY_FILE = "web-session-key"
+
+
+# A sign-in redirect target (?next=): "/" then printable ASCII with no backslash, never "//" or
+# "/\\" at the start. A control character could split the Location header; a backslash, tab or
+# newline lets the browser read the target as another host. vault.js applies the same rule.
+SAFE_NEXT_RE = re.compile(r"/(?![/\\])[!-\[\]-~]*")
+
+
+def safe_next(target):
+    """`target` when it is a same-origin absolute path with no control character, space or
+    backslash, else "/"."""
+    if isinstance(target, str) and SAFE_NEXT_RE.fullmatch(target):
+        return target
+    return "/"
 
 
 def _key(root):
