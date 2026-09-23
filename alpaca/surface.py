@@ -67,6 +67,7 @@ TABLE: dict[str, dict] = {
     "init": {"keys": ("verdict", "root"), "group": "setup"},
     "onboard": {"keys": ("verdict", "project"), "group": "setup"},
     "upgrade": {"keys": ("verdict", "plan", "applied"), "group": "setup"},
+    "spec": {"keys": ("verdict", "kit", "version", "files"), "group": "setup"},
     "collect": {"keys": ("status", "collector", "sources", "coverage", "consumers"), "group": "maintenance"},
     "artifact": {"keys": ("availability", "objects", "bytes", "pins"), "group": "maintenance"},
     "backup": {"keys": ("ok", "watermark", "completeness", "known_gaps"), "group": "maintenance"},

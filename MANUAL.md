@@ -41,6 +41,7 @@ The everyday operating verbs. Small on purpose.
 - `alpaca init` - create the runtime record under `.alpaca/` in this project root.
 - `alpaca onboard` - sense the repository, propose an identity, and seed the record on first contact.
 - `alpaca upgrade` - refresh the mechanism paths and leave the memory paths untouched, crash-safe.
+- `alpaca spec` - install one spec tool from the vendored copies, offline (`init --kit spec-kit|openspec`, `status`, `verify`); see Spec tools below.
 
 ### Maintenance
 
@@ -215,6 +216,38 @@ These hold in every session, at every level.
 - Never leave the project root, and never hand-edit a projection.
 - The authority surface (`contracts/`, `project.yaml`, `doctrine/`, the boot block in `CLAUDE.md`)
   is human-owned; below L5 an agent write there is a review card.
+
+## Spec tools
+
+Alpaca carries two upstream spec tools at pinned versions, with their MIT notices, and uses them as
+they ship. A project uses one of them, so they never overlap:
+
+- spec-kit (github/spec-kit) for a new thing: from a raw idea to a first spec, with the clarify
+  questions and answers. `alpaca spec init --kit spec-kit` writes its Claude Code skills
+  (/speckit-specify, /speckit-clarify, /speckit-plan, /speckit-tasks, /speckit-implement and the
+  rest) and its templates and scripts under .specify in the project. The spec-kit constitution is
+  replaced by `vendor/spec-kit/constitution.md`, which points at `CLAUDE.md` and `doctrine/` and
+  says Alpaca's rules win; it is not a second rulebook.
+- OpenSpec (Fission-AI/OpenSpec) for changes to something that exists: living specs plus change
+  deltas. `alpaca spec init --kit openspec` runs the vendored `openspec init --tools claude`, which
+  writes the openspec folder and the /opsx:propose, /opsx:apply and /opsx:archive commands with
+  their skills. `bin/openspec` runs the vendored CLI (`new change`, `validate`, `archive`, `list`,
+  `show`) with the host node (20.19.0 or later); the first run unpacks the pinned packages under
+  .alpaca/tools after checking each sha256. At session start the hook puts the project's bin
+  folder on PATH for Claude Code, so the commands find `openspec`. Telemetry stays off.
+  `openspec init` keeps a global config (profile, delivery, workflows); the install runs it with
+  a scratch config dir that it removes afterwards, so your own OpenSpec config under
+  XDG_CONFIG_HOME (or ~/.config/openspec) is not written and does not change what gets installed.
+  Other `bin/openspec` commands read that user config as upstream does.
+
+`alpaca spec init` refuses the second kit when the project already has the other one (its files,
+or the `spec:` entry it records in `project.yaml`), and refuses to replace a file that differs from
+what the kit would write (for OpenSpec it first runs `openspec init` in a scratch directory and
+compares the skills and commands, so a refusal writes nothing); `--force` overrides both, and the
+output lists the files it replaced. A rerun that changes nothing leaves `project.yaml` as it was. `alpaca spec status` shows the recorded kit, the kits
+found on disk and the pins; `alpaca spec verify` checks every vendored archive against
+`vendor/VENDOR.json`. Nothing here uses the network. `setup/vendor_spec_kits.py` rebuilds the
+vendored copies from the upstream releases (maintainers only, needs the network).
 
 ## This manual and its gate
 

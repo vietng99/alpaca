@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Run the vendored OpenSpec CLI (vendor/openspec, pinned in vendor/VENDOR.json) with the host node.
+# The first run unpacks the pinned packages into .alpaca/tools/ after checking each sha256; no
+# network is used, and OpenSpec's telemetry and update check stay off. Runs in the caller's cwd.
+set -euo pipefail
+ALPACA_INSTALL_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+resolved="$("$ALPACA_INSTALL_ROOT/bin/alpaca-python" -m alpaca.spec_kits entry openspec --root "$ALPACA_INSTALL_ROOT")"
+node_bin="${resolved%%$'\n'*}"
+entry="${resolved#*$'\n'}"
+export OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1
+exec "$node_bin" "$entry" "$@"

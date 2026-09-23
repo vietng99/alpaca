@@ -87,6 +87,21 @@ def _gen(root, *args):
                           capture_output=True, text=True, encoding="utf-8")
 
 
+# ------------------------------------------------------------------ the shipped MANIFEST.json
+def test_shipped_manifest_records_umask_free_modes():
+    """The shipped MANIFEST.json records 0644 or 0755 for every file (what a checkout under the
+    usual umask 022 gives), with 0755 exactly where the file is executable. A manifest written
+    under another umask (0664/0775) fails --verify on every fresh clone made under umask 022."""
+    import json
+    with open(os.path.join(REPO, "MANIFEST.json"), encoding="utf-8") as fh:
+        modes = json.load(fh)["file_modes"]
+    bad = {p: m for p, m in modes.items() if m not in ("f0644", "f0755")}
+    assert not bad, "modes other than f0644/f0755: %d, e.g. %s" % (len(bad), sorted(bad.items())[:5])
+    for rel, marker in modes.items():
+        executable = bool(os.stat(os.path.join(REPO, rel)).st_mode & 0o100)
+        assert (marker == "f0755") == executable, (rel, marker)
+
+
 # --------------------------------------------------------------- the per-file digest map on a clone
 def test_manifest_verifies_on_a_fresh_clone(tmp_path):
     src = tmp_path / "src"

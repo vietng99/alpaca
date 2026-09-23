@@ -30,11 +30,38 @@ def export_session(sid) -> bool:
         return False
 
 
+def export_tool_path(root) -> bool:
+    """With OpenSpec recorded as this project's spec kit (`alpaca spec init --kit openspec`), put
+    the project's bin/ on PATH for later Bash calls through the same env file, so the `/opsx:*`
+    commands and skills, which call a bare `openspec`, reach the vendored CLI (bin/openspec).
+    Fail-open: a project without the kit, or without the env file, is unaffected."""
+    path = os.environ.get("CLAUDE_ENV_FILE")
+    if not path:
+        return False
+    try:
+        from alpaca import spec_kits
+        lines = spec_kits.env_lines(root)
+        if not lines:
+            return False
+        existing = ""
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as fh:
+                existing = fh.read()
+        missing = [line for line in lines if line not in existing]
+        if missing:
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write("".join(missing))
+        return True
+    except Exception:
+        return False
+
+
 def handle(payload):
     from alpaca import db, pad, paths, project, util
     root = paths.root(payload.get("cwd"))
     sid = common.session_of(payload)
     export_session(sid)
+    export_tool_path(root)
     project.ensure_instance(root)
     conn = db.connect(root)
     if db.meta_get(conn, "initialized") is None:

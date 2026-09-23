@@ -284,8 +284,9 @@ def _split_row(line: str) -> list:
 
 
 def markdown_to_html(md: str) -> str:
-    """A small, deterministic markdown subset: ATX headings, paragraphs, unordered lists, fenced
-    code blocks, GitHub tables, and inline code and bold. Enough for the manual, no more."""
+    """A small, deterministic markdown subset: ATX headings, paragraphs, unordered lists (a bullet
+    may wrap onto indented continuation lines), fenced code blocks, GitHub tables, and inline code
+    and bold. Enough for the manual, no more."""
     lines = md.split("\n")
     out = []
     i = 0
@@ -342,9 +343,14 @@ def markdown_to_html(md: str) -> str:
             if not in_list:
                 out.append("<ul>")
                 in_list = True
-            item = re.sub(r"^[-*]\s+", "", stripped)
-            out.append("<li>%s</li>" % _inline(item))
+            parts = [re.sub(r"^[-*]\s+", "", stripped)]
             i += 1
+            # an indented continuation line belongs to the same item (a wrapped bullet)
+            while i < n and lines[i][:1] in (" ", "\t") and lines[i].strip() \
+                    and not re.match(r"^(#{1,6})\s|^[-*]\s|^```", lines[i].strip()):
+                parts.append(lines[i].strip())
+                i += 1
+            out.append("<li>%s</li>" % _inline(" ".join(parts)))
             continue
 
         # paragraph: gather consecutive non-blank, non-special lines
