@@ -1,7 +1,8 @@
-# Alpaca distribution template. `alpaca onboard` replaces this file with the project's own answers;
-# `alpaca upgrade` preserves an installed project's copy. Each installation takes its project id from
-# .alpaca/instance.json while this file stays a template. To plug in a domain, add a `profile:` key
-# naming a dotted module path importable from the project root (see alpaca/profile.py).
+# Alpaca distribution template. `alpaca onboard` writes the project's own answers into this file
+# and keeps every other key with its value (these comments are not kept); `alpaca upgrade` preserves
+# an installed project's copy. Each installation takes its project id from .alpaca/instance.json
+# while this file stays a template. To plug in a domain, add a `profile:` key naming a dotted
+# module path importable from the project root (see alpaca/profile.py).
 name: Alpaca
 project_id: alpaca-template
 template: true

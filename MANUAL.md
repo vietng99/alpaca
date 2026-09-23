@@ -88,7 +88,8 @@ there is nothing to resume yet, so the first thing to do is onboard.
 
 - `alpaca onboard` senses the repository, proposes an identity, and seeds the record. It writes
   `project.yaml` (the project identity, the default autodrive level, the plain-writing preset
-  choice) and opens the record. It is a sense-then-propose step: it reads the repository and
+  choice) and opens the record. On a fresh copy it writes these answers into the shipped template
+  `project.yaml` and keeps every other key and its value. It is a sense-then-propose step: it reads the repository and
   proposes, and you confirm, rather than guessing silently.
 - `alpaca doctor` then checks that the installation and the record are consistent. Run it once right
   after onboarding.
