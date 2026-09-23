@@ -199,6 +199,25 @@ def _contract_flags(parser):
     parser.add_argument("--stage", help="the profile stage this task runs, if any (alpaca/profile.py stages)")
     parser.add_argument("--source", help="where the contract is restated from")
 
+def add_task(conn, op, statement, title, *, phase=None, why=None, session="cli", actor="human",
+             extra=None):
+    """Add one open task to `op`: the task-add event and the tasks row in one transaction. Returns
+    the new task id. `extra` adds keys to the event data (intake names the runbook stage a task came
+    from there, so a later intake finds the task again). The caller has checked the op and title."""
+    now = util.now_iso()
+    data = {"statement": statement, "title": title, "phase": phase, "why": why}
+    if extra:
+        data.update({k: v for k, v in extra.items() if k not in data})
+    with db.transaction(conn):
+        tid = "t-%03d" % (conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] + 1)
+        db.append_event(conn, session=session, actor=actor, kind="task-add", op=op, ref=tid,
+                        data=data, conn_in_txn=True)
+        db.upsert(conn, "tasks", "id", {"id": tid, "op": op, "phase": phase, "statement": statement,
+                                         "title": title, "status": "open", "why": why, "created": now,
+                                         "updated": now})
+    return tid
+
+
 @cli.command("task")
 def cmd_task(args):
     conn = db.connect(cli._root()); sid = args.session or "cli"; now = util.now_iso()
@@ -211,13 +230,8 @@ def cmd_task(args):
                   'the statement is the full description)' % TITLE_MAX); return cli.FAIL
         if len(title) > TITLE_MAX:
             print("GATE alpaca-task-add: FAIL (title is %d chars; keep it to %d)" % (len(title), TITLE_MAX)); return cli.FAIL
-        with db.transaction(conn):
-            tid = "t-%03d" % (conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] + 1)
-            db.append_event(conn, session=sid, actor="human", kind="task-add", op=args.op, ref=tid,
-                            data={"statement": args.statement, "title": title, "phase": args.phase, "why": args.why},
-                            conn_in_txn=True)
-            db.upsert(conn, "tasks", "id", {"id": tid, "op": args.op, "phase": args.phase, "statement": args.statement,
-                                             "title": title, "status": "open", "why": args.why, "created": now, "updated": now})
+        tid = add_task(conn, args.op, args.statement, title, phase=args.phase, why=args.why,
+                       session=sid, actor="human")
         if any(getattr(args, part, None) for part in ("input", "expected", "done_bar", "fail_case")):
             from alpaca import taskcontract
             try:

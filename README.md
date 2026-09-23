@@ -37,6 +37,8 @@ Claude Code has native lifecycle hooks. Codex follows AGENTS.md and uses explici
 - `doctrine/`, `MAP.md`, `contracts/`, `formations/`: the rules, the boot router, and the work shapes.
 - `plugin/alpaca/` and `skills/`: optional bundled skills.
 - `docs/runbook-format.md`, `templates/runbook-example/` and `skills/alpaca-runbook-forge/`: the runbook format (a domain's stages, checks, knobs, retry rules and owner gates), a worked example, and the skill that writes a runbook from a spec. `alpaca runbook check` checks one.
+- `alpaca intake <spec> <runbook>`: turns a spec-kit or OpenSpec spec and its runbook into the op's checklist rows (one per success criterion or scenario), one task contract per stage and per owner gate, and the profile stages; after a spec change it supersedes only the rows that changed. `--dry-run` shows the plan. See `docs/intake.md`.
+- `skills/alpaca-from-notes/` and `alpaca start <notes>`: the one entry point from raw notes. It picks spec-kit for a new thing and OpenSpec for a change (you can override), then walks the notes to a spec, a runbook and intake.
 
 See `docs/DESIGN.md` for architecture, and `docs/operators.md`, `docs/operations-hub.md`, `docs/observability-operations.md`, and `docs/shipping.md` for operation details.
 

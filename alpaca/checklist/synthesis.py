@@ -77,12 +77,30 @@ def _applicable_steps(step_model: dict, artifact: dict) -> list:
     return [s for s in steps if kind in (s.get("consumes") or [])]
 
 
+#: `{cell:<column>}` in an obligation template: the item's cell in that column of the acceptance
+#: table (header matched as written, case and spacing ignored). A column the table lacks is left
+#: as written, so a template never silently loses words.
+_CELL_RE = re.compile(r"\{cell:([^}]+)\}")
+
+
+def _cell(item: dict, column: str):
+    want = " ".join(column.split()).casefold()
+    for name, value in (item.get("cells") or {}).items():
+        if " ".join(str(name).split()).casefold() == want:
+            return str(value)
+    return None
+
+
 def _statement(step: dict, item: dict, artifact: dict) -> str:
     text = step["obligation"]
     text = text.replace("{item}", item["key"])
     text = text.replace("{artifact}", artifact["path"])
     text = text.replace("{step}", step["key"])
-    return text
+
+    def one(m):
+        value = _cell(item, m.group(1))
+        return m.group(0) if value is None else value
+    return _CELL_RE.sub(one, text)
 
 
 def _content_hash(row: dict) -> str:

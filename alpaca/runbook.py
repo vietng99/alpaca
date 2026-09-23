@@ -72,7 +72,7 @@ ERROR_CODES = (
     "KNOB-DEFAULT-TYPE", "KNOB-DEFAULT-RANGE", "KNOB-UNKNOWN", "KNOB-OWNER-ONLY",
     "KNOB-NOT-NUMBER", "MOVE-NOT-INT", "RETRY-CHECK-UNKNOWN", "RETRY-OVERLAP", "VAR-UNKNOWN",
     "SPEC-MISSING", "SPEC-EMPTY", "SPEC-MIXED", "SPEC-UNCOVERED", "COVERS-UNKNOWN",
-    "COVERS-AMBIGUOUS",
+    "COVERS-AMBIGUOUS", "SPEC-DELTA",
 )
 WARNING_CODES = ("FR-UNCOVERED", "SPEC-CLARIFY", "COVERS-WITHOUT-SPEC", "SPEC-UNPARSED")
 
@@ -682,12 +682,32 @@ _KIT_ID = re.compile(r"\b(?:SC|FR)-\d+\b")
 _INLINE_COMMENT = re.compile(r"<!--.*?-->")
 
 
+#: an OpenSpec scenario whose name starts with a spec-kit id (`#### Scenario: SC-002 ...`) keeps that
+#: id: a runbook `covers: [SC-002]` finds it, and intake keys its row by the id, so a spec that moves
+#: from spec-kit to OpenSpec keeps its rows. SC-nnn stays a required item, FR-nnn an optional one.
+_ALIAS = re.compile(r"^((?:SC|FR)-\d+)\b\s*[:.)-]?\s*(.*)$")
+_HEADING = re.compile(r"^\s{0,3}#{1,6}\s")
+
+
+def scenario_alias(name):
+    """(id, rest) when an OpenSpec scenario name starts with a spec-kit id, else (None, name)."""
+    m = _ALIAS.match(name.strip())
+    if m:
+        return m.group(1), m.group(2).strip()
+    return None, name.strip()
+
+
 def _openspec_items(lines, capability=None):
+    """Scenario items with the requirement and section they sit under, their line and their body
+    (the lines under the scenario heading up to the next heading)."""
     items, requirement, section = [], None, ""
     mask = _fence_mask(lines)
-    for line, masked in zip(lines, mask):
+    current = None
+    for n, (line, masked) in enumerate(zip(lines, mask), 1):
         if masked:
             continue
+        if _HEADING.match(line):
+            current = None
         m = _SECTION.match(line)
         if m and not line.lstrip().startswith("###"):
             section, requirement = m.group(1).strip().upper(), None
@@ -704,9 +724,18 @@ def _openspec_items(lines, capability=None):
             name = re.sub(r"[ \t]+#+[ \t]*$", "", m.group(1))
             name = re.sub(r"^Scenario:\s*", "", name, flags=re.I).strip()
             bare = "%s/%s" % (requirement, name)
-            items.append({"id": "%s/%s" % (capability, bare) if capability else bare, "bare": bare,
-                          "capability": capability, "kind": "scenario", "text": name,
-                          "required": not section.startswith("REMOVED")})
+            alias, _rest = scenario_alias(name)
+            removed = section.startswith("REMOVED")
+            current = {"id": "%s/%s" % (capability, bare) if capability else bare, "bare": bare,
+                       "capability": capability, "kind": alias[:2] if alias else "scenario",
+                       "text": name, "required": not removed and (alias is None or alias.startswith("SC-")),
+                       "requirement": requirement, "section": section, "line": n, "body": []}
+            if alias:
+                current["alias"] = alias
+            items.append(current)
+            continue
+        if current is not None:
+            current["body"].append(line)
     return items
 
 
@@ -828,6 +857,8 @@ def coverage(data, spec, report):
         if item.get("capability"):
             # a folder spec: "<cap>/<req>/<scenario>" also answers to "<req>/<scenario>" when unique
             keys.add(_norm(item["bare"]))
+        if item.get("alias"):
+            keys.add(_norm(item["alias"]))
         for key in keys:
             index.setdefault(key, []).append(item)
     covered = {}
@@ -878,9 +909,29 @@ def coverage(data, spec, report):
 
 
 # ----------------------------------------------------------------------------- the check
-def check(path, spec_path=None, check_files=True):
+class _DeltaError(ValueError):
+    """An OpenSpec change that does not apply to the living specs next to it."""
+
+
+def _read_target(target):
+    """parse_spec, except that an OpenSpec change folder (openspec/changes/<id>) is read as the
+    living specs with the change applied, the way `alpaca intake` reads it: the runbook covers the
+    whole spec after the change, not only the delta."""
+    if os.path.isdir(target):
+        from alpaca import intake
+        if intake._is_change(target):
+            try:
+                return intake.effective_change(target)
+            except intake.IntakeError as exc:
+                raise _DeltaError("; ".join([str(exc)] + exc.detail))
+    return parse_spec(target)
+
+
+def check(path, spec_path=None, check_files=True, spec=None):
     """Check one runbook file, and its coverage of a spec when one is given (`spec_path`, else the
-    runbook's own `spec:` field, relative to the runbook folder).
+    runbook's own `spec:` field, relative to the runbook folder). `spec` takes a spec already read
+    (the shape `parse_spec` returns), for a caller that builds one, such as intake applying an
+    OpenSpec change to the living specs; it wins over `spec_path`.
 
     Returns {"verdict", "code", "runbook", "spec", "errors", "warnings", "coverage"}: PASS with no
     error, FAIL for a malformed runbook or an uncovered item, BLOCKED when the file cannot be read."""
@@ -895,11 +946,17 @@ def check(path, spec_path=None, check_files=True):
     target = spec_path
     if target is None and isinstance(data.get("spec"), str) and data["spec"].strip():
         target = os.path.join(base, data["spec"])
-    if target is not None:
+    if spec is not None:
+        result["spec"] = {"path": spec["path"], "format": spec["format"], "items": len(spec["items"]),
+                          "required": sum(1 for i in spec["items"] if i["required"])}
+        result["coverage"] = coverage(data, spec, report)
+    elif target is not None:
         try:
-            spec = parse_spec(target)
+            spec = _read_target(target)
         except (OSError, UnicodeDecodeError) as exc:
             report.error("SPEC-MISSING", "spec", "cannot read the spec %s: %s" % (target, exc))
+        except _DeltaError as exc:
+            report.error("SPEC-DELTA", "spec", str(exc))
         except ValueError as exc:
             report.error("SPEC-MIXED", "spec", str(exc))
         else:
