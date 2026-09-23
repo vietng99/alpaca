@@ -276,9 +276,10 @@ work an op opens from lives in `intents/queue.md`.
   A structurally valid backup can still contain explicitly declared historical evidence gaps.
 
 - `alpaca workspace` registers this instance in the host workspace registry (`add`, `list`,
-  `remove`) and renders one combined cloudflared config for every registered hostname
-  (`render-ingress`), which the owner applies. See `docs/workspaces.md` for the pathway from a
-  local root to a cockpit on localhost and on a public hostname.
+  `remove`, and `move` after its folder was moved) and renders one combined cloudflared config
+  for every registered hostname (`render-ingress`), which the owner applies. See
+  `docs/workspaces.md` for the pathway from a local root to a cockpit on localhost and on a
+  public hostname.
 
 See `docs/observability-operations.md` for collection contracts, service setup, failure recovery,
 retention budgets and the restore rehearsal. The optional project SQLite runtime is described
