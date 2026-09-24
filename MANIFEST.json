@@ -2,7 +2,7 @@
   "product": "Alpaca",
   "description": "The engineering harness. A full-tree integrity record over the mechanism class the manifest declares; the memory class (runtime state) is excluded so the digest map describes the shipment and verifies on a fresh clone.",
   "file_count": 706,
-  "tree_digest": "081bede1b24bc8f8fca7ef460dfaf977295b103a2d512646babf15789916d918",
+  "tree_digest": "0606b0c96b9fec861dec7ca7a2890d4293560e4f1adda3772b57f816916f6e0c",
   "tree_digest_note": "sha256 over '<sha256>  <path>' lines in path order, over every mechanism-class file except MANIFEST.json itself, every __pycache__/ dir and any *.pyc. Re-derive with: python3 gen_manifest.py --verify",
   "files": {
     ".claude/settings.json": "788c9903dcfbc6c7835957d80325d4a40c0405995cce88650cc0099e5b665506",
@@ -630,7 +630,7 @@
     "templates/runbook-kit/CLAUDE.md": "bf11cfc445aa123afc6aeb3d3cb80a78105b5b4aae01c988612fc9973dfd1269",
     "templates/runbook-kit/FORMAT-note.md": "8cc5f4e54aae74c26ca57d62d9184003ee35ad2181d309d5c5846fa0a1f8ff29",
     "templates/runbook-kit/FORMAT-our-side.md": "e2d10c41305e4238b2870e295bd33a263d0f824d272260497d4fb9fe513b8e08",
-    "templates/runbook-kit/README.md": "f9ee8703181fa96b4fb4a7e20a4346683e5a02cd7fd91776715d07791bd56df1",
+    "templates/runbook-kit/README.md": "5353c5e50c8c956e9310841dca36e2775dd8279e9dbc6dea33a0664a654f55e0",
     "templates/runbook-kit/SKILL-head.md": "6b51f4ea3533267e135a9b946a4610f9e58a16035da89afd129f1ff8be975593",
     "templates/runbook-kit/templates/OPENSPEC.md": "af34381d9db9891520452befb545086119e892d2cf48e933725a2e4c0ccbf98f",
     "templates/runbook-kit/templates/runbook.yaml": "b936a067d0aca0f1a11c5f0d2c6742b682ea229dff72c39a1f9fcc58f4ae2eab",
