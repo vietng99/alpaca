@@ -694,7 +694,11 @@ def test_the_fail_cases_of_a_recovery_stage_are_in_the_contract_that_sends_to_it
                       "detect": {"type": "json-field", "path": "out/free-port.json", "field": "free",
                                  "op": "==", "value": False}, "then": "stop"}]
     plan = {key: contract for key, _t, _s, contract in intake._task_plan(data, "domain/runbook.yaml")}
-    busy = [l for l in plan["stage:load-test"]["fail_cases"] if l.startswith("port-busy: ")][0]
-    assert "free-port fail case still-busy: the port stays taken" in busy, busy
-    assert "detect (json-field): out/free-port.json field free == False" in busy
-    assert busy.count("then stop: the stage ends FAIL without another attempt") == 1
+    fails = plan["stage:load-test"]["fail_cases"]
+    # a line of its own, right after the line of the fail case that sends to the recovery stage,
+    # so a long line never cuts it off
+    n = [i for i, l in enumerate(fails) if l.startswith("port-busy: ")][0]
+    rec = fails[n + 1]
+    assert rec.startswith("port-busy, in the recovery stage free-port: still-busy: the port stays taken"), fails
+    assert "detect (json-field): out/free-port.json field free == False" in rec
+    assert "then stop: the stage ends FAIL without another attempt" in rec
