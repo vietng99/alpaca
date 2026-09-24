@@ -1,0 +1,143 @@
+# Runbook for the link shortener in spec.md, the worked example of the runbook format.
+# Check it from the folder that holds it:
+#   alpaca runbook check runbook.yaml          (in the product)
+#   python3 ../check_runbook.py runbook.yaml   (in the partner runbook kit, folder example/)
+# The format is documented in docs/runbook-format.md (FORMAT.md in the partner kit).
+runbook: 1
+id: link-shortener
+title: Link shortener service
+description: >-
+  Build, test, load-test and release the link shortener. Every success criterion of spec.md
+  is covered by at least one check or owner gate below.
+spec: spec.md
+owner: the service owner
+
+knobs:
+  - id: WORKERS
+    description: server worker processes used by the load test
+    type: int
+    default: 2
+    min: 1
+    max: 8
+  - id: P95_LIMIT_MS
+    description: the redirect latency bar at the 95th percentile, from SC-002
+    type: float
+    default: 50
+    min: 1
+    max: 1000
+    owner_only: true
+  - id: LOAD_RPS
+    description: requests per second the load test sends, from SC-002
+    type: int
+    default: 200
+    min: 1
+    max: 5000
+    owner_only: true
+
+stages:
+  - id: install
+    title: Install dependencies
+    run: python3 -m pip install -r requirements.txt
+    timeout: 600
+    inputs: [requirements.txt]
+    checks:
+      - id: install-exit
+        type: exit-code
+        expect: 0
+    retry:
+      max_attempts: 2
+      on_fail: [install-exit]
+
+  - id: unit-test
+    title: Unit and endpoint tests
+    needs: [install]
+    run: python3 -m pytest -q --junitxml=out/junit.xml tests
+    timeout: 900
+    inputs: [app/, tests/]
+    outputs:
+      - path: out/junit.xml
+        what: the test results
+    checks:
+      - id: tests-exit
+        type: exit-code
+        covers: [SC-001, FR-001, FR-002, FR-003, FR-004, FR-005]
+      - id: tests-no-failures
+        type: regex-in-file
+        path: out/junit.xml
+        pattern: 'failures="[1-9]'
+        absent: true
+        covers: [SC-001]
+    fails:
+      - id: import-error
+        when: the app package does not import (a missing dependency or a syntax error)
+
+  - id: restart-test
+    title: Links survive a restart
+    needs: [unit-test]
+    run: python3 tools/restart_check.py --out out/restart.json
+    timeout: 300
+    outputs:
+      - path: out/restart.json
+        what: links created before the restart and the ones read back after it
+    checks:
+      - id: restart-lost
+        type: json-field
+        path: out/restart.json
+        field: lost
+        op: "=="
+        value: 0
+        covers: [SC-003, FR-006]
+
+  - id: load-test
+    title: Redirect latency under load
+    needs: [unit-test]
+    run: python3 tools/load.py --workers ${WORKERS} --rps ${LOAD_RPS} --seconds 30 --out out/load.json
+    timeout: 300
+    env:
+      LOAD_TARGET: http://127.0.0.1:8080
+    outputs:
+      - path: out/load.json
+        what: latency percentiles and status counts of the load run
+    checks:
+      - id: load-exit
+        type: exit-code
+      - id: redirect-p95
+        type: json-field
+        path: out/load.json
+        field: redirect.p95_ms
+        op: "<="
+        value: ${P95_LIMIT_MS}
+        covers: [SC-002]
+      - id: redirect-codes
+        type: plugin
+        script: checks/status_codes.py
+        args: [out/load.json, "301"]
+        covers: [SC-002, FR-003]
+    retry:
+      max_attempts: 3
+      on_fail: [redirect-p95]
+      stop_on: [redirect-codes]
+      move:
+        knob: WORKERS
+        by: 2
+    fails:
+      - id: port-busy
+        when: port 8080 is already taken, so the service under test never starts
+
+  - id: release
+    title: Release to production
+    needs: [restart-test, load-test]
+    owner_gate:
+      approve: >-
+        the owner reads the load report and the README walk-through, then approves the
+        release to production
+      evidence: [out/load.json, out/restart.json]
+      covers: [SC-004]
+    run: ./deploy.sh production --health-out out/health.json
+    checks:
+      - id: release-exit
+        type: exit-code
+      - id: release-health
+        type: plugin
+        script: checks/status_codes.py
+        args: [out/health.json, "200"]

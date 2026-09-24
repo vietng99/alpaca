@@ -13,7 +13,8 @@ import pytest
 
 from alpaca.tests.conftest import REPO
 
-EXAMPLE = os.path.join(REPO, "templates", "runbook-example")
+# format 1 behaviour: the worked example as it was in format 1, kept as a fixture
+EXAMPLE = os.path.join(REPO, "alpaca", "tests", "fixtures", "runbook-example-v1")
 
 
 def _cli(argv, capsys):

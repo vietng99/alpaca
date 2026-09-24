@@ -38,6 +38,7 @@ from alpaca.gates import verdict
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 EXAMPLE = os.path.join(REPO, "templates", "runbook-example")
+EXAMPLE_V1 = os.path.join(REPO, "alpaca", "tests", "fixtures", "runbook-example-v1")
 KIT_NAME = "alpaca-runbook-kit-v%d" % runbook.FORMAT
 
 EXPECTED_FILES = sorted([
@@ -179,7 +180,7 @@ def test_checker_is_carried_from_the_product_and_only_reads(built):
     with open(os.path.join(REPO, "alpaca", "runbook.py"), encoding="utf-8") as fh:
         product = {n.name for n in ast.parse(fh.read()).body if isinstance(n, (ast.FunctionDef, ast.ClassDef))}
     runner = {"knob_values", "substitute", "_field", "_inside", "_compare", "evaluate", "_run_plugin",
-              "next_attempt"}
+              "next_attempt", "respond", "_step_end", "bar_parts", "_bar_shown", "_bar_check", "_bar_note"}
     cli_glue = {"_from_caller", "cmd_runbook", "_parser", "_register"}
     assert product - runner - cli_glue <= top
     assert not (runner & top), "the kit checker must not carry the parts that run checks"
@@ -531,15 +532,19 @@ def test_checker_matches_the_product_on_the_extra_fixtures(alone, tmp_path, capt
 #: codes a JSON Schema states in every case the checker reports them
 SCHEMA_ALWAYS = {"FIELD-MISSING", "FIELD-UNKNOWN", "FIELD-EMPTY", "FIELD-TYPE", "FIELD-NOT-LIST",
                  "VERSION-UNSUPPORTED", "ID-INVALID", "RUN-MISSING", "CHECKS-EMPTY",
-                 "CHECKS-WITHOUT-RUN", "CHECK-TYPE-UNKNOWN", "OP-UNKNOWN", "PLUGIN-SCRIPT-VARIABLE", "KNOB-TYPE-UNKNOWN"}
+                 "CHECKS-WITHOUT-RUN", "CHECK-TYPE-UNKNOWN", "OP-UNKNOWN", "PLUGIN-SCRIPT-VARIABLE", "KNOB-TYPE-UNKNOWN",
+                 "THEN-MISSING", "THEN-UNKNOWN"}
 #: codes a JSON Schema states in some cases only (a number that must lie between two other
 #: fields, a path that climbs out after normalising, a threshold that names a text knob)
-SCHEMA_SOME = {"RANGE", "PATH-ESCAPES", "VALUE-NOT-NUMBER", "KNOB-DEFAULT-TYPE", "KNOB-DEFAULT-RANGE"}
+SCHEMA_SOME = {"RANGE", "PATH-ESCAPES", "VALUE-NOT-NUMBER", "KNOB-DEFAULT-TYPE", "KNOB-DEFAULT-RANGE",
+               # a detect is a check without id and covers: the schema states its shape, not the rest
+               "DETECT-INVALID"}
 #: codes that need another part of the file, the spec, the file system or the YAML text itself
 SCHEMA_NEVER = {"ID-DUPLICATE", "NEEDS-UNKNOWN", "VAR-UNKNOWN", "RETRY-CHECK-UNKNOWN", "RETRY-OVERLAP",
                 "KNOB-UNKNOWN", "KNOB-OWNER-ONLY", "KNOB-NOT-NUMBER", "MOVE-NOT-INT", "REGEX-INVALID",
                 "PLUGIN-MISSING", "PLUGIN-NOT-EXECUTABLE", "SPEC-MISSING", "SPEC-EMPTY", "SPEC-MIXED",
-                "SPEC-UNCOVERED", "COVERS-UNKNOWN", "COVERS-AMBIGUOUS", "SPEC-DELTA"}
+                "SPEC-UNCOVERED", "COVERS-UNKNOWN", "COVERS-AMBIGUOUS", "SPEC-DELTA", "EC-UNNUMBERED",
+                "RECOVERY-UNKNOWN", "RECOVERY-NOT-MARKED", "RECOVERY-NEEDED", "RECOVERY-SELF"}
 NOT_A_MAPPING = {"FILE-UNREADABLE", "YAML-SYNTAX", "NOT-MAPPING", "KEY-DUPLICATE"}
 
 
@@ -1029,3 +1034,70 @@ def test_build_stops_when_carried_code_needs_a_name_it_does_not_carry(tmp_path):
     with pytest.raises(kit.KitError) as err:
         kit.build(str(root), str(tmp_path / "out"))
     assert "util" in str(err.value)
+
+
+# ------------------------------------------------------------------------ format 2 (op-003)
+def test_the_kit_is_format_2(built):
+    assert runbook.FORMAT == 2 and KIT_NAME == "alpaca-runbook-kit-v2"
+    assert re.search(r"^format: 2$", _read(built, "VERSION"), re.M)
+    template = _read(built, "templates/runbook.yaml")
+    assert re.search(r"^runbook: 2\b", template, re.M)
+    assert "detect:" in template and "then:" in template and "source:" in template
+    assert "**EC-001**" in _read(built, "templates/spec.md")
+    assert "EC-001" in _read(built, "README.md")
+    src, _tree_ = _tree(built)
+    assert "respond" in src.split('"""', 2)[1]          # the head says what stays out
+
+
+def test_kit_checker_covers_edge_cases_in_the_template(alone):
+    proc = kit_run(alone, ["templates/runbook.yaml", "--json"], cwd=alone)
+    out = json.loads(proc.stdout)
+    assert proc.returncode == 0, out["errors"]
+    assert "EC-001" in out["coverage"]["covered"]
+
+
+def test_checker_matches_the_product_on_the_format_1_example(alone, tmp_path):
+    path = os.path.join(EXAMPLE_V1, "runbook.yaml")
+    want, code = product_json(path)
+    assert code == verdict.PASS and [w["code"] for w in want["warnings"]] == ["EC-IGNORED"]
+    proc = kit_run(alone, [path, "--json"], cwd=tmp_path)
+    assert proc.returncode == code and json.loads(proc.stdout) == want
+
+
+def test_schema_takes_format_2_and_keeps_format_1_to_its_fields(built):
+    schema = _schema(built)
+    with open(os.path.join(EXAMPLE_V1, "runbook.yaml"), encoding="utf-8") as fh:
+        v1 = _as_json(yaml.safe_load(fh))
+    assert schema_errors(schema, v1) == []
+    v1["knobs"][0]["source"] = "default"
+    assert schema_errors(schema, v1)
+    v1["runbook"] = 2
+    assert schema_errors(schema, v1) == []
+    base = {"runbook": 2, "id": "r", "title": "R", "stages": [
+        {"id": "s", "run": "make", "checks": [{"id": "c", "type": "exit-code"}],
+         "fails": [{"id": "f", "when": "w", "detect": {"type": "exit-code", "expect": 3}, "then": {"run": "fix"}}]},
+        {"id": "fix", "recovery": True, "run": "make fix", "checks": [{"id": "d", "type": "exit-code"}]}]}
+    assert schema_errors(schema, base) == []
+    for change in (lambda d: d["stages"][0]["fails"][0].pop("then"),
+                   lambda d: d["stages"][0]["fails"][0].update(then="again"),
+                   lambda d: d["stages"][0]["fails"][0].update(then={"run": "fix", "wait": 1}),
+                   lambda d: d["stages"][0]["fails"][0]["detect"].update(id="x"),
+                   lambda d: d["stages"][1].pop("run"),
+                   lambda d: d["stages"][1].update(owner_gate={"approve": "a person frees it"}),
+                   lambda d: d.update(runbook=3)):
+        data = json.loads(json.dumps(base))
+        change(data)
+        assert schema_errors(schema, data), data
+
+
+def test_agents_md_carries_format_2(built):
+    text = " ".join(_read(built, "AGENTS.md").split())
+    for must in ("`EC-001`", "`detect`", "`then`", "`recovery: true`", "`source`", "`EC-UNNUMBERED`"):
+        assert must in text, must
+
+
+def test_format_md_carries_format_2(built):
+    text = _read(built, "FORMAT.md")
+    for must in ("## Format 1 and format 2", "## Edge cases", "## Known failures", "## Provenance",
+                 "Our runner applies it."):
+        assert must in text, must
