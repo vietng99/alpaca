@@ -34,7 +34,7 @@ What it does, and why each clause is here:
     project with no list configured at all refuses the same way (review 4, N25d). Shape rules and
     protected paths run either way (B5). The list may carry `re:` lines and `!include:` lines
     (B1, B7); a line the barrier cannot use refuses.
-  * the hook scan has a wall-clock budget (`barrier.time_budget_seconds`, default 900): a scan past
+  * the hook scan has a wall-clock budget (`barrier.time_budget_seconds`, default 300): a scan past
     it refuses with its own reason, so a `re:` line that backtracks without end cannot hang the
     push (review 4, N15).
   * metadata (commit and tag messages, ref names, deleted ref names too) is matched against the
@@ -84,7 +84,7 @@ R_TIME = "SCAN-TIME-BUDGET-REFUSES"
 R_STALE = "HOOK-PREDATES-PIN-REFUSES"
 
 #: the scan's wall-clock budget in seconds (project.yaml `barrier.time_budget_seconds`, pinned).
-TIME_BUDGET = 900
+TIME_BUDGET = 300
 STALE_HOOK = "the hook predates the pinned barrier; run bin/alpaca barrier install"
 
 HOOK_NAME = "pre-push"

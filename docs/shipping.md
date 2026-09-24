@@ -154,7 +154,7 @@ even when the entry lets the file pass. A WOFF2 font needs the `brotli` module (
 can cap its output); without it the three fonts under `alpaca/web/vendor/` are passed by their
 `barrier.allow_blobs` entries, which name each file's digest and why.
 
-The scan has a time budget: 900 seconds, or `barrier.time_budget_seconds`. A scan that runs past
+The scan has a time budget: 300 seconds, or `barrier.time_budget_seconds`. A scan that runs past
 it refuses the push and says so (`SCAN-TIME-BUDGET-REFUSES`); the usual cause is a `re:` line with
 nested repeats, such as `(a+)+`, that backtracks without end on some text.
 
