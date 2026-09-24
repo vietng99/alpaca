@@ -88,7 +88,10 @@ A URL longer than 2048 characters is refused with 400.
 
 An OpenSpec scenario whose name starts with a spec-kit id keeps that id: `alpaca runbook check`
 matches `covers: [SC-002]` or `covers: [EC-001]` to it, an `SC` or `EC` id is a required item and an
-`FR` id an optional one, and intake keys its row by the id. The scenario body is the criterion
+`FR` id an optional one, and intake keys its row by the id. An `EC` id is kept only in the shape
+the move writes, a requirement named by that id; a scenario that merely starts with one under a
+requirement of another name (`#### Scenario: EC-001 port taken` under `### Requirement: Startup`)
+stays the scenario `Startup/EC-001 port taken`, as OpenSpec always read it. The scenario body is the criterion
 text, so the rows intake made from the spec-kit spec, the edge case rows included, are kept (`=`)
 with their verdicts. A runbook of format 1 does not cover edge cases, but after the move an `EC`
 scenario is a required item like any other scenario: move such a runbook to `runbook: 2` and cover
@@ -188,8 +191,8 @@ the open op opened last, and refuses when none is open. The op must be open.
 3. **Task contracts.** One task per runbook stage that runs a command, and one per owner gate
    ("Owner approval: <stage title>"), in run order. Each gets a contract (`alpaca task contract`):
    the stage `inputs` and the stages it `needs` are the input, the `outputs` are the expected
-   output, one done-bar line per check with its threshold (a `${KNOB}` threshold shows the knob's
-   value), and the fail cases from `fails`, `stop_on` and the attempt limit. The contract names the
+   output, one done-bar line per check with its threshold (a `${KNOB}` threshold, in a json-field
+   `value` or in a plugin's `args`, shows the knob's value next to it), and the fail cases from `fails`, `stop_on` and the attempt limit. The contract names the
    stage, and its source names the runbook and the stage index.
 
    Each fail case is one fail case line. A fail case with only `id` and `when` is
@@ -215,7 +218,9 @@ the open op opened last, and refuses when none is open. The op must be open.
    ```
 
    A recovery stage gets no task: it runs only when a fail case sends to it, never on its own, so
-   it is shown in the fail case line of every stage that sends to it. It stays a profile stage
+   it is shown in the fail case line of every stage that sends to it. Its own fail cases follow
+   that line, one line each (`port-busy, in the recovery stage free-port: <its fail case line>`),
+   so each part of a row's bar is in some contract. It stays a profile stage
    (step 4), so a contract or a proof can still name it.
 4. **Profile.** The runbook's stage ids become the project's profile stages, so a contract can
    name one. When `project.yaml` names no profile, intake writes `intake_profile.py` at the project
@@ -252,7 +257,8 @@ A bar change is any change to what a covering part asks: a threshold (`value`, `
 default the bar uses, an `op`, a `path`, a `field`, a `pattern` or `absent`, a check `type`, a
 fail case's `detect` or `then`, an owner gate's `approve` text. Each one supersedes exactly the
 rows whose bar names that part. A knob that no check names (one the `run` command uses, say)
-changes no bar.
+changes no bar. A knob's `owner_only` says who may change it, not what a check judges: the bar
+shows it (`owner only`), but flipping it alone keeps the row.
 
 "Current row" is the head of the key's supersession chain. An item that goes back to text it had
 before (a reverted change, or a removed item restored with the same text) is compared with the

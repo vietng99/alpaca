@@ -245,11 +245,16 @@ def effective_change(change):
     for cap in sorted(caps, key=lambda c: c or ""):
         for name, scenarios in caps[cap].values():
             for item in scenarios:
-                alias, _rest = runbook.scenario_alias(item["text"])
+                # the requirement name after a rename decides whether an EC-nnn id is kept
+                alias = runbook.openspec_alias(name, item["text"])
                 bare = "%s/%s" % (name, item["text"])
                 item = dict(item, requirement=name, bare=bare, capability=cap,
                             id="%s/%s" % (cap, bare) if cap else bare,
+                            kind=alias[:2] if alias else "scenario",
                             required=alias is None or alias.startswith(runbook._REQUIRED_ALIAS))
+                item.pop("alias", None)
+                if alias:
+                    item["alias"] = alias
                 items.append(item)
     return {"path": change, "format": "openspec", "items": items, "clarifications": 0}
 
@@ -293,8 +298,9 @@ def criterion(item):
     from alpaca import runbook
     if "body" not in item:
         return _plain(_canon([item.get("text") or ""]))
-    alias, rest = runbook.scenario_alias(item.get("text") or "")
-    title = _canon([rest if alias else (item.get("text") or "")])
+    # only a scenario that keeps a spec-kit id (runbook.openspec_alias) drops it from the title
+    _alias, rest = runbook.scenario_alias(item.get("text") or "")
+    title = _canon([rest if item.get("alias") else (item.get("text") or "")])
     body = _canon(item.get("body") or [])
     if title and body:
         return _plain("%s: %s" % (title, body))
@@ -490,7 +496,10 @@ def _check_what(chk, knobs):
             shown = "%s (%s)" % (value, knobs[m.group(1)])
         what = "%s field %s %s %s" % (chk.get("path"), chk.get("field"), chk.get("op"), shown)
     elif kind == "plugin":
-        args = " ".join(str(a) for a in (chk.get("args") or []))
+        # a ${KNOB} in the args is a threshold too: show its value, as for a json-field value
+        def shown(m):
+            return "%s (%s)" % (m.group(0), knobs[m.group(1)]) if m.group(1) in knobs else m.group(0)
+        args = " ".join(re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", shown, str(a)) for a in (chk.get("args") or []))
         what = "plugin %s%s passes" % (chk.get("script"), (" " + args) if args else "")
     else:
         what = kind
@@ -531,6 +540,20 @@ def _fail_line(fail, knobs, stages):
     elif then is not None:
         pieces.append(_THEN.get(str(then), "then %s" % then))
     return "; ".join(pieces)
+
+
+def _fail_lines(fail, knobs, stages):
+    """The contract lines of one fail case: its own line, then, when it runs a recovery stage, one
+    line per fail case of that recovery stage (the recovery stage has no task, so these lines are
+    the only contract place for them)."""
+    lines = [_fail_line(fail, knobs, stages)]
+    then = fail.get("then")
+    if isinstance(then, dict):
+        rid = str(then.get("run"))
+        for rf in (stages.get(rid) or {}).get("fails") or []:
+            if isinstance(rf, dict):
+                lines.append("%s, in the recovery stage %s: %s" % (fail.get("id"), rid, _fail_line(rf, knobs, {})))
+    return lines
 
 
 def _fit(lines, limit=20):
@@ -585,7 +608,8 @@ def _task_plan(data, rel_runbook):
         if gate:
             inputs.append("the owner approved stage %s" % sid)
         done = [_check_line(c, knobs, sid) for c in (stage.get("checks") or []) if isinstance(c, dict)]
-        fails = [_fail_line(f, knobs, by_id) for f in (stage.get("fails") or []) if isinstance(f, dict)]
+        fails = [line for f in (stage.get("fails") or []) if isinstance(f, dict)
+                 for line in _fail_lines(f, knobs, by_id)]
         retry = stage.get("retry") if isinstance(stage.get("retry"), dict) else None
         if retry:
             for chk in retry.get("stop_on") or []:
@@ -822,6 +846,16 @@ def _shown(who, part):
     return "%s/%s" % (part["stage"], who)
 
 
+#: the owner-only mark a bar puts after a knob name (`(knob P95_MS, owner only)`)
+_OWNER_ONLY = re.compile(r", owner only(?=[;)])")
+
+
+def _bar_same(old, new):
+    """Whether two bars ask the same. The owner-only mark says who may change a knob, not what a
+    check judges, so it is not a bar change (docs/intake.md): it is left out of the compare."""
+    return _OWNER_ONLY.sub("", str(old)) == _OWNER_ONLY.sub("", str(new))
+
+
 def plan(root, conn, spec_path, runbook_path, *, op=None, session="cli", actor=INSTRUMENT):
     """Everything intake would do, and nothing done. Raises IntakeError on a refusal."""
     from alpaca import runbook, taskcontract
@@ -895,12 +929,12 @@ def plan(root, conn, spec_path, runbook_path, *, op=None, session="cli", actor=I
             if any(old.get(c) != new.get(c) for c in _SAME_CELLS):
                 return False
             if "bar" in old:
-                return old["bar"] == new["bar"]
+                return _bar_same(old["bar"], new["bar"])
             recorded = (base_items.get(key) or {}).get("bar")
             if recorded is None:
                 baselined.append(key)
                 return True
-            return recorded == bar
+            return _bar_same(recorded, bar)
 
         def head_of(key):
             entry = base_items.get(key)
