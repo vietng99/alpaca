@@ -345,7 +345,7 @@ def test_a_format_1_project_moves_to_format_2_with_bar_baseline(kit1, capsys):
     kept = {r["key"]: r for r in out["rows"]["kept"]}
     assert {k: r["row"] for k, r in kept.items()} == {k: v["row"] for k, v in items.items()}
     assert kept["SC-001"]["status"] == "discharged"
-    baseline = sorted(w.split()[1] for w in out["warnings"] if w.startswith("BAR-BASELINE "))
+    baseline = sorted(w.split()[1].rstrip(":") for w in out["warnings"] if w.startswith("BAR-BASELINE "))
     assert baseline == ["SC-001", "SC-002", "SC-003", "SC-004"], out["warnings"]
     assert _files_under(kit1["root"]) == before
     assert _stored(kit1["root"], items["SC-001"]["row"])["statement"] == sc1["statement"]
@@ -379,7 +379,7 @@ def test_a_format_1_row_whose_criterion_changed_is_superseded_not_baselined(kit1
     out = _intake(kit1, capsys)
     assert [r["key"] for r in out["rows"]["superseded"]] == ["SC-002"]
     assert out["rows"]["superseded"][0]["old"] == items["SC-002"]["row"]
-    baseline = sorted(w.split()[1] for w in out["warnings"] if w.startswith("BAR-BASELINE "))
+    baseline = sorted(w.split()[1].rstrip(":") for w in out["warnings"] if w.startswith("BAR-BASELINE "))
     assert baseline == ["SC-001", "SC-003", "SC-004"]
 
 
