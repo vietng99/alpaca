@@ -73,11 +73,27 @@ The system SHALL meet success criterion SC-002.
 A redirect answers within 50 ms at the 95th percentile under 200 requests per second.
 ```
 
-One requirement per success criterion (`SC-nnn`) and per functional requirement (`FR-nnn`). An
-OpenSpec scenario whose name starts with a spec-kit id keeps that id: `alpaca runbook check` matches
-`covers: [SC-002]` to it, an `SC` id stays a required item and an `FR` id an optional one, and
-intake keys its row by the id. The scenario body is the criterion text, so the rows intake made
-from the spec-kit spec are kept with their verdicts. The move never writes over an existing file,
+One requirement per success criterion (`SC-nnn`), per edge case (`EC-nnn`) and per functional
+requirement (`FR-nnn`). An edge case moves the same way, with its text as the scenario body:
+
+```
+### Requirement: EC-001
+
+The system SHALL handle edge case EC-001.
+
+#### Scenario: EC-001
+
+A URL longer than 2048 characters is refused with 400.
+```
+
+An OpenSpec scenario whose name starts with a spec-kit id keeps that id: `alpaca runbook check`
+matches `covers: [SC-002]` or `covers: [EC-001]` to it, an `SC` or `EC` id is a required item and an
+`FR` id an optional one, and intake keys its row by the id. The scenario body is the criterion
+text, so the rows intake made from the spec-kit spec, the edge case rows included, are kept (`=`)
+with their verdicts. A runbook of format 1 does not cover edge cases, but after the move an `EC`
+scenario is a required item like any other scenario: move such a runbook to `runbook: 2` and cover
+its edge cases before the move. An edge case written without an `EC-nnn` id is not an item, so it
+does not move; number it first (`EC-UNNUMBERED` in docs/runbook-format.md). The move never writes over an existing file,
 records `moved_from` in the `spec:` block of `project.yaml`, and leaves the spec-kit files as
 history. It happens once: with `moved_from` recorded, a later `--prepare` says "already moved"
 and leaves the moved specs and the block as they are. Two feature folders whose names map to one
@@ -175,6 +191,32 @@ the open op opened last, and refuses when none is open. The op must be open.
    output, one done-bar line per check with its threshold (a `${KNOB}` threshold shows the knob's
    value), and the fail cases from `fails`, `stop_on` and the attempt limit. The contract names the
    stage, and its source names the runbook and the stage index.
+
+   Each fail case is one fail case line. A fail case with only `id` and `when` is
+   `<id>: <when>`. One with a `detect` and a `then` also says how the failure is recognized and
+   what happens then:
+
+   ```
+   import-error: the app package does not import (...); detect (regex-in-file): out/junit.xml
+     matches /ModuleNotFoundError|ImportError|SyntaxError/; then stop: the stage ends FAIL without
+     another attempt
+   ```
+
+   `then: retry` reads "then retry: another attempt through the retry rule of the stage", and
+   `then: ask-owner` "then ask the owner: the stage pauses for a decision". `then: {run: <id>}`
+   names the recovery stage, its command and its checks, since that stage has no task of its own:
+
+   ```
+   port-busy: port 8080 is already taken, ...; detect (regex-in-file): out/load.log matches
+     /Address already in use/; then run the recovery stage free-port: python3 tools/free_port.py
+     8080 --out out/free-port.json, checks free-port/port-free (json-field): out/free-port.json
+     field free == True; after it passes, then this stage runs again as one more attempt, and when
+     it fails this stage ends FAIL
+   ```
+
+   A recovery stage gets no task: it runs only when a fail case sends to it, never on its own, so
+   it is shown in the fail case line of every stage that sends to it. It stays a profile stage
+   (step 4), so a contract or a proof can still name it.
 4. **Profile.** The runbook's stage ids become the project's profile stages, so a contract can
    name one. When `project.yaml` names no profile, intake writes `intake_profile.py` at the project
    root (a `RunbookProfile` that lists the runbooks intake has read) and sets

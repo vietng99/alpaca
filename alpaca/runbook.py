@@ -845,8 +845,10 @@ _EC_BULLET = re.compile(r"^ ?(?:[-*+]|\d{1,9}[.)])\s+(.*\S)\s*$")
 
 #: an OpenSpec scenario whose name starts with a spec-kit id (`#### Scenario: SC-002 ...`) keeps that
 #: id: a runbook `covers: [SC-002]` finds it, and intake keys its row by the id, so a spec that moves
-#: from spec-kit to OpenSpec keeps its rows. SC-nnn stays a required item, FR-nnn an optional one.
-_ALIAS = re.compile(r"^((?:SC|FR)-\d+)\b\s*[:.)-]?\s*(.*)$")
+#: from spec-kit to OpenSpec keeps its rows. SC-nnn and EC-nnn stay required items, FR-nnn an
+#: optional one.
+_ALIAS = re.compile(r"^((?:SC|FR|EC)-\d+)\b\s*[:.)-]?\s*(.*)$")
+_REQUIRED_ALIAS = ("SC-", "EC-")
 _HEADING = re.compile(r"^\s{0,3}#{1,6}\s")
 
 
@@ -889,7 +891,7 @@ def _openspec_items(lines, capability=None):
             removed = section.startswith("REMOVED")
             current = {"id": "%s/%s" % (capability, bare) if capability else bare, "bare": bare,
                        "capability": capability, "kind": alias[:2] if alias else "scenario",
-                       "text": name, "required": not removed and (alias is None or alias.startswith("SC-")),
+                       "text": name, "required": not removed and (alias is None or alias.startswith(_REQUIRED_ALIAS)),
                        "requirement": requirement, "section": section, "line": n, "body": []}
             if alias:
                 current["alias"] = alias

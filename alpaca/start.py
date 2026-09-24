@@ -108,8 +108,8 @@ def capability_name(feature_dir):
 
 def moved_spec_text(spec_path, rel_path):
     """A living OpenSpec spec that says what the spec-kit spec at `spec_path` says: one
-    requirement per SC-nnn and FR-nnn, each with one scenario named by the id and holding the
-    item's text."""
+    requirement per SC-nnn, EC-nnn and FR-nnn, each with one scenario named by the id and holding
+    the item's text."""
     from alpaca import runbook
     spec = runbook.parse_spec(spec_path)
     if spec["format"] != "spec-kit":
@@ -120,16 +120,19 @@ def moved_spec_text(spec_path, rel_path):
     out = ["# %s Specification" % capability_name(os.path.dirname(spec_path)), "",
            "## Purpose", "",
            "%s. Moved from the spec-kit spec %s by alpaca start on %s. Each requirement is one "
-           "success criterion (SC-nnn) or functional requirement (FR-nnn) of that spec, and its "
-           "scenario keeps the id, so the rows alpaca intake made from the spec-kit spec keep their "
-           "keys." % (title.rstrip("."), rel_path, util.now_iso()[:10]), "",
+           "success criterion (SC-nnn), edge case (EC-nnn) or functional requirement (FR-nnn) of "
+           "that spec, and its scenario keeps the id, so the rows alpaca intake made from the "
+           "spec-kit spec keep their keys." % (title.rstrip("."), rel_path, util.now_iso()[:10]), "",
            "## Requirements", ""]
-    order = sorted(spec["items"], key=lambda i: (i["kind"] != "SC", int(i["id"].split("-")[1])))
+    rank = {"SC": 0, "EC": 1, "FR": 2}
+    order = sorted(list(spec["items"]) + list(spec.get("edge_cases") or []),
+                   key=lambda i: (rank.get(i["kind"], 3), int(i["id"].split("-")[1])))
     for item in order:
-        what = "success criterion" if item["kind"] == "SC" else "functional requirement"
+        what = {"SC": "meet success criterion", "EC": "handle edge case"}.get(item["kind"],
+                                                                          "meet functional requirement")
         text = " ".join(str(item["text"]).split()) or item["id"]
         out += ["### Requirement: %s" % item["id"], "",
-                "The system SHALL meet %s %s." % (what, item["id"]), "",
+                "The system SHALL %s %s." % (what, item["id"]), "",
                 "#### Scenario: %s" % item["id"], "", text, ""]
     return "\n".join(out)
 

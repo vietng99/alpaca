@@ -248,7 +248,7 @@ def effective_change(change):
                 bare = "%s/%s" % (name, item["text"])
                 item = dict(item, requirement=name, bare=bare, capability=cap,
                             id="%s/%s" % (cap, bare) if cap else bare,
-                            required=alias is None or alias.startswith("SC-"))
+                            required=alias is None or alias.startswith(runbook._REQUIRED_ALIAS))
                 items.append(item)
     return {"path": change, "format": "openspec", "items": items, "clarifications": 0}
 
@@ -471,8 +471,9 @@ def _intake_tasks(conn, op, runbook_id):
 
 
 # ------------------------------------------------------------------------------ contracts
-def _check_line(chk, knobs, stage_id):
-    ident, kind = chk.get("id"), chk.get("type")
+def _check_what(chk, knobs):
+    """What a check (or the detect of a fail case) asks, in words: `out/load.json field p95 <= 50`."""
+    kind = chk.get("type")
     if kind == "exit-code":
         what = "the command exits %s" % chk.get("expect", 0)
     elif kind == "file-exists":
@@ -492,9 +493,43 @@ def _check_line(chk, knobs, stage_id):
         what = "plugin %s%s passes" % (chk.get("script"), (" " + args) if args else "")
     else:
         what = kind
+    return what
+
+
+def _check_line(chk, knobs, stage_id):
     covers = chk.get("covers") or []
     tail = " (shows %s)" % ", ".join(str(c) for c in covers) if covers else ""
-    return ("%s/%s (%s): %s%s" % (stage_id, ident, kind, what, tail))[:600]
+    return ("%s/%s (%s): %s%s" % (stage_id, chk.get("id"), chk.get("type"), _check_what(chk, knobs), tail))[:600]
+
+
+#: what each `then` of a fail case does, as a task contract says it (docs/runbook-format.md)
+_THEN = {"stop": "then stop: the stage ends FAIL without another attempt",
+         "retry": "then retry: another attempt through the retry rule of the stage",
+         "ask-owner": "then ask the owner: the stage pauses for a decision"}
+
+
+def _fail_line(fail, knobs, stages):
+    """One fail case line of a task contract. A fail case of format 1 (no detect, no then) is
+    `<id>: <when>`. With a detect and a then, the line says how the failure is recognized and what
+    happens then; a then that runs a recovery stage names that stage, its command and its checks,
+    since the recovery stage has no task of its own."""
+    when = " ".join(str(fail.get("when")).split())
+    detect, then = fail.get("detect"), fail.get("then")
+    if not isinstance(detect, dict) and then is None:
+        return "%s: %s" % (fail.get("id"), when)
+    pieces = ["%s: %s" % (fail.get("id"), when.rstrip("."))]
+    if isinstance(detect, dict):
+        pieces.append("detect (%s): %s" % (detect.get("type"), _check_what(detect, knobs)))
+    if isinstance(then, dict):
+        rid = str(then.get("run"))
+        rec = stages.get(rid) or {}
+        checks = ", ".join(_check_line(c, knobs, rid) for c in (rec.get("checks") or []) if isinstance(c, dict))
+        pieces.append("then run the recovery stage %s: %s, checks %s; after it passes, then this stage runs "
+                      "again as one more attempt, and when it fails this stage ends FAIL"
+                      % (rid, " ".join(str(rec.get("run")).split()), checks or "none"))
+    elif then is not None:
+        pieces.append(_THEN.get(str(then), "then %s" % then))
+    return "; ".join(pieces)
 
 
 def _fit(lines, limit=20):
@@ -508,13 +543,19 @@ def _fit(lines, limit=20):
 
 
 def _task_plan(data, rel_runbook):
-    """[(key, title, statement, contract)] for every stage and every owner gate, in run order."""
+    """[(key, title, statement, contract)] for every stage and every owner gate, in run order.
+    A recovery stage (`recovery: true`) gets no task: it runs only when a fail case sends to it,
+    so the fail case line of the stage that sends names it, its command and its checks. It stays
+    a profile stage."""
     from alpaca import runbook
     knobs = runbook.knob_values(data)
     rb_id = data.get("id")
+    by_id = {s.get("id"): s for s in data.get("stages") or [] if isinstance(s, dict)}
     out = []
     for n, stage in enumerate(data.get("stages") or []):
         sid = stage.get("id")
+        if stage.get("recovery") is True:
+            continue
         title = str(stage.get("title") or sid)
         source = "%s stages[%d] (%s)" % (rel_runbook, n, sid)
         gate = stage.get("owner_gate") if isinstance(stage.get("owner_gate"), dict) else None
@@ -543,7 +584,7 @@ def _task_plan(data, rel_runbook):
         if gate:
             inputs.append("the owner approved stage %s" % sid)
         done = [_check_line(c, knobs, sid) for c in (stage.get("checks") or []) if isinstance(c, dict)]
-        fails = ["%s: %s" % (f.get("id"), f.get("when")) for f in (stage.get("fails") or []) if isinstance(f, dict)]
+        fails = [_fail_line(f, knobs, by_id) for f in (stage.get("fails") or []) if isinstance(f, dict)]
         retry = stage.get("retry") if isinstance(stage.get("retry"), dict) else None
         if retry:
             for chk in retry.get("stop_on") or []:

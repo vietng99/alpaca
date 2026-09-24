@@ -277,10 +277,10 @@ Matching ignores case and extra spaces. In a change's delta spec, scenarios unde
 applied, the way `alpaca intake` reads it (`docs/intake.md`): the runbook must cover the whole spec
 after the change, and a delta that does not apply is `SPEC-DELTA`.
 
-A scenario whose name starts with a spec-kit id (`#### Scenario: SC-002` or
-`#### Scenario: SC-002 redirect latency`) keeps that id: `covers: [SC-002]` matches it, an `SC`
-id is a required item and an `FR` id an optional one. This is how a project that moved from
-spec-kit to OpenSpec keeps its runbook (see `docs/intake.md`). Pass a folder (`openspec/specs`, or a change's `specs`
+A scenario whose name starts with a spec-kit id (`#### Scenario: SC-002`,
+`#### Scenario: SC-002 redirect latency` or `#### Scenario: EC-001`) keeps that id:
+`covers: [SC-002]` matches it, an `SC` or `EC` id is a required item and an `FR` id an optional
+one. This is how a project that moved from spec-kit to OpenSpec keeps its runbook (see `docs/intake.md`). Pass a folder (`openspec/specs`, or a change's `specs`
 folder) to read every `<capability>/spec.md` in it; the items are then
 `<capability>/<requirement>/<scenario>`, and the short form `<requirement>/<scenario>` is
 accepted when only one capability has it (`COVERS-AMBIGUOUS` otherwise).
@@ -317,7 +317,9 @@ In format 1 edge cases are not items. An Edge Cases section with bullets gives t
 `EC-IGNORED`, and a `covers` entry that names an `EC-nnn` id is `COVERS-UNKNOWN`.
 
 OpenSpec is the same in both formats: an edge case there is a scenario, and every scenario is
-already required.
+already required. A spec-kit edge case moved to OpenSpec becomes `### Requirement: EC-001` with
+`#### Scenario: EC-001` (its text is the scenario body) and keeps its id, so `covers: [EC-001]`
+still finds it.
 
 **Owner gates cover too.** Some criteria can only be judged by a person (for example "a new
 team member can start the service in under 10 minutes"). Put those in the `covers` list of the
