@@ -42,6 +42,10 @@ bin/alpaca interview set <slot> --answered --value "<the answer>" --source <wher
 - `--waived --reason "<why>"`: the runbook can go without this slot; the reason is required.
 - `--open`: reopen a slot that turned out wrong.
 
+When the operator repeats a number or a default you proposed in their own words, that is
+`--answered`: they stated it. `--default` is only the recommended option picked with nothing
+added.
+
 The source says where the value came from: the note path (`input/notes/<file>.md`) when a note
 says it, `round:<n>/q<n>` for the round and the question that settled it, or `owner` when the
 owner states it outside a round. Keep the operator's words in `--value`, and a number always with
@@ -52,7 +56,9 @@ its unit. A correction is a new `set`; the log is never edited.
 1. `bin/alpaca note list`, then read every note file in full. A new piece the operator gives
    during the interview goes in first: `bin/alpaca note add "<text>"` (or `--file <path>`).
 2. `bin/alpaca interview status` shows each slot, the open ones, and the notes no answer cites.
-3. For each slot a note answers plainly, record it with the note as the source.
+3. For each slot a note answers plainly, record it with the note as the source. When a note
+   answers part of a slot, record what it says and keep the slot's other probes for the rounds:
+   the slot is settled in the log, but it is thin until they are answered (step 2).
 4. Contradictions between notes become questions. When two notes disagree (one says 50 ms, the
    other 100 ms), record neither: ask it in the first round, with both values as options and the
    note each comes from in the option's description.
@@ -78,7 +84,12 @@ its unit. A correction is a new `set`; the log is never edited.
 6. Build the next round from the answers. An answer that opens a new fork gets a question next
    round; an answer that closes an area drops every question queued for it; an answer that
    contradicts an earlier one becomes the next question.
-7. Stop when `bin/alpaca interview status` exits 0: every slot answered, defaulted or waived.
+7. Stop when `bin/alpaca interview status` exits 0 and no slot is thin. Status exits 0 as soon
+   as every slot has a value; before you stop, hold each settled value against its probes in the
+   probe bank. A value that leaves open a probe the runbook needs is thin: `commands` without the
+   build, run, test or measure command; `thresholds` without the load or size the number must
+   hold under; `failures` without how each one is recognized. Ask the missing probes in the next
+   round and record the fuller value with a new `set` (the log keeps both).
 
 ## Step 3: read back and sign off
 
@@ -115,6 +126,12 @@ A change to something that has specs: `/opsx:propose` with it. Carry the slots o
 | `failures` | runbook fail cases, each with `detect` (how it is recognized) and `then` (retry, stop, ask the owner, or run a recovery stage) |
 | `never` | a `stop_on` check in the retry block, or a check with `absent: true` |
 | `owner-gates`, `rollback`, `evidence`, `knobs`, `commands` | the runbook: owner gates, a rollback stage or gate, check paths, knobs and stage commands |
+
+A recovery stage runs with no one to wait for, so it is never an owner gate. When the undo needs
+a person's approval first (a restore that only someone named in `owner-gates` may allow), the
+fail case that recognizes the failure answers `then: ask-owner`, and the restore is a stage with
+an `owner_gate` (in the run order, or in a rollback runbook of its own). Say so in the readback
+when `rollback` and `owner-gates` meet like this.
 
 Then `/alpaca-runbook-forge` writes the runbook in interview mode, with
 `source: interview:<slot>` on every value it takes from a slot, and `/alpaca-from-notes` goes on

@@ -32,7 +32,13 @@ questions, and a question is only asked when neither does.
     the signed slots first, then from the spec and the repository.
   - Step 3: ask only for what the signed slots still lack (a waived slot is not asked again), in
     rounds of up to 4 questions through the interactive question tool, each with 2 to 4 options
-    and the recommended default first; build the next round from the answers.
+    and the recommended default first; build the next round from the answers. Record each answer
+    in the slot it fills, as the interview does:
+    `alpaca interview set <slot> --answered --value "<the answer>" --source round:<n>/q<n>`
+    (number these rounds after the interview's last one), so the signed brief holds every fact
+    the runbook depends on. That makes the sign-off stale: show `alpaca interview readback`, and
+    the operator signs off again (`/alpaca-interview`, step 3) before the runbook takes the
+    answers as `source: interview:<slot>`.
   - Step 4: put `source: interview:<slot>` on each knob, check, fail case and owner gate whose
     value came from a slot (`source: spec:<item id>` when it came from the spec,
     `note:input/notes/<file>` when a raw note states it, `owner:<decision ref>` when the owner
@@ -51,6 +57,9 @@ questions, and a question is only asked when neither does.
   finished runbook.
 - Forging writes a plan. Do not run the stages, and do not run any `alpaca` verb that writes the
   record. The only verb this skill runs is `alpaca runbook check`, which is read-only.
+- Interview mode adds one exception: the answers of the forge's own rounds go into the interview
+  log with `alpaca interview set` (a project file, not the record), and `alpaca interview status`
+  and `alpaca interview readback` show them. The sign-off stays with the operator.
 
 ## Step 1: list what must be covered
 
@@ -151,7 +160,10 @@ Write `runbook.yaml` next to the spec (or in the domain folder), following the f
   least one check, no `needs`, no `owner_gate`, and no other stage lists it in `needs`. It runs
   only when a fail case sends to it; after it passes the failed stage runs again, and that run
   counts as an attempt, so the failed stage needs `retry.max_attempts` of 2 or more. A fail case
-  of a recovery stage never sends to that same stage;
+  of a recovery stage never sends to a recovery stage, itself or another. A recovery stage is
+  never an owner gate: an undo or restore a person must approve first is a fail case with
+  `then: ask-owner` plus a stage with `owner_gate` (in the run order, or in a rollback runbook of
+  its own);
 - `source` on a knob, a check, a fail case and an owner gate when you know where the value comes
   from: `spec:<item id>`, `note:input/notes/<file>`, `interview:<slot id>`, `owner:<decision
   ref>`, or `default` for a default you chose (any other text is a `SOURCE-SHAPE` warning);

@@ -72,7 +72,7 @@ bin/alpaca start input/notes/<stamp>-<sha12>.md [--kit <kit>] --prepare
 
 This installs the kit from the vendored copies (offline) and records the choice. On the first
 change to a spec-kit project it also moves the project to OpenSpec: each `specs/*/spec.md` is
-written as `openspec/specs/<name>/spec.md`, one requirement per `SC-nnn` and `FR-nnn`, each
+written as `openspec/specs/<name>/spec.md`, one requirement per `SC-nnn`, `EC-nnn` and `FR-nnn`, each
 scenario named by its id, so the runbook still covers the same ids and intake keeps every row.
 If Claude Code does not show the new `/speckit-*` or `/opsx:*` commands yet, restart the session
 once.
@@ -82,7 +82,10 @@ once.
 1. `/speckit-specify <the signed brief>`: writes `specs/<NNN-name>/spec.md` with user stories,
    functional requirements (`FR-nnn`) and success criteria (`SC-nnn`). The `done-bar` and
    `thresholds` slots become success criteria, and the `edge-cases` slot becomes edge cases
-   numbered `- **EC-001**: ...`.
+   numbered `- **EC-001**: ...`. spec-kit's own template does not number edge cases (it writes
+   them as questions): that rule is Alpaca's, so number each one yourself in
+   `spec.md` as `- **EC-001**: ...`, `EC-002` and on (never renumber one that has an id).
+   `alpaca runbook check` refuses an edge case bullet with no id (`EC-UNNUMBERED`).
 2. `/speckit-clarify`: answer its questions until no `[NEEDS CLARIFICATION]` marker is left.
    Success criteria must be measurable; a number belongs in the criterion, not in a later chat.
 3. The spec is `specs/<NNN-name>/spec.md`.

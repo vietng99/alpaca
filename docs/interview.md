@@ -148,5 +148,8 @@ The runbook forge (`/alpaca-runbook-forge`) has two modes. Quiet mode is for a c
 no interview, such as a spec a partner sends. Interview mode is for a signed interview: it takes
 thresholds, failures, never, owner gates, rollback, knobs and commands from the signed slots,
 writes `runbook: 2` with `source: interview:<slot>` on each value, writes fail cases with `detect`
-and `then`, and asks only for what the signed slots still lack. `docs/runbook-format.md` is the
+and `then`, and asks only for what the signed slots still lack. It records each answer of its
+own rounds in the slot it fills (`alpaca interview set <slot> --answered --value "<answer>"
+--source round:<n>/q<n>`), so the signed brief holds every fact the runbook uses; the sign-off is
+then stale until the operator reads it back and signs off again. `docs/runbook-format.md` is the
 runbook reference and `docs/intake.md` the rest of the path.
