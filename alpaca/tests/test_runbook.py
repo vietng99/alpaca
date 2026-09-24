@@ -1700,4 +1700,4 @@ def test_format_doc_describes_format_2():
                  "`interview:<slot id>`", "`owner:<decision ref>`", "`default`", "`then`", "`detect`",
                  "## Edge cases", "## Known failures", "## Provenance"):
         assert must in doc, must
-    assert "—" not in doc
+    assert chr(0x2014) not in doc          # no em dash
