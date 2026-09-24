@@ -87,6 +87,8 @@ TABLE: dict[str, dict] = {
                "group": "spec"},
     "start": {"keys": ("verdict", "kit", "mode", "reason", "interview", "steps", "prepared"), "group": "spec"},
     "note": {"keys": ("verdict", "file", "sha256", "bytes", "new", "notes"), "group": "spec"},
+    "interview": {"keys": ("verdict", "progress", "slots", "open", "uncited_notes", "signoff", "buckets",
+                           "file", "log_sha256"), "group": "spec"},
     # knowledge and output
     "sort": {"keys": ("verdict", "sorted", "unsorted"), "group": "knowledge"},
     "wiki": {"keys": ("verdict", "vault", "out"), "group": "knowledge"},
