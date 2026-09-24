@@ -583,3 +583,118 @@ def test_the_docs_describe_recovery_tasks_and_the_edge_case_move():
     assert "### Requirement: EC-001" in intake_doc and "#### Scenario: EC-001" in intake_doc
     assert "an `SC` or `EC` id is a required item" in intake_doc
     assert "an `SC` or `EC` id is a required item" in format_doc
+
+
+# ------------------------------------------------------------------------------ review and trial fixes
+OPENSPEC_EC_NAMED = """# Service Specification
+
+## Purpose
+
+A service.
+
+## Requirements
+
+### Requirement: Startup
+
+The service SHALL start.
+
+#### Scenario: Starts clean
+
+- WHEN started
+- THEN it listens
+
+#### Scenario: EC-001 port taken
+
+- WHEN the port is taken
+- THEN it exits with a clear message
+"""
+
+SVC_RUNBOOK = """runbook: %d
+id: svc
+title: Service
+stages:
+  - id: start
+    run: ./start.sh
+    checks:
+      - id: start-exit
+        type: exit-code
+        covers: ["Startup/Starts clean", "Startup/EC-001 port taken"]
+"""
+
+
+@pytest.mark.parametrize("fmt", [1, 2])
+def test_an_openspec_scenario_named_ec_keeps_its_scenario_row_key(project, capsys, fmt):
+    """OpenSpec is unchanged (design A1): `#### Scenario: EC-001 port taken` under `### Requirement:
+    Startup` keys its row `Startup/EC-001 port taken`, as before format 2, and its criterion keeps
+    the id in the text."""
+    spec = os.path.join(project, "domain", "spec.md")
+    rb = os.path.join(project, "domain", "runbook.yaml")
+    _write(spec, OPENSPEC_EC_NAMED)
+    _write(rb, SVC_RUNBOOK % fmt)
+    _op(capsys)
+    rc, out = _cli(["intake", spec, rb, "--json"], capsys)
+    assert rc == 0, out
+    added = {r["key"]: r for r in out["rows"]["added"]}
+    assert sorted(added) == ["Startup/EC-001 port taken", "Startup/Starts clean"], sorted(added)
+    stored = _stored(project, added["Startup/EC-001 port taken"]["row"])
+    assert stored["statement"].startswith("Startup/EC-001 port taken: EC-001 port taken: ")
+    rc, again = _cli(["intake", spec, rb, "--json"], capsys)
+    assert rc == 0 and again["changed"] is False
+
+
+def test_a_change_adding_an_ec_named_scenario_keeps_its_scenario_key(tmp_path):
+    from alpaca import intake
+    living = tmp_path / "openspec" / "specs" / "svc" / "spec.md"
+    _write(str(living), "# svc\n\n## Requirements\n\n### Requirement: Other\n\nIt SHALL work.\n\n"
+                        "#### Scenario: Works\n\nIt works.\n")
+    delta = tmp_path / "openspec" / "changes" / "add-startup" / "specs" / "svc" / "spec.md"
+    _write(str(tmp_path / "openspec" / "changes" / "add-startup" / "proposal.md"), "# add startup\n")
+    _write(str(delta), "## ADDED Requirements\n\n### Requirement: Startup\n\nIt SHALL start.\n\n"
+                       "#### Scenario: EC-001 port taken\n\nIt exits with a clear message.\n")
+    spec = intake.effective_change(str(tmp_path / "openspec" / "changes" / "add-startup"))
+    keys = sorted(intake.item_key(i) for i in spec["items"])
+    assert keys == ["svc/Other/Works", "svc/Startup/EC-001 port taken"], keys
+
+
+def test_flipping_owner_only_is_not_a_bar_change(kit2, capsys):
+    """owner_only says who may change a knob, not what a check judges: it is not in the list of
+    bar changes (docs/intake.md), so flipping it keeps every row and its verdict."""
+    ids, out = _change_and_intake(kit2, capsys, [("    max: 1000\n    owner_only: true\n",
+                                                  "    max: 1000\n    owner_only: false\n")],
+                                  discharge="SC-002")
+    assert not out["rows"]["superseded"] and not out["rows"]["added"], out["rows"]
+    kept = {r["key"]: r for r in out["rows"]["kept"]}
+    assert kept["SC-002"]["row"] == ids["SC-002"] and kept["SC-002"]["status"] == "discharged"
+    # a threshold change after it still supersedes
+    _edit(kit2["runbook"], "    type: float\n    default: 50\n", "    type: float\n    default: 45\n")
+    out = _intake(kit2, capsys)
+    assert [r["key"] for r in out["rows"]["superseded"]] == ["SC-002"]
+
+
+def test_a_knob_in_plugin_args_shows_its_value_in_the_contract():
+    """A `${KNOB}` in a plugin's args is a threshold like a json-field value: the contract line
+    shows the knob's value next to it, as the bar does."""
+    from alpaca import intake
+    data = _example2()
+    load = [s for s in data["stages"] if s["id"] == "load-test"][0]
+    codes = [c for c in load["checks"] if c["id"] == "redirect-codes"][0]
+    codes["args"] = ["out/load.json", "${P95_LIMIT_MS}"]
+    plan = {key: contract for key, _t, _s, contract in intake._task_plan(data, "domain/runbook.yaml")}
+    line = [l for l in plan["stage:load-test"]["done_bar"] if l.startswith("load-test/redirect-codes ")][0]
+    assert "plugin checks/status_codes.py out/load.json ${P95_LIMIT_MS} (50) passes" in line, line
+
+
+def test_the_fail_cases_of_a_recovery_stage_are_in_the_contract_that_sends_to_it():
+    """A recovery stage has no task, so the fail case line that sends to it also names the
+    recovery stage's own fail cases: nothing in the bar is left out of every contract."""
+    from alpaca import intake
+    data = _example2()
+    free = [s for s in data["stages"] if s["id"] == "free-port"][0]
+    free["fails"] = [{"id": "still-busy", "when": "the port stays taken",
+                      "detect": {"type": "json-field", "path": "out/free-port.json", "field": "free",
+                                 "op": "==", "value": False}, "then": "stop"}]
+    plan = {key: contract for key, _t, _s, contract in intake._task_plan(data, "domain/runbook.yaml")}
+    busy = [l for l in plan["stage:load-test"]["fail_cases"] if l.startswith("port-busy: ")][0]
+    assert "free-port fail case still-busy: the port stays taken" in busy, busy
+    assert "detect (json-field): out/free-port.json field free == False" in busy
+    assert busy.count("then stop: the stage ends FAIL without another attempt") == 1

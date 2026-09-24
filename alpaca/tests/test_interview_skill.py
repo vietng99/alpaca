@@ -129,3 +129,57 @@ def test_the_new_texts_are_plain():
         low = text.lower()
         for word in BANNED:
             assert not re.search(r"\b%s" % word, low), (path, word)
+
+
+# ------------------------------------------------------------------ review and trial fixes (op-003)
+def test_from_notes_names_edge_cases_in_the_move_to_openspec():
+    text = _flat(_read(FROM_NOTES))
+    assert "one requirement per `SC-nnn`, `EC-nnn` and `FR-nnn`" in text
+
+
+def test_from_notes_numbers_the_edge_cases_that_spec_kit_leaves_unnumbered():
+    """spec-kit's own template writes edge cases as unnumbered questions; the numbering rule is
+    Alpaca's, so the skill says to number them and names the error the check gives otherwise."""
+    step = _flat(_read(FROM_NOTES).split("## Step 2a", 1)[1].split("\n## ", 1)[0])
+    assert "does not number" in step and "- **EC-001**: ..." in step and "EC-UNNUMBERED" in step
+
+
+def test_a_rollback_a_person_approves_is_not_a_recovery_stage():
+    """A recovery stage runs with no one to wait for, so it is never an owner gate: a restore
+    that a person must approve first is an ask-owner answer plus a gated stage."""
+    for path in (SKILL, FORGE):
+        text = _flat(_read(path))
+        low = text.lower()
+        assert "never an owner gate" in low, path
+        assert "then: ask-owner" in text and "owner_gate" in text, path
+        part = low.split("never an owner gate", 1)[1][:600] + low.split("never an owner gate", 1)[0][-600:]
+        assert "restore" in part or "undo" in part, path
+
+
+def test_the_forge_records_the_answers_of_its_own_rounds():
+    """The forge's rounds answer what the signed slots lack; each answer goes into the slot it
+    fills, so the brief holds every fact the runbook depends on, and the operator signs again."""
+    text = _flat(_read(FORGE))
+    mode = text.split("Interview mode", 1)[1].split("## Before you start", 1)[0]
+    for must in ("alpaca interview set", "--source round:<n>/q<n>", "alpaca interview readback",
+                 "signs off again"):
+        assert must in mode, must
+    doc = _flat(_read(DOC)).split("## After the sign-off", 1)[1]
+    assert "alpaca interview set" in doc and "signs off again" in doc
+
+
+def test_the_interview_does_not_stop_on_a_thin_slot():
+    """status exits 0 once every slot has a value; a slot is only done when its value answers
+    the probes the runbook needs (commands: build, run, test, measure; thresholds: the load or
+    size the number holds under). A note that answers part of a slot leaves the rest to ask."""
+    text = _flat(_read(SKILL))
+    step2 = text.split("## Step 2: ask in rounds", 1)[1].split("## Step 3", 1)[0]
+    assert "thin" in step2 and "probe" in step2
+    assert "load or size" in step2 and "build, run, test" in step2
+    assert "answers part of a slot" in text
+
+
+def test_a_repeated_proposal_in_the_operators_words_is_an_answer():
+    text = _flat(_read(SKILL))
+    rules = text.split("## How an answer is recorded", 1)[1].split("## Step 1", 1)[0]
+    assert "repeats" in rules and "--answered" in rules.split("repeats", 1)[1][:300]

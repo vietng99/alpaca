@@ -248,3 +248,52 @@ def test_a_broken_project_slot_file_is_blocked(project, capsys, clock):
         fh.write("slots:\n  - fills: no id here\n")
     rc, out = _cli(["interview", "status"], capsys)
     assert rc == 2 and "slots.yaml" in out, out
+
+
+# ------------------------------------------------------------------ review fixes (op-003)
+def _signed(project, capsys, note):
+    _settle_all(capsys, note)
+    rc, out = _cli(["interview", "signoff", "--by", "the operator", "--json"], capsys)
+    assert rc == 0, out
+    return out["file"]
+
+
+def test_a_slot_added_after_the_signoff_makes_it_stale(project, capsys, clock):
+    """The sign-off records the slot list it settled. A slot the map gains later (a project
+    slots.yaml, a product upgrade) is open, so the sign-off no longer holds."""
+    note = _note(capsys, "the notes")
+    signed = _signed(project, capsys, note)
+    text = open(os.path.join(project, signed), encoding="utf-8").read()
+    assert "slots: %s" % " ".join(DEFAULT_SLOTS) in text
+    path = os.path.join(project, "input", "interview", "slots.yaml")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("slots:\n  - id: data-retention\n    fills: how long a stored link is kept\n")
+    rc, st = _cli(["interview", "status", "--json"], capsys)
+    assert rc == 1 and st["open"] == ["data-retention"]
+    assert st["signoff"]["state"] == "stale" and st["interview"] == "stale", st["signoff"]
+    assert "data-retention" in st["signoff"]["why"]
+    rc, text = _cli(["interview", "status"], capsys)
+    assert "sign-off: stale" in text and "data-retention" in text
+    # settling it and signing again gives a sign-off that holds
+    _set(capsys, "data-retention", "answered", "one year", "owner")
+    clock["t"] = "2026-09-24T11:00:00+00:00"
+    rc, new = _cli(["interview", "signoff", "--by", "the operator", "--json"], capsys)
+    assert rc == 0 and new["new"] is True
+    assert _cli(["interview", "status", "--json"], capsys)[1]["signoff"]["state"] == "signed"
+
+
+def test_a_note_added_after_the_signoff_makes_it_stale(project, capsys, clock):
+    """A note kept after the sign-off is new raw input the interview has not seen. Notes that
+    were there at signing and that no answer cites do not change the sign-off."""
+    note = _note(capsys, "the notes")
+    _note(capsys, "a side remark no answer cites")
+    signed = _signed(project, capsys, note)
+    text = open(os.path.join(project, signed), encoding="utf-8").read()
+    assert re.search(r"^notes: \S+\.md \S+\.md$", text, re.M), text
+    rc, st = _cli(["interview", "status", "--json"], capsys)
+    assert rc == 0 and st["signoff"]["state"] == "signed"
+    later = _note(capsys, "second change: add CSV export, must never leak other users' links")
+    rc, st = _cli(["interview", "status", "--json"], capsys)
+    assert st["signoff"]["state"] == "stale" and later in st["signoff"]["why"], st["signoff"]
+    rc, text = _cli(["interview", "status"], capsys)
+    assert "sign-off: stale" in text and later in text

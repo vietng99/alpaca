@@ -203,3 +203,57 @@ def test_a_signed_interview_goes_straight_to_the_spec_and_a_later_change_makes_i
     assert rc == 0 and out["interview"] == "stale"
     assert [s["step"] for s in out["steps"]][:2] == ["note", "interview"]
     assert "stale" in out["steps"][1]["do"]
+
+
+# ------------------------------------------------------------------ review and trial fixes (op-003)
+def test_new_notes_after_a_signoff_go_to_the_inbox_and_the_interview(project, capsys):
+    """Raw notes that are not in the inbox yet are new input: start keeps them and sends them
+    through the interview again, instead of the earlier signed brief."""
+    _signed_interview(project, capsys)
+    new = "second change: add CSV export, must never leak other users' links"
+    rc, out = _cli(["start", new, "--json"], capsys)
+    assert rc == 0, out
+    assert out["interview"] == "stale", out["interview"]
+    assert [s["step"] for s in out["steps"]][:2] == ["note", "interview"]
+    assert out["steps"][0]["command"] == "alpaca note add \"<the notes>\""
+    assert "new notes" in out["steps"][1]["do"]
+    # once kept, the new note alone makes the sign-off stale
+    rc, _ = _cli(["note", "add", new], capsys)
+    rc, out = _cli(["start", new, "--json"], capsys)
+    assert out["interview"] == "stale" and "new notes" in out["steps"][1]["do"]
+
+
+def test_a_note_from_the_inbox_is_not_added_again(project, capsys):
+    rc, note = _cli(["note", "add", NOTES, "--json"], capsys)
+    assert rc == 0, note
+    rc, out = _cli(["start", os.path.join(project, note["file"]), "--json"], capsys)
+    assert rc == 0, out
+    step = out["steps"][0]
+    assert step["step"] == "note" and "note add" not in step["command"], step
+    assert note["file"] in step["do"]
+
+
+def test_the_signed_brief_as_the_notes_keeps_the_signoff(project, capsys):
+    signed = _signed_interview(project, capsys)
+    rc, out = _cli(["start", os.path.join(project, signed), "--json"], capsys)
+    assert rc == 0 and out["interview"] == "signed", out
+    assert [s["step"] for s in out["steps"]][0] == "prepare"
+
+
+def test_a_rerun_with_the_same_notes_keeps_the_first_pick(project, capsys, monkeypatch):
+    """After `start <brief> --prepare` picked spec-kit and the spec was written from the brief, a
+    rerun with the same brief keeps the pick instead of calling it a change to move to OpenSpec."""
+    from alpaca import spec_kits
+    monkeypatch.setattr(spec_kits, "init", lambda root, kit, force=False: None)
+    signed = _signed_interview(project, capsys)
+    brief = os.path.join(project, signed)
+    rc, out = _cli(["start", brief, "--prepare", "--json"], capsys)
+    assert rc == 0 and out["kit"] == "spec-kit" and out["mode"] == "new", out
+    _feature(project)                                  # the spec written from the brief
+    rc, out = _cli(["start", brief, "--json"], capsys)
+    assert rc == 0, out
+    assert (out["kit"], out["mode"]) == ("spec-kit", "new"), out["reason"]
+    assert "started before" in out["reason"] and "specs/001-link-shortener/spec.md" in out["reason"]
+    # other notes are still a change
+    rc, out = _cli(["start", "a new change: add CSV export", "--json"], capsys)
+    assert (out["kit"], out["mode"]) == ("openspec", "change")

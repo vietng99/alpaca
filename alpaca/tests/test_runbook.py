@@ -1701,3 +1701,112 @@ def test_format_doc_describes_format_2():
                  "## Edge cases", "## Known failures", "## Provenance"):
         assert must in doc, must
     assert chr(0x2014) not in doc          # no em dash
+
+
+# ------------------------------------------------------------ review and trial fixes (op-003)
+OPENSPEC_EC_NAMED = """# Service Specification
+
+## Requirements
+
+### Requirement: Startup
+
+The service SHALL start.
+
+#### Scenario: Starts clean
+
+- WHEN started
+- THEN it listens
+
+#### Scenario: EC-001 port taken
+
+- WHEN the port is taken
+- THEN it exits with a clear message
+"""
+
+
+def test_an_openspec_scenario_named_ec_under_its_own_requirement_stays_a_scenario(tmp_path):
+    """OpenSpec is unchanged (design A1): a scenario whose name starts with EC-nnn under a
+    requirement of another name keeps its `<requirement>/<scenario>` key. Only the shape the
+    move to OpenSpec writes (`### Requirement: EC-001` with `#### Scenario: EC-001`) keeps the
+    edge case id."""
+    spec = spec_file(tmp_path, OPENSPEC_EC_NAMED)
+    items = {i["id"]: i for i in runbook.parse_spec(spec)["items"]}
+    item = items["Startup/EC-001 port taken"]
+    assert "alias" not in item and item["kind"] == "scenario" and item["required"] is True
+    for fmt in (1, 2):
+        data = openspec_runbook(["Startup/Starts clean", "Startup/EC-001 port taken"])
+        data["runbook"] = fmt
+        result = runbook.check(write(tmp_path, data), spec_path=spec)
+        assert result["errors"] == [], (fmt, result["errors"])
+        assert sorted(result["coverage"]["covered"]) == ["Startup/EC-001 port taken", "Startup/Starts clean"]
+    # the moved shape keeps the id
+    moved = spec_file(tmp_path, "## Requirements\n\n### Requirement: EC-001\n\nThe system SHALL handle it.\n\n"
+                                "#### Scenario: EC-001\n\nThe port is taken.\n", name="moved.md")
+    assert [(i.get("alias"), i["kind"]) for i in runbook.parse_spec(moved)["items"]] == [("EC-001", "EC")]
+
+
+def test_only_a_fail_case_that_detects_covers(tmp_path):
+    """A fail case covers an item only when it detects the failure and answers it; one with no
+    `detect` is never recognized, so its `covers` is refused and counts for nothing."""
+    spec = spec_file(tmp_path, SPEC_EC)
+    for fail in ({"id": "too-many", "when": "the day holds too many orders", "covers": ["EC-002"]},
+                 {"id": "too-many", "when": "the day holds too many orders", "then": "stop",
+                  "covers": ["EC-002"]}):
+        data = ec_runbook()
+        data["stages"][1]["fails"] = [fail]
+        result = runbook.check(write(tmp_path, data), spec_path=spec)
+        assert result["verdict"] == "FAIL"
+        assert ("COVERS-NO-DETECT", "stages[1].fails[0].covers") in where_codes(result), result["errors"]
+        assert "EC-002" not in result["coverage"]["covered"]
+        assert result["coverage"]["missing"] == ["EC-002"]
+
+
+def test_a_recovery_stage_never_sends_to_another_recovery_stage(tmp_path):
+    """A recovery stage that fails ends the failed stage with FAIL (design A2), so its fail case
+    may not send on to a second recovery stage: two that send to each other would loop."""
+    data = fails2(detect=DETECT, then={"run": "free-port"})
+    data["stages"].append({"id": "kill-port", "recovery": True, "run": "make kill-port",
+                           "checks": [{"id": "port-killed", "type": "exit-code"}]})
+    data["stages"][2]["fails"] = [{"id": "still-busy", "when": "w", "detect": DETECT, "then": {"run": "kill-port"}}]
+    data["stages"][3]["fails"] = [{"id": "kill-failed", "when": "w", "detect": DETECT, "then": {"run": "free-port"}}]
+    result = runbook.check(write(tmp_path, data))
+    assert where_codes(result) == {("RECOVERY-CHAIN", "stages[2].fails[0].then.run"),
+                                   ("RECOVERY-CHAIN", "stages[3].fails[0].then.run")}, result["errors"]
+
+
+def test_respond_on_a_recovery_stage_never_runs_another_recovery_stage():
+    data, _stage = respond_data({"run": "free-port"})
+    rec_a = {"id": "rec-a", "recovery": True, "run": "a", "checks": [{"id": "a-exit", "type": "exit-code"}],
+             "retry": {"max_attempts": 3},
+             "fails": [{"id": "a-bad", "when": "w", "detect": {"type": "exit-code", "expect": 1},
+                        "then": {"run": "rec-b"}}]}
+    step = runbook.respond(data, rec_a, {"a-exit": F}, 1, {}, {"a-bad": P})
+    assert (step["run"], step["end"], step["fail"]) == (None, F, "a-bad"), step
+    assert "recovery stage" in step["reason"]
+
+
+@pytest.mark.parametrize("retry", [None, {"max_attempts": 1}])
+def test_a_fail_case_that_runs_a_recovery_stage_needs_an_attempt_left(tmp_path, retry):
+    """After the recovery stage passes, the failed stage runs again as one more attempt; with one
+    attempt the recovery stage could never run, and the check says so before any run."""
+    data = fails2(detect=DETECT, then={"run": "free-port"})
+    if retry is None:
+        del data["stages"][1]["retry"]
+    else:
+        data["stages"][1]["retry"] = retry
+    result = runbook.check(write(tmp_path, data))
+    assert where_codes(result) == {("RECOVERY-NO-ATTEMPT", "stages[1].fails[0].then.run")}, result["errors"]
+    msg = result["errors"][0]["message"]
+    assert "max_attempts" in msg and "free-port" in msg
+
+
+def test_fr_uncovered_names_edge_cases_in_format_2(tmp_path):
+    text = SPEC_EC + "\n## Requirements\n\n- **FR-001**: The job reads the orders table.\n"
+    spec = spec_file(tmp_path, text)
+    result = runbook.check(write(tmp_path, ec_runbook()), spec_path=spec)
+    fr = [w for w in result["warnings"] if w["code"] == "FR-UNCOVERED"]
+    assert len(fr) == 1 and "only success criteria and edge cases must be covered" in fr[0]["message"]
+    data = minimal()
+    result = runbook.check(write(tmp_path, data), spec_path=spec)
+    fr = [w for w in result["warnings"] if w["code"] == "FR-UNCOVERED"]
+    assert len(fr) == 1 and "only success criteria must be covered" in fr[0]["message"]

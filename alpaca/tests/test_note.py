@@ -154,3 +154,14 @@ def test_list_shows_the_notes_in_time_order_with_their_first_line(project, capsy
 def test_list_with_no_notes(project, capsys):
     rc, out = _cli(["note", "list", "--json"], capsys)
     assert rc == 0 and out["notes"] == []
+
+
+def test_adding_a_note_file_again_finds_the_note(project, capsys, clock):
+    """`alpaca note add --file input/notes/<note>.md` (a kept note, front matter and all) is the
+    note already kept: `already have`, and no note that wraps a note."""
+    rc, first = _cli(["note", "add", "raw idea: a link shortener", "--json"], capsys)
+    assert rc == 0, first
+    rc, again = _cli(["note", "add", "--file", os.path.join(project, first["file"]), "--json"], capsys)
+    assert rc == 0, again
+    assert again["new"] is False and again["file"] == first["file"]
+    assert len(_notes(project)) == 1
