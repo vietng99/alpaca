@@ -307,6 +307,36 @@ def test_pure_owner_gate_stage_is_valid(tmp_path):
     assert result["errors"] == []
 
 
+@pytest.mark.parametrize("checks", [
+    [{"id": "wall", "type": "json-field", "path": "out/bench.json", "field": "wall_seconds",
+      "op": "<", "value": 600, "covers": ["SC-002"]}],
+    [],
+])
+def test_owner_gate_stage_without_run_may_not_carry_checks(tmp_path, checks):
+    # A gate-only stage runs nothing, so intake makes it an approval task only: a check there
+    # would be in no task contract and never judged, while its `covers` still counted.
+    data = minimal()
+    data["stages"][1]["checks"][0]["covers"] = []
+    data["stages"].append({"id": "bench", "needs": ["load"], "checks": checks,
+                           "owner_gate": {"approve": "the owner reads the benchmark"}})
+    result = runbook.check(write(tmp_path, data))
+    assert [(e["code"], e["where"]) for e in result["errors"]] == [("CHECKS-WITHOUT-RUN", "stages[2].checks")]
+    assert "run" in result["errors"][0]["message"]
+    assert result["verdict"] == "FAIL"
+
+
+def test_stage_ranges_are_named_once(tmp_path, monkeypatch):
+    """The ranges the checker enforces are module constants that the kit schema reads too."""
+    assert runbook.EXPECT_RANGE == (0, 255)
+    assert runbook.PLUGIN_TIMEOUT_RANGE == (1, 24 * 3600)
+    assert runbook.STAGE_TIMEOUT_RANGE == (1, 7 * 24 * 3600)
+    monkeypatch.setattr(runbook, "STAGE_TIMEOUT_RANGE", (1, 99))
+    data = minimal()
+    data["stages"][0]["timeout"] = 100
+    got = {(e["code"], e["where"]) for e in runbook.check(write(tmp_path, data))["errors"]}
+    assert got == {("RANGE", "stages[0].timeout")}
+
+
 def test_owner_gate_needs_approve_text(tmp_path):
     data = minimal()
     data["stages"].append({"id": "ship", "owner_gate": {"evidence": ["out/x"]}})

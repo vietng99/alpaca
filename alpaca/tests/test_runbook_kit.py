@@ -222,6 +222,20 @@ def test_checker_usage_error_is_64(alone):
     assert proc.returncode == verdict.USAGE
 
 
+@pytest.mark.parametrize("args", [[], ["example/runbook.yaml", "--bogus"]])
+def test_checker_usage_error_shows_the_usage_line_first(alone, args):
+    # a partner reads the usage line; the HARNESS-ERROR line stays last, as in the product
+    proc = kit_run(alone, args, cwd=alone)
+    lines = proc.stderr.strip().splitlines()
+    assert lines[0].startswith("usage: check_runbook.py"), proc.stderr
+    assert lines[-1].startswith("HARNESS-ERROR check_runbook [USAGE]:"), proc.stderr
+
+
+def test_readme_says_help_exits_64(built):
+    text = _read(built, "README.md")
+    assert re.search(r"`--help`[^.]*64", text), "README.md does not say --help exits 64"
+
+
 def test_checker_matches_the_product_on_the_example_and_templates(alone, tmp_path):
     cases = [
         (os.path.join(EXAMPLE, "runbook.yaml"), None, False),
@@ -517,7 +531,7 @@ def test_checker_matches_the_product_on_the_extra_fixtures(alone, tmp_path, capt
 #: codes a JSON Schema states in every case the checker reports them
 SCHEMA_ALWAYS = {"FIELD-MISSING", "FIELD-UNKNOWN", "FIELD-EMPTY", "FIELD-TYPE", "FIELD-NOT-LIST",
                  "VERSION-UNSUPPORTED", "ID-INVALID", "RUN-MISSING", "CHECKS-EMPTY",
-                 "CHECK-TYPE-UNKNOWN", "OP-UNKNOWN", "PLUGIN-SCRIPT-VARIABLE", "KNOB-TYPE-UNKNOWN"}
+                 "CHECKS-WITHOUT-RUN", "CHECK-TYPE-UNKNOWN", "OP-UNKNOWN", "PLUGIN-SCRIPT-VARIABLE", "KNOB-TYPE-UNKNOWN"}
 #: codes a JSON Schema states in some cases only (a number that must lie between two other
 #: fields, a path that climbs out after normalising, a threshold that names a text knob)
 SCHEMA_SOME = {"RANGE", "PATH-ESCAPES", "VALUE-NOT-NUMBER", "KNOB-DEFAULT-TYPE", "KNOB-DEFAULT-RANGE"}
@@ -779,6 +793,57 @@ def test_readme_tells_the_partner_what_to_send_back(built):
         assert must in text, must
 
 
+def test_readme_commands_work_from_a_runbook_in_a_subfolder(built):
+    """The runbook may live below the repository root, so no command or schema line may assume
+    the kit folder sits next to it."""
+    text = _read(built, "README.md")
+    assert "python3 %s/check_runbook.py" % KIT_NAME not in text
+    assert "$schema=%s/" % KIT_NAME not in text
+    assert "python3 <kit>/check_runbook.py runbook.yaml --spec spec.md" in text
+    assert "../%s/check_runbook.py" % KIT_NAME in text
+
+
+def test_agents_md_names_the_kit_folder_without_this_file(built):
+    # the skill copy lives in .claude/skills/, where "the folder that holds this file" is wrong
+    for rel in ("AGENTS.md", ".claude/skills/runbook-forge/SKILL.md"):
+        text = _read(built, rel)
+        assert "and this file" not in text, rel
+        assert "`<kit>` is the kit folder, named `%s`" % KIT_NAME in text, rel
+
+
+def test_agents_md_writes_a_gate_only_stage_without_checks(built):
+    text = " ".join(_read(built, "AGENTS.md").split())
+    assert "a stage that is only an owner gate has `owner_gate` and no `run` and no `checks`" in text
+    assert "`CHECKS-WITHOUT-RUN`" in text
+
+
+def test_agents_md_says_which_source_of_a_value_wins(built):
+    text = " ".join(_read(built, "AGENTS.md").split())
+    for must in ("the spec first, then the person's answers",
+                 "Never choose a threshold yourself",
+                 "`# default chosen by the agent: <why>`",
+                 "on every value you choose"):
+        assert must in text, must
+    # the Never list agrees with the intro: a threshold is asked for, or left to an owner gate
+    never = text.split("## Never", 1)[1]
+    assert "owner gate" in never.split("Never invent a threshold", 1)[1].split("- Never", 1)[0]
+
+
+def test_format_says_a_gate_only_stage_has_no_checks(built):
+    text = " ".join(_read(built, "FORMAT.md").split())
+    assert "`CHECKS-WITHOUT-RUN` | a stage without `run` lists `checks`" in text
+    assert "A stage may be only a gate (no `run`, no `checks`)" in text
+
+
+def test_intake_doc_says_to_copy_a_partner_delivery_into_the_project():
+    with open(os.path.join(REPO, "docs", "intake.md"), encoding="utf-8") as fh:
+        text = " ".join(fh.read().split())
+    assert "A runbook a partner sends" in text and "copy the delivered folder into the project" in text
+    with open(os.path.join(REPO, "docs", "runbook-format.md"), encoding="utf-8") as fh:
+        doc = " ".join(fh.read().split())
+    assert "copy the delivered folder into the project" in doc
+
+
 BANNED = ("robust", "seamless", "leverage", "comprehensive", "ensure", "crucial", "utilize")
 
 
@@ -905,6 +970,39 @@ def test_build_stops_when_the_skill_no_longer_fits_the_rules(tmp_path):
     with pytest.raises(kit.KitError) as err:
         kit.build(str(root), str(tmp_path / "out"))
     assert "SKILL.md" in str(err.value)
+
+
+def test_build_stops_when_the_example_names_a_product_only_path(tmp_path):
+    kit = _kit_module()
+    root = _copy_sources(tmp_path)
+    spec = root / "templates" / "runbook-example" / "spec.md"
+    spec.write_text(spec.read_text(encoding="utf-8") + "\nSee contracts/README.md.\n", encoding="utf-8")
+    with pytest.raises(kit.KitError) as err:
+        kit.build(str(root), str(tmp_path / "out"))
+    assert "example/spec.md" in str(err.value) and "contracts/" in str(err.value)
+
+
+def test_example_names_product_paths_only_where_it_names_the_kit_too(built):
+    kit = _kit_module()
+    for rel, allowed in kit.EXAMPLE_ALLOW.items():
+        text = _read(built, rel)
+        for phrase in allowed:
+            assert phrase in text, (rel, phrase)
+            assert "partner" in text, rel
+
+
+def test_schema_ranges_come_from_the_checker(monkeypatch):
+    kit = _kit_module()
+    monkeypatch.setattr(runbook, "EXPECT_RANGE", (0, 7))
+    monkeypatch.setattr(runbook, "PLUGIN_TIMEOUT_RANGE", (2, 8))
+    monkeypatch.setattr(runbook, "STAGE_TIMEOUT_RANGE", (3, 9))
+    defs = kit.schema()["$defs"]
+    got = [(defs["check_exit_code"]["properties"]["expect"]["minimum"],
+            defs["check_exit_code"]["properties"]["expect"]["maximum"]),
+           (defs["check_plugin"]["properties"]["timeout"]["minimum"],
+            defs["check_plugin"]["properties"]["timeout"]["maximum"]),
+           (defs["stage"]["properties"]["timeout"]["minimum"], defs["stage"]["properties"]["timeout"]["maximum"])]
+    assert got == [(0, 7), (2, 8), (3, 9)]
 
 
 def test_build_stops_when_carried_code_needs_a_name_it_does_not_carry(tmp_path):
