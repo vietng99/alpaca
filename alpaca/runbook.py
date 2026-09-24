@@ -95,7 +95,8 @@ ERROR_CODES = (
     "COVERS-AMBIGUOUS", "SPEC-DELTA",
     # format 2
     "EC-UNNUMBERED", "THEN-MISSING", "THEN-UNKNOWN", "RECOVERY-UNKNOWN", "RECOVERY-NOT-MARKED",
-    "RECOVERY-NEEDED", "RECOVERY-SELF", "DETECT-INVALID",
+    "RECOVERY-NEEDED", "RECOVERY-SELF", "RECOVERY-CHAIN", "RECOVERY-NO-ATTEMPT", "DETECT-INVALID",
+    "COVERS-NO-DETECT",
 )
 WARNING_CODES = ("FR-UNCOVERED", "SPEC-CLARIFY", "COVERS-WITHOUT-SPEC", "SPEC-UNPARSED",
                  "EC-IGNORED", "SOURCE-SHAPE", "SOURCE-MISSING")
@@ -566,8 +567,13 @@ class _Checker:
             self.text(fail, "when", at)
             if self.fmt < 2:
                 continue
-            self.items(fail, "covers", at)
+            covers = self.items(fail, "covers", at)
             self.source(fail, at)
+            if covers and not isinstance(fail.get("detect"), dict):
+                self.r.error("COVERS-NO-DETECT", at + ".covers", "only a fail case that detects the failure "
+                             "and answers it covers a spec item; this one has no `detect`, so it is never "
+                             "recognized. Give it `detect` and `then`, or list %s in the `covers` of the check "
+                             "that shows it" % ", ".join(str(c) for c in covers))
             if "detect" in fail:
                 self.detect(fail["detect"], at + ".detect")
                 if "then" not in fail:
@@ -608,6 +614,20 @@ class _Checker:
             elif target == stage.get("id"):
                 self.r.error("RECOVERY-SELF", at + ".run", "recovery stage `%s` would send its own failure "
                              "back to itself" % target)
+            elif stage.get("recovery") is True:
+                self.r.error("RECOVERY-CHAIN", at + ".run", "recovery stage `%s` sends its failure on to "
+                             "recovery stage `%s`; a recovery stage that fails ends the failed stage with "
+                             "FAIL, so its fail cases answer retry, stop or ask-owner"
+                             % (stage.get("id"), target))
+            else:
+                retry = stage.get("retry")
+                limit = retry.get("max_attempts", 1) if isinstance(retry, dict) else 1
+                if isinstance(limit, int) and not isinstance(limit, bool) and limit < 2:
+                    self.r.error("RECOVERY-NO-ATTEMPT", at + ".run", "after recovery stage `%s` passes, stage "
+                                 "`%s` runs again as one more attempt, and it has %s; give it "
+                                 "`retry.max_attempts` of 2 or more, or recovery stage `%s` never runs"
+                                 % (target, stage.get("id"), "no `retry` block (one attempt)"
+                                    if not isinstance(retry, dict) else "`max_attempts: %d`" % limit, target))
             return
         self.r.error("THEN-UNKNOWN", at, "`then` is retry, stop, ask-owner or {run: <recovery stage id>}, "
                      "found %r" % (then,))
@@ -847,7 +867,7 @@ _EC_BULLET = re.compile(r"^ ?(?:[-*+]|\d{1,9}[.)])\s+(.*\S)\s*$")
 #: an OpenSpec scenario whose name starts with a spec-kit id (`#### Scenario: SC-002 ...`) keeps that
 #: id: a runbook `covers: [SC-002]` finds it, and intake keys its row by the id, so a spec that moves
 #: from spec-kit to OpenSpec keeps its rows. SC-nnn and EC-nnn stay required items, FR-nnn an
-#: optional one.
+#: optional one. An EC-nnn id is kept only in the shape the move writes (openspec_alias).
 _ALIAS = re.compile(r"^((?:SC|FR|EC)-\d+)\b\s*[:.)-]?\s*(.*)$")
 _REQUIRED_ALIAS = ("SC-", "EC-")
 _HEADING = re.compile(r"^\s{0,3}#{1,6}\s")
@@ -859,6 +879,19 @@ def scenario_alias(name):
     if m:
         return m.group(1), m.group(2).strip()
     return None, name.strip()
+
+
+def openspec_alias(requirement, name):
+    """The spec-kit id an OpenSpec scenario named `name` under `requirement` keeps, or None. An
+    SC-nnn or FR-nnn at the start of the name is kept under any requirement. An EC-nnn is kept only
+    in the shape the move from spec-kit writes, a requirement named by that same id (`### Requirement:
+    EC-001` with `#### Scenario: EC-001`): OpenSpec reads the same in both formats, so a scenario
+    that only starts with an EC id (`#### Scenario: EC-001 port taken` under `### Requirement:
+    Startup`) stays the scenario `Startup/EC-001 port taken`."""
+    alias, _rest = scenario_alias(name)
+    if alias and alias.startswith("EC-") and _norm(str(requirement or "")) != _norm(alias):
+        return None
+    return alias
 
 
 def _openspec_items(lines, capability=None):
@@ -888,7 +921,7 @@ def _openspec_items(lines, capability=None):
             name = re.sub(r"[ \t]+#+[ \t]*$", "", m.group(1))
             name = re.sub(r"^Scenario:\s*", "", name, flags=re.I).strip()
             bare = "%s/%s" % (requirement, name)
-            alias, _rest = scenario_alias(name)
+            alias = openspec_alias(requirement, name)
             removed = section.startswith("REMOVED")
             current = {"id": "%s/%s" % (capability, bare) if capability else bare, "bare": bare,
                        "capability": capability, "kind": alias[:2] if alias else "scenario",
@@ -1051,7 +1084,8 @@ def _covering(data):
                         out.append((entry, str(chk.get("id")), "stages[%d].checks[%d].covers[%d]" % (n, c, k)))
         fails = stage.get("fails") if fmt >= 2 and isinstance(stage.get("fails"), list) else []
         for f, fail in enumerate(fails):
-            if isinstance(fail, dict) and isinstance(fail.get("covers"), list):
+            # only a fail case that detects the failure covers (COVERS-NO-DETECT otherwise)
+            if isinstance(fail, dict) and isinstance(fail.get("covers"), list) and isinstance(fail.get("detect"), dict):
                 for k, entry in enumerate(fail["covers"]):
                     if isinstance(entry, str) and entry.strip():
                         out.append((entry, "fail:%s/%s" % (stage.get("id"), fail.get("id")),
@@ -1113,7 +1147,7 @@ def coverage(data, spec, report):
     for item in items:
         if not item["required"] and item["kind"] == "FR" and item["id"] not in covered:
             report.warn("FR-UNCOVERED", item["id"], "no check covers %s (a warning: only success criteria "
-                        "must be covered)" % item["id"])
+                        "%smust be covered)" % (item["id"], "and edge cases " if fmt >= 2 else ""))
     for item in items:
         if item.get("loose"):
             report.warn("SPEC-UNPARSED", item["id"], "%s appears at line %d of %s in a shape this reader "
@@ -1471,7 +1505,9 @@ def respond(data, stage, results, attempt, knobs, detected):
     attempts and its knob range, but not its on_fail (the fail case names this failure as one a
     new attempt may fix); `{run: <id>}` returns the recovery stage, unless a stop_on check failed
     or no attempt is left for the rerun that follows it (the rerun counts as an attempt of this
-    stage). With no fail case recognized, the retry rule decides exactly as next_attempt does."""
+    stage); on a recovery stage it ends FAIL, since a recovery stage that fails ends the failed
+    stage with FAIL. With no fail case recognized, the retry rule decides exactly as next_attempt
+    does."""
     retry = stage.get("retry") or {}
     failing = not all(code == verdict.PASS for code in results.values())
     for fail in (stage.get("fails") or []) if failing else []:
@@ -1489,6 +1525,11 @@ def respond(data, stage, results, attempt, knobs, detected):
             step = next_attempt(data, dict(stage, retry=dict(retry, on_fail=None)), results, attempt, knobs)
             return dict(step, reason="%s; %s" % (why, step["reason"]), run=None,
                         end=_step_end(results, step), fail=ident)
+        if isinstance(then, dict) and isinstance(then.get("run"), str) and stage.get("recovery") is True:
+            return {"retry": False, "knobs": dict(knobs), "reason": "%s, but %s is a recovery stage: a "
+                    "recovery stage that fails ends the failed stage with FAIL and never runs another "
+                    "recovery stage (%s)" % (why, stage.get("id"), then["run"]),
+                    "run": None, "end": verdict.FAIL, "fail": ident}
         if isinstance(then, dict) and isinstance(then.get("run"), str):
             limit = retry.get("max_attempts", 1)
             stopped = [c for c, code in results.items() if code == verdict.FAIL and c in (retry.get("stop_on") or [])]

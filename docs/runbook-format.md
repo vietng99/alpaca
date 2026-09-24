@@ -319,7 +319,9 @@ In format 1 edge cases are not items. An Edge Cases section with bullets gives t
 OpenSpec is the same in both formats: an edge case there is a scenario, and every scenario is
 already required. A spec-kit edge case moved to OpenSpec becomes `### Requirement: EC-001` with
 `#### Scenario: EC-001` (its text is the scenario body) and keeps its id, so `covers: [EC-001]`
-still finds it.
+still finds it. Only that shape keeps an `EC-nnn` id: a scenario whose name merely starts with
+one under a requirement of another name (`#### Scenario: EC-001 port taken` under
+`### Requirement: Startup`) stays the scenario `Startup/EC-001 port taken`.
 
 **Owner gates cover too.** Some criteria can only be judged by a person (for example "a new
 team member can start the service in under 10 minutes"). Put those in the `covers` list of the
@@ -327,7 +329,9 @@ owner gate that judges them. Coverage then shows `gate:<stage id>` as the one co
 
 **Fail cases cover too (format 2).** A fail case that detects a failure and answers it shows
 how the runbook handles that situation. Put the items it shows in its `covers` list; coverage
-then shows `fail:<stage>/<fail id>` as the one covering it.
+then shows `fail:<stage>/<fail id>` as the one covering it. Only a fail case with a `detect`
+covers: one without is never recognized, so a `covers` list there is an error
+(`COVERS-NO-DETECT`) and counts for nothing.
 
 A `covers` entry that names nothing in the spec is an error (`COVERS-UNKNOWN`, with the closest
 item named). A spec with no success criterion and no scenario is refused (`SPEC-EMPTY`): an
@@ -395,8 +399,9 @@ What each answer does:
 - `ask-owner`: the stage ends with PAUSED-FOR-DECISION; a person decides what happens next.
 - `{run: <stage id>}`: the recovery stage named there runs. After it passes, the failed stage
   runs again, and that run counts as an attempt of the failed stage, so it needs an attempt left
-  (`retry.max_attempts` of 2 or more). A recovery stage that fails ends the failed stage with
-  FAIL. A check listed in `stop_on` that failed still stops the stage: it never runs again,
+  (`retry.max_attempts` of 2 or more; with one attempt the recovery stage could never run, and the
+  check refuses it with `RECOVERY-NO-ATTEMPT`). A recovery stage that fails ends the failed stage
+  with FAIL. A check listed in `stop_on` that failed still stops the stage: it never runs again,
   recovered or not.
 
 After an attempt that did not pass, the first fail case in file order whose `detect` passed
@@ -421,7 +426,11 @@ A recovery stage is a stage with `recovery: true`. It follows the stage rules, a
 - no stage lists it in `needs`, and it has no `needs` itself (`RECOVERY-NEEDED`);
 - `then: {run: <id>}` names a stage of the runbook (`RECOVERY-UNKNOWN`) that has
   `recovery: true` (`RECOVERY-NOT-MARKED`), and a fail case of a recovery stage may not send to
-  that same stage (`RECOVERY-SELF`).
+  that same stage (`RECOVERY-SELF`) or to another recovery stage (`RECOVERY-CHAIN`): a recovery
+  stage that fails ends the failed stage with FAIL, so its own fail cases answer `retry`, `stop`
+  or `ask-owner`;
+- the stage whose fail case sends to it has `retry.max_attempts` of 2 or more
+  (`RECOVERY-NO-ATTEMPT`), since the rerun after the recovery is one of its attempts.
 
 It may be declared anywhere in the file; a comment next to it helps the person who reads the
 run order. From the worked example:
@@ -545,7 +554,10 @@ Every error is reported at once, one per line: `ERROR <code> <where>: <message>`
 | `RECOVERY-NOT-MARKED` | `then: {run: ...}` names a stage without `recovery: true` |
 | `RECOVERY-NEEDED` | a stage `needs` a recovery stage, or a recovery stage has `needs` |
 | `RECOVERY-SELF` | a fail case of a recovery stage sends to that same stage |
+| `RECOVERY-CHAIN` | a fail case of a recovery stage sends to another recovery stage |
+| `RECOVERY-NO-ATTEMPT` | a fail case sends to a recovery stage from a stage with one attempt (no `retry`, or `max_attempts: 1`) |
 | `DETECT-INVALID` | a `detect` breaks a check rule; the message names the rule |
+| `COVERS-NO-DETECT` | a fail case without `detect` lists `covers`; only a fail case that detects covers |
 
 Warnings (`WARN <code> <where>: <message>`) do not change the verdict: `FR-UNCOVERED`,
 `SPEC-CLARIFY`, `COVERS-WITHOUT-SPEC`, `SPEC-UNPARSED` (an id found outside the known item
