@@ -11,7 +11,7 @@ raw notes -> spec (spec-kit or OpenSpec) -> runbook -> intake (rows, task contra
 ```
 
 The spec says what must hold. The runbook says how each part of that is shown, and it links
-every success criterion or scenario of the spec to at least one check. Intake reads the runbook
+every success criterion, edge case or scenario of the spec to at least one check. Intake reads the runbook
 and turns it into checklist rows and task contracts.
 
 `alpaca runbook check <file> [--spec <path>]` reads a runbook, refuses a malformed one with a
@@ -20,8 +20,9 @@ no check. The skill `/alpaca-runbook-forge` (`.claude/skills/alpaca-runbook-forg
 the person only for what the spec leaves out.
 
 A worked example lives in `templates/runbook-example/`: a spec-kit spec for a small link
-shortener service (`spec.md`), its runbook (`runbook.yaml`) and one plugin check
-(`checks/status_codes.py`). `alpaca runbook check templates/runbook-example/runbook.yaml` passes
+shortener service with numbered edge cases (`spec.md`), its format 2 runbook (`runbook.yaml`),
+with a fail case that recognizes a busy port and sends to a recovery stage, and one plugin
+check (`checks/status_codes.py`). `alpaca runbook check templates/runbook-example/runbook.yaml` passes
 on it.
 
 ## Why one YAML file
@@ -41,11 +42,28 @@ A runbook is one `runbook.yaml` file.
 Write the file in UTF-8. Keep a bare `on`, `off`, `yes` or `no` out of key position: YAML reads
 such a key as true or false (the check reports it and names the field you meant).
 
+## Format 1 and format 2
+
+`runbook: 2` is the current format. It adds three things to format 1:
+
+- numbered edge cases: the `EC-nnn` items of a spec-kit spec are items the runbook must cover
+  (see "Edge cases");
+- known failures with a detection and a response: `detect` and `then` on a fail case, and
+  recovery stages (`recovery: true`) that a fail case sends to (see "Known failures");
+- provenance: a `source` on a knob, a check, a fail case and an owner gate (see "Provenance").
+
+A `runbook: 1` file is still read, and checked as it always was: the fields above are
+`FIELD-UNKNOWN` in it, an `EC-nnn` id is not an item, and a spec-kit spec whose Edge Cases
+section lists bullets gives one warning, `EC-IGNORED` ("format 1 does not cover edge cases;
+move to runbook: 2"). To move a runbook to format 2, write `runbook: 2`, number the edge cases
+in the spec (`- **EC-001**: ...`) and cover each one. Any other `runbook:` value is refused
+(`VERSION-UNSUPPORTED`).
+
 ## Top level
 
 | field | required | meaning |
 |---|---|---|
-| `runbook` | yes | the format version; write `runbook: 1` |
+| `runbook` | yes | the format version; write `runbook: 2` (a `runbook: 1` file is still read, see "Format 1 and format 2") |
 | `id` | yes | a short name: lower-case letters, digits, `.`, `_`, `-` |
 | `title` | yes | one line a person reads |
 | `description` | no | what this runbook runs and why |
@@ -76,6 +94,7 @@ move it; a check may use it as its threshold.
 | `max` | no | highest allowed value (`int` and `float` only) |
 | `values` | for `enum` | the allowed values |
 | `owner_only` | no | `true` when only the owner may change it; a retry may not move it |
+| `source` | no | where the value comes from (format 2, see "Provenance") |
 
 A threshold that comes from the spec (a latency bar, a clock target) is a good `owner_only` knob:
 the runbook states it once, a check compares against it, and no retry can loosen it.
@@ -96,15 +115,17 @@ the runbook states it once, a check compares against it, and no retry can loosen
 | `outputs` | no | what the stage writes: a path, or a mapping with `path` and `what` |
 | `checks` | yes when `run` is set; not allowed without `run` | the pass checks; a stage that runs a command needs at least one, and a stage without `run` has none |
 | `retry` | no | the retry rule (below); without it a stage runs once |
-| `fails` | no | known ways the stage fails: mappings with `id` and `when` |
+| `fails` | no | known ways the stage fails: mappings with `id` and `when`, and in format 2 `detect`, `then`, `covers` and `source` (see "Known failures") |
 | `owner_gate` | no | a step only a person may approve (below) |
+| `recovery` | no | `true` for a recovery stage (format 2): it runs only when a fail case sends to it (see "Known failures") |
 
 A stage passes when every one of its checks passes. `needs` names only earlier stages, so the
 order of the file is a valid run order and a cycle cannot be written.
 
 An output mapping takes `path` (required) and `what` (a short description). A known failure
 takes `id` and `when`, for example `{id: port-busy, when: "port 8080 is already taken"}`;
-intake copies these into the task contract's fail cases.
+intake copies these into the task contract's fail cases. In format 2 it can also say how the
+failure is recognized and what to do then (see "Known failures").
 
 ### Variables
 
@@ -130,6 +151,7 @@ Every check has these fields:
 | `type` | yes | one of the check types below |
 | `description` | no | what it shows |
 | `covers` | no | the spec items this check shows (see "Linking checks to the spec") |
+| `source` | no | where the check and its threshold come from (format 2, see "Provenance") |
 
 A check answers with one of the four verdicts of the verdict contract (`alpaca/gates/verdict.py`):
 PASS, FAIL, BLOCKED (there was nothing to judge, for example the stage never ran) or
@@ -228,7 +250,8 @@ required item is covered by nothing.
 **spec-kit.** The items are the ids of the `spec.md` bullets `- **SC-001**: ...` (success
 criteria, required) and `- **FR-001**: ...` (functional requirements, not required). Write the
 id: `covers: [SC-001]`. A functional requirement without a check is a warning
-(`FR-UNCOVERED`), not a failure. `[NEEDS CLARIFICATION: ...]` markers left in the spec are
+(`FR-UNCOVERED`), not a failure. In format 2 the edge cases (`- **EC-001**: ...`) are required
+items too (see "Edge cases"). `[NEEDS CLARIFICATION: ...]` markers left in the spec are
 reported as a warning (`SPEC-CLARIFY`).
 
 The template's shape is `- **SC-001**: ...`. These shapes are read the same way: the colon inside
@@ -264,9 +287,45 @@ accepted when only one capability has it (`COVERS-AMBIGUOUS` otherwise).
 
 Headings and ids inside fenced code blocks and HTML comments are not items, in either format.
 
+## Edge cases
+
+In format 2 the edge cases of a spec-kit spec are items, like the success criteria. Number them
+`EC-001`, `EC-002`, ... where the spec lists them, under its `### Edge Cases` (or
+`## Edge Cases`) heading:
+
+```markdown
+### Edge Cases
+
+- **EC-001**: A URL longer than 2048 characters is refused with 400.
+- **EC-002**: The same long URL posted twice gets two different codes.
+```
+
+An `EC-nnn` id is read in every shape an `SC-nnn` id is, and one written anywhere else in the
+spec still counts, with the `SPEC-UNPARSED` warning. Every edge case is required: one that
+nothing covers is `SPEC-UNCOVERED`, like a success criterion. The check that shows it covers it
+(`covers: [EC-001]`); so does the fail case that detects and answers it (an edge case such as
+"the port is already taken" is covered by the fail case that recognizes a busy port, see "Known
+failures"), and so does an owner gate.
+
+A bullet under the Edge Cases heading that carries no `EC-nnn` id is an error, `EC-UNNUMBERED`,
+with its line number and its text. The reader never numbers edge cases by their position: an id
+must stay with its edge case when the list changes, because intake keys a row by it. Only the
+top-level bullets count; an indented bullet is a detail of the one above it. The section ends at
+the next heading of the same or a higher level.
+
+In format 1 edge cases are not items. An Edge Cases section with bullets gives the warning
+`EC-IGNORED`, and a `covers` entry that names an `EC-nnn` id is `COVERS-UNKNOWN`.
+
+OpenSpec is the same in both formats: an edge case there is a scenario, and every scenario is
+already required.
+
 **Owner gates cover too.** Some criteria can only be judged by a person (for example "a new
 team member can start the service in under 10 minutes"). Put those in the `covers` list of the
 owner gate that judges them. Coverage then shows `gate:<stage id>` as the one covering it.
+
+**Fail cases cover too (format 2).** A fail case that detects a failure and answers it shows
+how the runbook handles that situation. Put the items it shows in its `covers` list; coverage
+then shows `fail:<stage>/<fail id>` as the one covering it.
 
 A `covers` entry that names nothing in the spec is an error (`COVERS-UNKNOWN`, with the closest
 item named). A spec with no success criterion and no scenario is refused (`SPEC-EMPTY`): an
@@ -294,6 +353,9 @@ Otherwise the knob moves by `by` and the stage runs again. Without `move` the ne
 with unchanged inputs, which only makes sense for a stage that fails for reasons outside the
 runbook (a network hiccup). `alpaca.runbook.next_attempt` implements this rule.
 
+In format 2 a fail case that recognizes the failure decides before this rule (see "Known
+failures").
+
 Example: raise the worker count by 2 while the latency check fails, at most three runs, and stop
 at once if any response had the wrong status:
 
@@ -305,6 +367,91 @@ retry:
   move: {knob: WORKERS, by: 2}
 ```
 
+## Known failures
+
+A stage lists the ways it is known to fail in `fails`. In format 1 a fail case has `id` and
+`when` only. In format 2 a fail case can also say how the failure is recognized and what to do
+then:
+
+| field | required | meaning |
+|---|---|---|
+| `id` | yes | a short name, unique in the stage |
+| `when` | yes | the failure, in words |
+| `detect` | no | a check of one of the types above (`exit-code`, `file-exists`, `regex-in-file`, `json-field`, `plugin`), without `id` and without `covers`; the failure is recognized when this check would PASS |
+| `then` | yes when `detect` is set | `retry`, `stop`, `ask-owner`, or `{run: <stage id>}` |
+| `covers` | no | the spec items this failure handling shows (see "Edge cases") |
+| `source` | no | where the fail case comes from (see "Provenance") |
+
+What each answer does:
+
+- `retry`: another attempt, through the retry rule of the stage: its `stop_on`, its
+  `max_attempts` and the range of its `move` knob still hold, and a BLOCKED or
+  PAUSED-FOR-DECISION check still stops the stage. `on_fail` need not list the failed check: the
+  fail case names this failure as one a new attempt may fix. A stage with no `retry` block has
+  one attempt, so there `retry` ends the stage with FAIL.
+- `stop`: the stage ends with FAIL at once.
+- `ask-owner`: the stage ends with PAUSED-FOR-DECISION; a person decides what happens next.
+- `{run: <stage id>}`: the recovery stage named there runs. After it passes, the failed stage
+  runs again, and that run counts as an attempt of the failed stage, so it needs an attempt left
+  (`retry.max_attempts` of 2 or more). A recovery stage that fails ends the failed stage with
+  FAIL. A check listed in `stop_on` that failed still stops the stage: it never runs again,
+  recovered or not.
+
+After an attempt that did not pass, the first fail case in file order whose `detect` passed
+decides. When no fail case is recognized, the retry rule decides, as above. When every check
+passed, the stage passed, whatever a `detect` would say. A fail case with `then` and no
+`detect` is never recognized; give it the `detect` that shows the failure.
+`alpaca.runbook.respond` implements it.
+
+A `detect` is a check, so the check rules apply to it, with the paths relative to the stage
+`workdir`. A `detect` that breaks one is `DETECT-INVALID`, and the message names the rule it
+broke: a missing `pattern`, a field a detect does not have (`id`, `covers`, `source`), a plugin
+script that does not exist.
+
+### Recovery stages
+
+A recovery stage is a stage with `recovery: true`. It follows the stage rules, and these:
+
+- it has a `run` and at least one check (`RUN-MISSING`, `CHECKS-EMPTY`), and it is never an owner
+  gate (an `owner_gate` there is `FIELD-UNKNOWN`);
+- it is left out of the run order: it runs only when a fail case sends to it, never on its own,
+  and intake gives it no place in the run order;
+- no stage lists it in `needs`, and it has no `needs` itself (`RECOVERY-NEEDED`);
+- `then: {run: <id>}` names a stage of the runbook (`RECOVERY-UNKNOWN`) that has
+  `recovery: true` (`RECOVERY-NOT-MARKED`), and a fail case of a recovery stage may not send to
+  that same stage (`RECOVERY-SELF`).
+
+It may be declared anywhere in the file; a comment next to it helps the person who reads the
+run order. From the worked example:
+
+```yaml
+fails:
+  - id: port-busy
+    when: port 8080 is already taken, so the service under test never starts
+    detect: {type: regex-in-file, path: out/load.log, pattern: 'Address already in use'}
+    then: {run: free-port}
+    covers: [EC-003]
+```
+
+## Provenance
+
+In format 2 a knob, a check, a fail case and an owner gate may say where they come from, in
+`source` (text). The shapes:
+
+| source | means |
+|---|---|
+| `spec:<item id>` | a spec item states it, for example `spec:SC-002` |
+| `note:input/notes/<file>` | a raw note in the project's inbox states it |
+| `interview:<slot id>` | an answer of the interview settled it, for example `interview:thresholds` |
+| `owner:<decision ref>` | the owner decided it; the reference names the decision |
+| `default` | a default: nobody stated it |
+
+Any other text is a warning, `SOURCE-SHAPE`; it does not change the verdict. When the check reads
+a spec (`--spec`, or the `spec:` field) without `--no-files`, a `note:` path must exist. It is
+looked for under the runbook folder and each folder above it, up to the project root, the first
+folder that holds `project.yaml` (`SOURCE-MISSING`, a warning). A `source` says where a value
+came from; it is not part of what a check asks.
+
 ## Owner gates
 
 An owner gate is a step only a person may approve. Nothing in Alpaca moves it on its own, at any
@@ -315,6 +462,7 @@ autodrive level.
 | `approve` | yes | what the owner looks at and approves, in one or two sentences |
 | `evidence` | no | the files the owner reads before approving |
 | `covers` | no | the spec items this approval judges |
+| `source` | no | where the gate comes from (format 2, see "Provenance") |
 
 A stage with an `owner_gate` waits for the approval before its `run` starts, and its checks judge
 that `run`. A stage may be only a gate (no `run`, no `checks`), for example a release sign-off.
@@ -384,14 +532,24 @@ Every error is reported at once, one per line: `ERROR <code> <where>: <message>`
 | `SPEC-MISSING` | the spec cannot be read |
 | `SPEC-MIXED` | a spec folder holds a spec that is not OpenSpec |
 | `SPEC-EMPTY` | the spec has nothing to cover |
-| `SPEC-UNCOVERED` | a success criterion or scenario is covered by no check or owner gate |
+| `SPEC-UNCOVERED` | a success criterion, edge case or scenario is covered by no check, fail case or owner gate |
 | `COVERS-UNKNOWN` | a `covers` entry names nothing in the spec |
 | `COVERS-AMBIGUOUS` | a short OpenSpec key matches scenarios in more than one capability |
 | `SPEC-DELTA` | an OpenSpec change folder does not apply to its living specs (it names a requirement they lack, or adds one they have) |
+| `EC-UNNUMBERED` | a bullet under an Edge Cases heading has no `EC-nnn` id (format 2); the line and the text are named |
+| `THEN-MISSING` | a fail case has `detect` and no `then` |
+| `THEN-UNKNOWN` | `then` is not `retry`, `stop`, `ask-owner` or `{run: <stage id>}` |
+| `RECOVERY-UNKNOWN` | `then: {run: ...}` names no stage of the runbook |
+| `RECOVERY-NOT-MARKED` | `then: {run: ...}` names a stage without `recovery: true` |
+| `RECOVERY-NEEDED` | a stage `needs` a recovery stage, or a recovery stage has `needs` |
+| `RECOVERY-SELF` | a fail case of a recovery stage sends to that same stage |
+| `DETECT-INVALID` | a `detect` breaks a check rule; the message names the rule |
 
 Warnings (`WARN <code> <where>: <message>`) do not change the verdict: `FR-UNCOVERED`,
-`SPEC-CLARIFY`, `COVERS-WITHOUT-SPEC` and `SPEC-UNPARSED` (an id found outside the known item
-shapes; it is still counted, see "Linking checks to the spec").
+`SPEC-CLARIFY`, `COVERS-WITHOUT-SPEC`, `SPEC-UNPARSED` (an id found outside the known item
+shapes; it is still counted, see "Linking checks to the spec"), `EC-IGNORED` (a format 1
+runbook read with a spec that lists edge cases), and `SOURCE-SHAPE` and `SOURCE-MISSING` (see
+"Provenance").
 
 ## The partner kit: `alpaca runbook kit`
 
@@ -406,7 +564,7 @@ files, so the kit cannot drift from what `alpaca runbook check` and `alpaca inta
 
 | kit file | what it is |
 |---|---|
-| `check_runbook.py` | this checker in one file: `alpaca/runbook.py` with the verdict contract and the OpenSpec change reader of `alpaca/intake.py` inlined, Python 3.9 or later and PyYAML; the same options, messages, codes and exit status as `alpaca runbook check`, plus 65 when PyYAML is missing. Only the reading side is carried: `evaluate` and `next_attempt`, which run checks, stay out |
+| `check_runbook.py` | this checker in one file: `alpaca/runbook.py` with the verdict contract and the OpenSpec change reader of `alpaca/intake.py` inlined, Python 3.9 or later and PyYAML; the same options, messages, codes and exit status as `alpaca runbook check`, plus 65 when PyYAML is missing. Only the reading side is carried: `evaluate`, `next_attempt` and `respond`, which run checks and decide the next step, and `bar_parts`, which writes the bar of an intake row, stay out |
 | `runbook.schema.json` | a JSON Schema (draft 2020-12) generated from the field tables of `alpaca/runbook.py`, for editors and other tools; the checker stays the authority |
 | `FORMAT.md` | this document, rewritten for the partner: product paths removed, intake marked as our side |
 | `AGENTS.md`, `CLAUDE.md`, `.claude/skills/runbook-forge/SKILL.md` | the steps of `/alpaca-runbook-forge` for any agent, and as a Claude Code skill |
@@ -443,6 +601,9 @@ runbook fields line up with them:
   which is why it may not list checks.
 - Each covered spec item becomes one checklist row whose evidence is the checks that cover it; a
   row covered only by an owner gate is discharged by review, the others by a run.
+- `alpaca.runbook.bar_parts` gives the bar each check, fail case and owner gate sets (knob values
+  put in, the knob named, owner-only marked), each stage's place in the run order (a recovery
+  stage has none) and the `source` values, so a row states what shows its item.
 - Owner gates become decisions the owner records; they are never moved by an agent.
 
 ## Where the pieces come from

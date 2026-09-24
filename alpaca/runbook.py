@@ -16,9 +16,14 @@ The verdicts come from alpaca.gates.verdict (0 PASS, 1 FAIL, 2 BLOCKED, 3 PAUSED
 referenced, never restated. A plugin check reports through the same band, the contract
 contracts/README.md sets for acceptance scripts.
 
-`evaluate` gives each check type its meaning and `next_attempt` gives the retry rule its meaning,
-so a runner and intake share one reading of the file. `check` reads files but writes nothing,
-and it never touches the record.
+`evaluate` gives each check type its meaning, `next_attempt` gives the retry rule its meaning and
+`respond` the known failures of format 2, so a runner and intake share one reading of the file.
+`bar_parts` renders what each check, fail case and owner gate asks, for intake's rows. `check`
+reads files but writes nothing, and it never touches the record.
+
+Format 2 (`runbook: 2`) adds numbered edge cases (EC-nnn) as spec items, known failures with a
+detection and a response (`detect`, `then`, recovery stages) and provenance (`source`). A
+`runbook: 1` file reads and checks as it always did.
 """
 from __future__ import annotations
 
@@ -32,7 +37,9 @@ import sys
 
 from alpaca.gates import verdict
 
-FORMAT = 1
+#: the newest format this reader knows, and every format it reads
+FORMAT = 2
+FORMATS = (1, 2)
 CHECK_TYPES = ("exit-code", "file-exists", "regex-in-file", "json-field", "plugin")
 KNOB_TYPES = ("int", "float", "str", "bool", "enum")
 OPS = ("==", "!=", "<", "<=", ">", ">=")
@@ -49,11 +56,13 @@ STAGE_TIMEOUT_RANGE = (1, 7 * 24 * 3600)
 TOP_KEYS = {"runbook": True, "id": True, "title": True, "description": False, "spec": False,
             "owner": False, "knobs": False, "stages": True}
 KNOB_KEYS = {"id": True, "description": True, "type": True, "default": True, "min": False,
-             "max": False, "values": False, "owner_only": False}
+             "max": False, "values": False, "owner_only": False, "source": False}
 STAGE_KEYS = {"id": True, "title": False, "description": False, "needs": False, "run": False,
               "workdir": False, "timeout": False, "env": False, "inputs": False, "outputs": False,
-              "checks": False, "retry": False, "fails": False, "owner_gate": False}
-CHECK_KEYS = {"id": True, "type": True, "description": False, "covers": False}
+              "checks": False, "retry": False, "fails": False, "owner_gate": False, "recovery": False}
+CHECK_KEYS = {"id": True, "type": True, "description": False, "covers": False, "source": False}
+#: a fail case's `detect` is a check without `id`, `covers` and `source`
+DETECT_KEYS = {"type": True, "description": False}
 TYPE_KEYS = {
     "exit-code": {"expect": False},
     "file-exists": {"path": True, "non_empty": False},
@@ -63,9 +72,14 @@ TYPE_KEYS = {
 }
 RETRY_KEYS = {"max_attempts": True, "on_fail": False, "stop_on": False, "move": False}
 MOVE_KEYS = {"knob": True, "by": True}
-GATE_KEYS = {"approve": True, "evidence": False, "covers": False}
+GATE_KEYS = {"approve": True, "evidence": False, "covers": False, "source": False}
 OUTPUT_KEYS = {"path": True, "what": False}
-FAIL_KEYS = {"id": True, "when": True}
+FAIL_KEYS = {"id": True, "when": True, "detect": False, "then": False, "covers": False, "source": False}
+#: the fields format 2 added, per table; in a `runbook: 1` file each is FIELD-UNKNOWN, as it was
+SINCE_2 = {"knob": ("source",), "stage": ("recovery",), "check": ("source",), "gate": ("source",),
+           "fail": ("detect", "then", "covers", "source")}
+#: the answers a fail case gives besides `{run: <recovery stage id>}`
+THEN_WORDS = ("retry", "stop", "ask-owner")
 
 ERROR_CODES = (
     "FILE-UNREADABLE", "YAML-SYNTAX", "NOT-MAPPING", "KEY-DUPLICATE", "FIELD-MISSING",
@@ -78,8 +92,12 @@ ERROR_CODES = (
     "KNOB-NOT-NUMBER", "MOVE-NOT-INT", "RETRY-CHECK-UNKNOWN", "RETRY-OVERLAP", "VAR-UNKNOWN",
     "SPEC-MISSING", "SPEC-EMPTY", "SPEC-MIXED", "SPEC-UNCOVERED", "COVERS-UNKNOWN",
     "COVERS-AMBIGUOUS", "SPEC-DELTA",
+    # format 2
+    "EC-UNNUMBERED", "THEN-MISSING", "THEN-UNKNOWN", "RECOVERY-UNKNOWN", "RECOVERY-NOT-MARKED",
+    "RECOVERY-NEEDED", "RECOVERY-SELF", "DETECT-INVALID",
 )
-WARNING_CODES = ("FR-UNCOVERED", "SPEC-CLARIFY", "COVERS-WITHOUT-SPEC", "SPEC-UNPARSED")
+WARNING_CODES = ("FR-UNCOVERED", "SPEC-CLARIFY", "COVERS-WITHOUT-SPEC", "SPEC-UNPARSED",
+                 "EC-IGNORED", "SOURCE-SHAPE", "SOURCE-MISSING")
 
 #: words people reach for, mapped to the field that means it (used only for the "did you mean" hint)
 ALIASES = {"command": "run", "cmd": "run", "depends_on": "needs", "depends": "needs",
@@ -89,6 +107,8 @@ ALIASES = {"command": "run", "cmd": "run", "depends_on": "needs", "depends": "ne
            "cwd": "workdir", "name": "title"}
 
 SLUG = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+#: where `alpaca note add` keeps the raw notes, relative to the project root
+NOTES_DIR = "input/notes"
 KNOB_ID = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 VAR = re.compile(r"\$\{([^}]*)\}")
 
@@ -176,10 +196,44 @@ def _is_number(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
+def runbook_format(data):
+    """The format a loaded runbook is read as: its `runbook:` value when this reader knows it,
+    else the newest (such a file is refused with VERSION-UNSUPPORTED anyway)."""
+    value = data.get("runbook")
+    return int(value) if value in FORMATS else FORMAT
+
+
+def source_shape(text):
+    """True when `text` has one of the shapes of a `source` field: spec:<item id>,
+    note:input/notes/<file>, interview:<slot id>, owner:<decision ref> or default."""
+    if text == "default":
+        return True
+    kind, sep, rest = text.partition(":")
+    if not sep or not rest.strip() or rest != rest.strip():
+        return False
+    if kind == "note":
+        parts = rest.split("/")
+        return (rest.startswith(NOTES_DIR + "/") and len(parts) > 2
+                and all(part not in ("", ".", "..") for part in parts))
+    if kind == "interview":
+        return bool(SLUG.match(rest))
+    return kind in ("spec", "owner")
+
+
 class _Checker:
     def __init__(self, data, base_dir, check_files, report):
         self.data, self.base, self.check_files, self.r = data, base_dir, check_files, report
         self.knobs = {}
+        self.fmt = runbook_format(data)
+        # every stage id, and the ids of the recovery stages (format 2), known before any stage
+        # is read, since a fail case may send to a stage declared after it
+        self.stage_ids, self.recovery = set(), set()
+
+    def table(self, table, name):
+        """The field table as this file's format has it: format 1 has none of the SINCE_2 fields."""
+        if self.fmt >= 2:
+            return table
+        return {k: v for k, v in table.items() if k not in SINCE_2[name]}
 
     # -- generic field helpers
     def keys(self, block, allowed, where):
@@ -298,9 +352,10 @@ class _Checker:
     def run(self):
         d = self.data
         self.keys(d, TOP_KEYS, "")
-        if "runbook" in d and d["runbook"] != FORMAT:
+        if "runbook" in d and d["runbook"] not in FORMATS:
             self.r.error("VERSION-UNSUPPORTED", "runbook", "`runbook: %r` is not a format this reader "
-                         "knows; write `runbook: %d`" % (d["runbook"], FORMAT))
+                         "knows (%s); write `runbook: %d`" % (d["runbook"], ", ".join(map(str, FORMATS)),
+                                                            FORMAT))
         self.ident(d, "", kind="runbook id")
         self.text(d, "title", "")
         self.text(d, "description", "")
@@ -323,10 +378,12 @@ class _Checker:
                 self.r.error("FIELD-TYPE", where, "each knob must be a mapping with `id`, `description`, "
                              "`type` and `default`")
                 continue
-            self.keys(knob, KNOB_KEYS, where)
+            self.keys(knob, self.table(KNOB_KEYS, "knob"), where)
             ident = self.ident(knob, where, pattern=KNOB_ID, seen=seen, kind="knob id")
             self.text(knob, "description", where)
             self.flag(knob, "owner_only", where)
+            if self.fmt >= 2:
+                self.source(knob, where)
             kind = knob.get("type")
             if "type" in knob and kind not in KNOB_TYPES:
                 self.r.error("KNOB-TYPE-UNKNOWN", where + ".type", "knob type %r is not one of %s"
@@ -395,6 +452,11 @@ class _Checker:
             self.r.error("FIELD-EMPTY", "stages", "a runbook needs at least one stage")
             return
         stage_ids, check_ids = {}, {}
+        for stage in stages:
+            if isinstance(stage, dict) and isinstance(stage.get("id"), str):
+                self.stage_ids.add(stage["id"])
+                if self.fmt >= 2 and stage.get("recovery") is True:
+                    self.recovery.add(stage["id"])
         for n, stage in enumerate(stages):
             where = "stages[%d]" % n
             if not isinstance(stage, dict):
@@ -403,18 +465,36 @@ class _Checker:
             self.stage(stage, where, stage_ids, check_ids)
 
     def stage(self, stage, where, stage_ids, check_ids):
-        self.keys(stage, STAGE_KEYS, where)
+        self.keys(stage, self.table(STAGE_KEYS, "stage"), where)
         earlier = dict(stage_ids)
         self.ident(stage, where, seen=stage_ids, kind="stage id")
         for key in ("title", "description"):
             self.text(stage, key, where)
-        for n, need in enumerate(self.items(stage, "needs", where)):
-            if need not in earlier:
+        recovery = False
+        if self.fmt >= 2:
+            self.flag(stage, "recovery", where)
+            recovery = stage.get("recovery") is True
+        needs = self.items(stage, "needs", where)
+        for n, need in enumerate(needs):
+            if need in self.recovery:
+                self.r.error("RECOVERY-NEEDED", "%s.needs[%d]" % (where, n), "`%s` is a recovery stage: it "
+                             "runs only when a fail case sends to it, so no stage waits for it" % need)
+            elif need not in earlier:
                 self.r.error("NEEDS-UNKNOWN", "%s.needs[%d]" % (where, n), "`%s` is not a stage declared "
                              "before this one; list stages in run order" % need)
+        if recovery and needs:
+            self.r.error("RECOVERY-NEEDED", where + ".needs", "a recovery stage runs only when a fail case "
+                         "sends to it, outside the run order, so it has no `needs`")
         run = self.text(stage, "run", where)
         gate = stage.get("owner_gate")
-        if "run" not in stage and gate is None:
+        if recovery and gate is not None:
+            self.r.error("FIELD-UNKNOWN", where + ".owner_gate", "a recovery stage is never an owner gate: "
+                         "it runs only when a fail case sends to it, with no one to wait for")
+            gate = None
+        if recovery and "run" not in stage:
+            self.r.error("RUN-MISSING", where, "a recovery stage runs a command (`run`) and has checks; "
+                         "this one has no `run`")
+        elif "run" not in stage and gate is None:
             self.r.error("RUN-MISSING", where, "a stage runs a command (`run`) or is an owner gate "
                          "(`owner_gate`); this one has neither")
         if run:
@@ -480,9 +560,63 @@ class _Checker:
             if not isinstance(fail, dict):
                 self.r.error("FIELD-TYPE", at, "a known failure is a mapping with `id` and `when`")
                 continue
-            self.keys(fail, FAIL_KEYS, at)
+            self.keys(fail, self.table(FAIL_KEYS, "fail"), at)
             self.ident(fail, at, seen=seen, kind="failure id")
             self.text(fail, "when", at)
+            if self.fmt < 2:
+                continue
+            self.items(fail, "covers", at)
+            self.source(fail, at)
+            if "detect" in fail:
+                self.detect(fail["detect"], at + ".detect")
+                if "then" not in fail:
+                    self.r.error("THEN-MISSING", at + ".then", "a fail case with `detect` says what to do "
+                                 "when the failure is recognized: `then` is retry, stop, ask-owner or "
+                                 "{run: <recovery stage id>}")
+            if "then" in fail:
+                self.then(fail["then"], at + ".then", stage)
+
+    def detect(self, detect, at):
+        """A `detect` is a check without `id`, `covers` and `source`: the check rules, each finding
+        reported as DETECT-INVALID with the rule it broke."""
+        if not isinstance(detect, dict):
+            self.r.error("DETECT-INVALID", at, "`detect` is a check mapping with `type` and the fields of "
+                         "that type, without `id` and `covers`")
+            return
+        outer, self.r = self.r, _Report()
+        try:
+            self.check(detect, at, base=DETECT_KEYS)
+        finally:
+            inner, self.r = self.r, outer
+        for e in inner.errors:
+            self.r.error("DETECT-INVALID", e["where"], "a detect follows the check rules: %s (%s)"
+                         % (e["message"], e["code"]))
+
+    def then(self, then, at, stage):
+        if isinstance(then, str) and then in THEN_WORDS:
+            return
+        if (isinstance(then, dict) and list(then) == ["run"] and isinstance(then["run"], str)
+                and then["run"].strip()):
+            target = then["run"]
+            if target not in self.stage_ids:
+                self.r.error("RECOVERY-UNKNOWN", at + ".run", "`%s` is not a stage of this runbook" % target)
+            elif target not in self.recovery:
+                self.r.error("RECOVERY-NOT-MARKED", at + ".run", "stage `%s` is not marked `recovery: true`; "
+                             "a fail case sends only to a recovery stage, which runs outside the run order"
+                             % target)
+            elif target == stage.get("id"):
+                self.r.error("RECOVERY-SELF", at + ".run", "recovery stage `%s` would send its own failure "
+                             "back to itself" % target)
+            return
+        self.r.error("THEN-UNKNOWN", at, "`then` is retry, stop, ask-owner or {run: <recovery stage id>}, "
+                     "found %r" % (then,))
+
+    def source(self, block, where):
+        value = self.text(block, "source", where)
+        if value is not None and not source_shape(value):
+            self.r.warn("SOURCE-SHAPE", self._at(where, "source"), "source %r has none of the shapes "
+                        "spec:<item id>, note:%s/<file>, interview:<slot id>, owner:<decision ref>, "
+                        "default" % (value, NOTES_DIR))
 
     def checks(self, stage, where, check_ids):
         value = stage.get("checks")
@@ -505,18 +639,23 @@ class _Checker:
             self.check(chk, at)
         return own
 
-    def check(self, chk, at):
+    def check(self, chk, at, base=None):
+        """One check; `base` is the table of the fields every type has (a detect has fewer)."""
+        base = self.table(CHECK_KEYS, "check") if base is None else base
         kind = chk.get("type")
         if "type" in chk and kind not in CHECK_TYPES:
             self.r.error("CHECK-TYPE-UNKNOWN", at + ".type", "check type %r is not one of %s"
                          % (kind, ", ".join(CHECK_TYPES)))
-            self.keys({k: v for k, v in chk.items() if k in CHECK_KEYS}, CHECK_KEYS, at)
+            self.keys({k: v for k, v in chk.items() if k in base}, base, at)
             return
-        allowed = dict(CHECK_KEYS)
+        allowed = dict(base)
         allowed.update(TYPE_KEYS.get(kind, {}))
         self.keys(chk, allowed, at)
         self.text(chk, "description", at)
-        self.items(chk, "covers", at)
+        if "covers" in base:
+            self.items(chk, "covers", at)
+        if "source" in base:
+            self.source(chk, at)
         if kind == "exit-code":
             self.whole(chk, "expect", at, *EXPECT_RANGE)
         elif kind in ("file-exists", "regex-in-file", "json-field"):
@@ -590,10 +729,12 @@ class _Checker:
         if not isinstance(gate, dict):
             self.r.error("FIELD-TYPE", at, "`owner_gate` is a mapping with `approve`")
             return
-        self.keys(gate, GATE_KEYS, at)
+        self.keys(gate, self.table(GATE_KEYS, "gate"), at)
         self.text(gate, "approve", at)
         self.items(gate, "evidence", at)
         self.items(gate, "covers", at)
+        if self.fmt >= 2:
+            self.source(gate, at)
 
     def retry(self, retry, at, own):
         if not isinstance(retry, dict):
@@ -688,13 +829,18 @@ _REQUIREMENT = re.compile(r"^\s{0,3}###\s+Requirement:\s*(.+?)\s*$", re.I)
 _SCENARIO = re.compile(r"^\s{0,3}####\s+(.+?)\s*$")
 _SECTION = re.compile(r"^\s{0,3}##\s+(.+?)\s*$")
 # spec-kit item lines. The template writes `- **SC-001**: ...`; people also write the colon inside
-# the bold, a numbered list, no bullet, no bold (`SC-001: ...`), a heading, or a table row.
+# the bold, a numbered list, no bullet, no bold (`SC-001: ...`), a heading, or a table row. Edge
+# cases (EC-nnn) take the same shapes; they are items of a format 2 runbook only.
 _KIT_LEAD = r"^\s*(?:[-*+]\s+|\d{1,9}[.)]\s+|#{1,6}\s+)?"
-_KIT_ITEM = re.compile(_KIT_LEAD + r"(?:\*\*|__)((?:SC|FR)-\d+)\s*:?\s*(?:\*\*|__)\s*:?\s*(.*)$")
-_KIT_BARE = re.compile(_KIT_LEAD + r"((?:SC|FR)-\d+)\s*:\s*(.*)$")
-_KIT_ROW = re.compile(r"^\s*\|\s*(?:\*\*|__)?((?:SC|FR)-\d+)(?:\*\*|__)?\s*\|(.*)$")
+_KIT_ITEM = re.compile(_KIT_LEAD + r"(?:\*\*|__)((?:SC|FR|EC)-\d+)\s*:?\s*(?:\*\*|__)\s*:?\s*(.*)$")
+_KIT_BARE = re.compile(_KIT_LEAD + r"((?:SC|FR|EC)-\d+)\s*:\s*(.*)$")
+_KIT_ROW = re.compile(r"^\s*\|\s*(?:\*\*|__)?((?:SC|FR|EC)-\d+)(?:\*\*|__)?\s*\|(.*)$")
 _KIT_ID = re.compile(r"\b(?:SC|FR)-\d+\b")
+_EC_ID = re.compile(r"\bEC-\d+\b")
 _INLINE_COMMENT = re.compile(r"<!--.*?-->")
+_ANY_HEADING = re.compile(r"^\s{0,3}(#{1,6})\s+(.*?)\s*$")
+# a top-level bullet (at most one space in front); a deeper one is a detail of the bullet above it
+_EC_BULLET = re.compile(r"^ ?(?:[-*+]|\d{1,9}[.)])\s+(.*\S)\s*$")
 
 
 #: an OpenSpec scenario whose name starts with a spec-kit id (`#### Scenario: SC-002 ...`) keeps that
@@ -766,11 +912,23 @@ def _kit_item(line):
     return None
 
 
+def _edge_heading(text):
+    """True for the heading text of an Edge Cases section (`Edge Cases`, `Edge cases *(optional)*`)."""
+    name = re.sub(r"\(.*?\)", " ", re.sub(r"[*_`]", "", text))
+    name = re.sub(r"\s#+$", "", name).replace(":", " ")
+    return " ".join(name.split()).casefold() == "edge cases"
+
+
 def _speckit_items(lines):
-    """Items from the known line shapes first; then any SC-nnn or FR-nnn id that appears only in
-    some other line is still an item (an SC is still required), marked `loose` with its line
-    number, so a criterion written in an odd shape can never drop out of coverage unseen."""
-    items, clarify, seen = [], 0, set()
+    """Items from the known line shapes first; then any SC-nnn, FR-nnn or EC-nnn id that appears
+    only in some other line is still an item (an SC or EC is still required), marked `loose` with
+    its line number, so a criterion written in an odd shape can never drop out of coverage unseen.
+
+    Edge cases (EC-nnn) are kept apart in `edge_cases`: they are items of a format 2 runbook only
+    (spec_items). `unnumbered` holds the top-level bullets under an Edge Cases heading that carry
+    no EC id, and `edge_case_bullets` counts every such bullet."""
+    items, edge, unnumbered, clarify, seen = [], [], [], 0, set()
+    bullets, section = 0, None             # section: the level of the Edge Cases heading we are under
     open_lines = []
     for n, (line, masked) in enumerate(zip(lines, _fence_mask(lines)), 1):
         if masked:
@@ -778,20 +936,37 @@ def _speckit_items(lines):
         line = _INLINE_COMMENT.sub(" ", line)
         open_lines.append((n, line))
         clarify += line.count("[NEEDS CLARIFICATION")
+        head = _ANY_HEADING.match(line)
+        if head:
+            level = len(head.group(1))
+            if _edge_heading(head.group(2)):
+                section = level
+            elif section is not None and level <= section:
+                section = None
+        elif section is not None:
+            bullet = _EC_BULLET.match(line)
+            if bullet:
+                bullets += 1
+                if not _EC_ID.search(line):
+                    unnumbered.append({"line": n, "text": bullet.group(1).strip()})
         found = _kit_item(line)
         if found and found[0] not in seen:
             ident = found[0]
             seen.add(ident)
-            items.append({"id": ident, "kind": ident[:2], "text": found[1], "line": n,
-                          "required": ident.startswith("SC-")})
+            (edge if ident.startswith("EC-") else items).append(
+                {"id": ident, "kind": ident[:2], "text": found[1], "line": n,
+                 "required": ident[:2] in ("SC", "EC")})
     for n, line in open_lines:
-        for ident in _KIT_ID.findall(line):
+        for ident in _KIT_ID.findall(line) + _EC_ID.findall(line):
             if ident not in seen:
                 seen.add(ident)
-                items.append({"id": ident, "kind": ident[:2], "text": line.strip(), "line": n,
-                              "required": ident.startswith("SC-"), "loose": True})
+                (edge if ident.startswith("EC-") else items).append(
+                    {"id": ident, "kind": ident[:2], "text": line.strip(), "line": n,
+                     "required": ident[:2] in ("SC", "EC"), "loose": True})
     items.sort(key=lambda i: (not i["required"], i["id"]))
-    return items, clarify
+    edge.sort(key=lambda i: i["id"])
+    return {"items": items, "clarifications": clarify, "edge_cases": edge, "unnumbered": unnumbered,
+            "edge_case_bullets": bullets}
 
 
 def _detect(lines):
@@ -811,7 +986,9 @@ def parse_spec(path):
     spec, or an OpenSpec folder of <capability>/spec.md files.
 
     Returns {"path", "format", "items": [{"id", "kind", "text", "required"}], "clarifications"}.
-    spec-kit items are SC-nnn (required) and FR-nnn (not required); OpenSpec items are
+    spec-kit items are SC-nnn (required) and FR-nnn (not required); a spec-kit spec also gives
+    "edge_cases" (the EC-nnn items, which spec_items adds for a format 2 runbook), "unnumbered"
+    and "edge_case_bullets" (see _speckit_items). OpenSpec items are
     "<requirement>/<scenario>" (under a folder, "<capability>/<requirement>/<scenario>"), required
     unless they sit under a `## REMOVED Requirements` section. Raises OSError when unreadable and
     ValueError for a folder that mixes formats."""
@@ -834,15 +1011,31 @@ def parse_spec(path):
     fmt = _detect(lines)
     if fmt == "openspec":
         return {"path": path, "format": fmt, "items": _openspec_items(lines), "clarifications": 0}
-    items, clarify = _speckit_items(lines)
-    return {"path": path, "format": fmt, "items": items, "clarifications": clarify}
+    found = _speckit_items(lines)
+    return {"path": path, "format": fmt, "items": found["items"], "clarifications": found["clarifications"],
+            "edge_cases": found["edge_cases"], "unnumbered": found["unnumbered"],
+            "edge_case_bullets": found["edge_case_bullets"]}
+
+
+def spec_items(spec, fmt):
+    """The items a runbook of format `fmt` covers: a format 2 runbook also covers the edge cases
+    (EC-nnn) of a spec-kit spec, as required items. OpenSpec items are the same in both."""
+    items = list(spec["items"])
+    if fmt >= 2:
+        have = {i["id"] for i in items}
+        more = [i for i in spec.get("edge_cases") or [] if i["id"] not in have]
+        if more:
+            items = sorted(items + more, key=lambda i: (not i["required"], i["id"]))
+    return items
 
 
 # ----------------------------------------------------------------------------- coverage
 def _covering(data):
-    """[(covers entry, who, where)] for every check and owner gate. who is the check id, or
-    "gate:<stage id>" for an owner gate."""
+    """[(covers entry, who, where)] for every check, fail case (format 2) and owner gate. who is
+    the check id, "fail:<stage id>/<fail id>" for a fail case, or "gate:<stage id>" for an owner
+    gate."""
     out = []
+    fmt = runbook_format(data)
     stages = data.get("stages") if isinstance(data.get("stages"), list) else []
     for n, stage in enumerate(stages):
         if not isinstance(stage, dict):
@@ -853,6 +1046,13 @@ def _covering(data):
                 for k, entry in enumerate(chk["covers"]):
                     if isinstance(entry, str) and entry.strip():
                         out.append((entry, str(chk.get("id")), "stages[%d].checks[%d].covers[%d]" % (n, c, k)))
+        fails = stage.get("fails") if fmt >= 2 and isinstance(stage.get("fails"), list) else []
+        for f, fail in enumerate(fails):
+            if isinstance(fail, dict) and isinstance(fail.get("covers"), list):
+                for k, entry in enumerate(fail["covers"]):
+                    if isinstance(entry, str) and entry.strip():
+                        out.append((entry, "fail:%s/%s" % (stage.get("id"), fail.get("id")),
+                                    "stages[%d].fails[%d].covers[%d]" % (n, f, k)))
         gate = stage.get("owner_gate")
         if isinstance(gate, dict) and isinstance(gate.get("covers"), list):
             for k, entry in enumerate(gate["covers"]):
@@ -865,9 +1065,12 @@ def coverage(data, spec, report):
     """Map every covers entry to a spec item and report what stays uncovered.
 
     Returns {"required": count, "covered": {required item: [who...]}, "optional": {other covered
-    item (FR-nnn, a removed scenario): [who...]}, "missing": [required item...]}."""
+    item (FR-nnn, a removed scenario): [who...]}, "missing": [required item...]}. A format 2
+    runbook also covers the edge cases of a spec-kit spec (spec_items)."""
+    fmt = runbook_format(data)
+    items = spec_items(spec, fmt)
     index = {}
-    for item in spec["items"]:
+    for item in items:
         keys = {_norm(item["id"])}
         if item.get("capability"):
             # a folder spec: "<cap>/<req>/<scenario>" also answers to "<req>/<scenario>" when unique
@@ -891,28 +1094,39 @@ def coverage(data, spec, report):
         ident = found[0]["id"]
         if who not in covered.setdefault(ident, []):
             covered[ident].append(who)
-    required = [i for i in spec["items"] if i["required"]]
+    required = [i for i in items if i["required"]]
     if not required:
         report.error("SPEC-EMPTY", spec["path"], "the spec has no success criterion (SC-nnn) and no "
                      "OpenSpec scenario to cover; an empty list is never a pass")
     missing = []
+    fix = ("the check that shows it, or to an owner gate when only a person can judge it" if fmt < 2 else
+           "the check that shows it or of the fail case that detects and answers it, or to an owner gate "
+           "when only a person can judge it")
     for item in required:
         if item["id"] not in covered:
             missing.append(item["id"])
             report.error("SPEC-UNCOVERED", item["id"], "no runbook check covers %s (%s); add it to the "
-                         "`covers` list of the check that shows it, or to an owner gate when only a person "
-                         "can judge it" % (item["id"], item["text"][:120]))
-    for item in spec["items"]:
+                         "`covers` list of %s" % (item["id"], item["text"][:120], fix))
+    for item in items:
         if not item["required"] and item["kind"] == "FR" and item["id"] not in covered:
             report.warn("FR-UNCOVERED", item["id"], "no check covers %s (a warning: only success criteria "
                         "must be covered)" % item["id"])
-    for item in spec["items"]:
+    for item in items:
         if item.get("loose"):
             report.warn("SPEC-UNPARSED", item["id"], "%s appears at line %d of %s in a shape this reader "
                         "does not know (%r); it is counted as %s anyway. Write it as `- **%s**: ...`"
                         % (item["id"], item["line"], spec["path"], item["text"][:80],
-                           "a required success criterion" if item["required"] else
-                           "a functional requirement", item["id"]))
+                           {"SC": "a required success criterion", "EC": "a required edge case"}.get(
+                               item["kind"], "a functional requirement"), item["id"]))
+    if fmt >= 2:
+        for bullet in spec.get("unnumbered") or []:
+            report.error("EC-UNNUMBERED", "%s:%d" % (spec["path"], bullet["line"]), "the edge case at line "
+                         "%d of %s has no EC-nnn id (%r); number it `- **EC-001**: ...`. Ids stay stable, "
+                         "so the reader never numbers an edge case by its position"
+                         % (bullet["line"], spec["path"], bullet["text"][:120]))
+    elif spec.get("edge_case_bullets"):
+        report.warn("EC-IGNORED", spec["path"], "format 1 does not cover edge cases; move to runbook: 2 "
+                    "(%s lists %d under an Edge Cases heading)" % (spec["path"], spec["edge_case_bullets"]))
     if spec.get("clarifications"):
         report.warn("SPEC-CLARIFY", spec["path"], "the spec still has %d [NEEDS CLARIFICATION] marker(s)"
                     % spec["clarifications"])
@@ -958,12 +1172,14 @@ def check(path, spec_path=None, check_files=True, spec=None):
         return result
     base = os.path.dirname(os.path.abspath(path))
     validate(data, base, check_files=check_files, report=report)
+    fmt = runbook_format(data)
     target = spec_path
     if target is None and isinstance(data.get("spec"), str) and data["spec"].strip():
         target = os.path.join(base, data["spec"])
     if spec is not None:
-        result["spec"] = {"path": spec["path"], "format": spec["format"], "items": len(spec["items"]),
-                          "required": sum(1 for i in spec["items"] if i["required"])}
+        items = spec_items(spec, fmt)
+        result["spec"] = {"path": spec["path"], "format": spec["format"], "items": len(items),
+                          "required": sum(1 for i in items if i["required"])}
         result["coverage"] = coverage(data, spec, report)
     elif target is not None:
         try:
@@ -975,16 +1191,67 @@ def check(path, spec_path=None, check_files=True, spec=None):
         except ValueError as exc:
             report.error("SPEC-MIXED", "spec", str(exc))
         else:
+            items = spec_items(spec, fmt)
             result["spec"] = {"path": target, "format": spec["format"],
-                              "items": len(spec["items"]),
-                              "required": sum(1 for i in spec["items"] if i["required"])}
+                              "items": len(items),
+                              "required": sum(1 for i in items if i["required"])}
             result["coverage"] = coverage(data, spec, report)
     elif _covering(data):
         report.warn("COVERS-WITHOUT-SPEC", "spec", "checks name `covers` entries but no spec was given; "
                     "pass --spec or set `spec:` to check them")
+    if result["coverage"] is not None and check_files:
+        for where, note in _note_sources(data):
+            if not _note_found(base, note):
+                report.warn("SOURCE-MISSING", where, "source note:%s names a note that is not in the runbook "
+                            "folder or a folder above it, up to the project root (the folder that holds "
+                            "project.yaml)" % note)
     code = verdict.FAIL if report.errors else verdict.PASS
     result.update(verdict=verdict.name_of(code), code=code, errors=report.errors, warnings=report.warnings)
     return result
+
+
+def _note_sources(data):
+    """[(where, note path)] for every well-formed `source: note:<path>` of a format 2 runbook."""
+    if runbook_format(data) < 2:
+        return []
+    out = []
+
+    def take(block, where):
+        value = block.get("source") if isinstance(block, dict) else None
+        if isinstance(value, str) and value.startswith("note:") and source_shape(value):
+            out.append((where + ".source", value[len("note:"):]))
+
+    def listed(block, key):
+        value = block.get(key)
+        return value if isinstance(value, list) else []
+
+    for n, knob in enumerate(listed(data, "knobs")):
+        take(knob, "knobs[%d]" % n)
+    for n, stage in enumerate(listed(data, "stages")):
+        if not isinstance(stage, dict):
+            continue
+        where = "stages[%d]" % n
+        for c, chk in enumerate(listed(stage, "checks")):
+            take(chk, "%s.checks[%d]" % (where, c))
+        for f, fail in enumerate(listed(stage, "fails")):
+            take(fail, "%s.fails[%d]" % (where, f))
+        take(stage.get("owner_gate"), where + ".owner_gate")
+    return out
+
+
+def _note_found(base, note):
+    """True when `note` (input/notes/...) is under the runbook folder or a folder above it, up to
+    the project root: the first folder that holds project.yaml."""
+    folder = os.path.abspath(base)
+    while True:
+        if os.path.isfile(os.path.join(folder, note)):
+            return True
+        if os.path.isfile(os.path.join(folder, "project.yaml")):
+            return False
+        up = os.path.dirname(folder)
+        if up == folder:
+            return False
+        folder = up
 
 
 # ------------------------------------------------------------------------ check meaning
@@ -1171,6 +1438,192 @@ def next_attempt(data, stage, results, attempt, knobs):
         return {"retry": True, "knobs": knobs, "reason": "attempt %d of %d with %s=%s"
                 % (attempt + 1, limit, name, value)}
     return {"retry": True, "knobs": knobs, "reason": "attempt %d of %d, inputs unchanged" % (attempt + 1, limit)}
+
+
+def _step_end(results, step):
+    """The verdict code a stage ends with after `step` (a next_attempt answer); None while it
+    goes on."""
+    if step["retry"]:
+        return None
+    if all(code == verdict.PASS for code in results.values()):
+        return verdict.PASS
+    for code in results.values():
+        if code in (verdict.BLOCKED, verdict.PAUSED):
+            return code
+    return verdict.FAIL
+
+
+def respond(data, stage, results, attempt, knobs, detected):
+    """The step after attempt number `attempt` of a stage, with its known failures (format 2).
+
+    results maps each check id of the stage to its verdict code, as for next_attempt; detected
+    maps a fail case id of the stage to the verdict code of its `detect` on this attempt. Returns
+    next_attempt's {"retry", "knobs", "reason"} and "run" (the recovery stage to run before the
+    stage runs again, else None), "end" (the verdict code the stage ends with; None while it goes
+    on) and "fail" (the id of the fail case that decided, else None).
+
+    When every check passed the stage ends PASS, whatever was detected. Otherwise the first fail
+    case, in file order, that has a `detect` and whose detect passed decides: `stop` ends FAIL;
+    `ask-owner` ends PAUSED-FOR-DECISION; `retry` goes through the retry rule, its stop_on, its
+    attempts and its knob range, but not its on_fail (the fail case names this failure as one a
+    new attempt may fix); `{run: <id>}` returns the recovery stage, unless a stop_on check failed
+    or no attempt is left for the rerun that follows it (the rerun counts as an attempt of this
+    stage). With no fail case recognized, the retry rule decides exactly as next_attempt does."""
+    retry = stage.get("retry") or {}
+    failing = not all(code == verdict.PASS for code in results.values())
+    for fail in (stage.get("fails") or []) if failing else []:
+        if not isinstance(fail, dict) or not isinstance(fail.get("detect"), dict):
+            continue
+        ident, then = fail.get("id"), fail.get("then")
+        if detected.get(ident) != verdict.PASS:
+            continue
+        why = "fail case %s was recognized" % ident
+        if then in ("stop", "ask-owner"):
+            end = verdict.FAIL if then == "stop" else verdict.PAUSED
+            return {"retry": False, "knobs": dict(knobs), "reason": "%s; its answer is %s" % (why, then),
+                    "run": None, "end": end, "fail": ident}
+        if then == "retry":
+            step = next_attempt(data, dict(stage, retry=dict(retry, on_fail=None)), results, attempt, knobs)
+            return dict(step, reason="%s; %s" % (why, step["reason"]), run=None,
+                        end=_step_end(results, step), fail=ident)
+        if isinstance(then, dict) and isinstance(then.get("run"), str):
+            limit = retry.get("max_attempts", 1)
+            stopped = [c for c, code in results.items() if code == verdict.FAIL and c in (retry.get("stop_on") or [])]
+            if stopped:
+                reason = "%s, but check %s failed and is listed in stop_on" % (why, stopped[0])
+            elif attempt >= limit:
+                reason = ("%s, but attempt %d of %d is used, and the rerun after recovery stage %s would be "
+                          "one more" % (why, attempt, limit, then["run"]))
+            else:
+                return {"retry": False, "knobs": dict(knobs), "reason": "%s; run recovery stage %s, then "
+                        "attempt %d of %d" % (why, then["run"], attempt + 1, limit),
+                        "run": then["run"], "end": None, "fail": ident}
+            return {"retry": False, "knobs": dict(knobs), "reason": reason, "run": None,
+                    "end": verdict.FAIL, "fail": ident}
+    step = next_attempt(data, stage, results, attempt, knobs)
+    return dict(step, run=None, end=_step_end(results, step), fail=None)
+
+
+# ------------------------------------------------------------------------ the bar of a row
+def _bar_shown(value, quote=True):
+    """A value as a bar writes it: a whole number without `.0` (a knob default of 50 and of 50.0
+    give one bar), true/false in lower case, text in double quotes (or as it is, quote=False)."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, float) and math.isfinite(value) and value.is_integer():
+        return str(int(value))
+    if isinstance(value, (int, float)):
+        return repr(value)
+    if isinstance(value, str):
+        return json.dumps(value) if quote else value
+    return json.dumps(value, sort_keys=True, default=str)
+
+
+def _bar_check(chk, knobs):
+    """(text, knob names): `<type> <what>` for one check or detect, every ${KNOB} replaced by the
+    knob's default. Built-in variables stay as written."""
+    names = []
+
+    def put(text):
+        def one(m):
+            name = m.group(1)
+            if name not in knobs:
+                return m.group(0)
+            if name not in names:
+                names.append(name)
+            return _bar_shown(knobs[name]["default"], quote=False)
+        return VAR.sub(one, str(text))
+
+    kind = chk.get("type")
+    path = put(chk.get("path"))
+    if kind == "exit-code":
+        text = "exit == %s" % _bar_shown(chk.get("expect", 0))
+    elif kind == "file-exists":
+        text = "%s exists%s" % (path, "" if chk.get("non_empty") is False else ", non-empty")
+    elif kind == "regex-in-file":
+        text = "%s %s /%s/%s" % (path, "does not match" if chk.get("absent") else "matches", chk.get("pattern"),
+                                 "i" if chk.get("ignore_case") else "")
+    elif kind == "json-field":
+        value = chk.get("value")
+        whole = VAR.fullmatch(value) if isinstance(value, str) else None
+        if whole and whole.group(1) in knobs:
+            put(value)                                  # names the knob; its value keeps its type
+            shown = _bar_shown(knobs[whole.group(1)]["default"])
+        elif isinstance(value, str):
+            shown = _bar_shown(put(value))
+        else:
+            shown = _bar_shown(value)
+        text = "%s %s %s %s" % (path, chk.get("field"), chk.get("op"), shown)
+    elif kind == "plugin":
+        args = [put(a) if isinstance(a, str) else _bar_shown(a) for a in chk.get("args") or []]
+        text = "%s exits 0" % " ".join([str(chk.get("script"))] + args)
+    else:
+        text = ""
+    return ("%s %s" % (kind, text)).strip(), names
+
+
+def _bar_note(names, knobs):
+    """` (knob A, owner only; knob B)` for the knobs a bar put in, or nothing."""
+    if not names:
+        return ""
+    return " (%s)" % "; ".join("knob %s%s" % (n, ", owner only" if knobs[n]["owner_only"] else "")
+                               for n in names)
+
+
+def bar_parts(data):
+    """What each part of a loaded runbook asks, written as intake writes the `bar` of a row: every
+    check (`<stage>/<check>: <type> <what> <op> <value>`, a knob's value put in and the knob named,
+    owner-only marked), every fail case (`fail <stage>/<id>: detect <...> then <...>`, or `when
+    <text>` without a detect) and every owner gate (`owner approves: <approve text>`).
+
+    Returns {"parts": {who: {"kind", "stage", "bar", "source", "knobs"}}, "stages": {stage id:
+    {"position", "of", "label", "recovery"}}, "knobs": {knob id: {"default", "owner_only",
+    "source"}}}. `who` is the name coverage gives a covering part (a check id, `fail:<stage>/<id>`,
+    `gate:<stage>`), so an item's bar is the bars of coverage["covered"][item] joined with "; ".
+    A stage's position counts the stages in run order (`3/5 load-test`); a recovery stage runs
+    outside that order and has none. Read only a runbook that passed the check."""
+    knobs = {}
+    for knob in data.get("knobs") or []:
+        if isinstance(knob, dict) and isinstance(knob.get("id"), str):
+            knobs[knob["id"]] = {"default": knob.get("default"), "owner_only": bool(knob.get("owner_only")),
+                                 "source": knob.get("source")}
+    stages = [s for s in data.get("stages") or [] if isinstance(s, dict)]
+    order = [s.get("id") for s in stages if s.get("recovery") is not True]
+    positions, parts = {}, {}
+    for stage in stages:
+        sid = stage.get("id")
+        if stage.get("recovery") is True:
+            positions[sid] = {"position": None, "of": len(order), "label": "recovery %s" % sid, "recovery": True}
+        else:
+            n = order.index(sid) + 1
+            positions[sid] = {"position": n, "of": len(order), "label": "%d/%d %s" % (n, len(order), sid),
+                              "recovery": False}
+        for chk in stage.get("checks") or []:
+            if isinstance(chk, dict):
+                text, names = _bar_check(chk, knobs)
+                parts[str(chk.get("id"))] = {"kind": "check", "stage": sid, "source": chk.get("source"),
+                                             "knobs": names, "bar": "%s/%s: %s%s" % (
+                                                 sid, chk.get("id"), text, _bar_note(names, knobs))}
+        for fail in stage.get("fails") or []:
+            if not isinstance(fail, dict):
+                continue
+            pieces, names = [], []
+            if isinstance(fail.get("detect"), dict):
+                text, names = _bar_check(fail["detect"], knobs)
+                pieces.append("detect %s%s" % (text, _bar_note(names, knobs)))
+            then = fail.get("then")
+            if then is not None:
+                pieces.append("then %s" % ("run %s" % then["run"] if isinstance(then, dict) else then))
+            if not pieces:
+                pieces.append("when %s" % " ".join(str(fail.get("when") or "").split()))
+            parts["fail:%s/%s" % (sid, fail.get("id"))] = {
+                "kind": "fail", "stage": sid, "source": fail.get("source"), "knobs": names,
+                "bar": "fail %s/%s: %s" % (sid, fail.get("id"), " ".join(pieces))}
+        gate = stage.get("owner_gate")
+        if isinstance(gate, dict):
+            parts["gate:%s" % sid] = {"kind": "gate", "stage": sid, "source": gate.get("source"), "knobs": [],
+                                      "bar": "owner approves: %s" % " ".join(str(gate.get("approve") or "").split())}
+    return {"parts": parts, "stages": positions, "knobs": knobs}
 
 
 # ------------------------------------------------------------------------------- the verb
