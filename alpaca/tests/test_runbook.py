@@ -1584,7 +1584,8 @@ def bar_data():
                     {"id": "build-exit", "type": "exit-code"},
                     {"id": "artifact", "type": "file-exists", "path": "out/app.bin", "source": "interview:done-bar"},
                     {"id": "any-log", "type": "file-exists", "path": "out/app.log", "non_empty": False}]},
-                {"id": "load-test", "needs": ["build"], "run": "make load W=${WORKERS}", "checks": [
+                {"id": "load-test", "needs": ["build"], "run": "make load W=${WORKERS}", "retry": {"max_attempts": 2},
+                 "checks": [
                     {"id": "redirect-p95", "type": "json-field", "path": "out/p95.json", "field": "p95_ms",
                      "op": "<=", "value": "${P95_MS}", "source": "spec:SC-002"},
                     {"id": "no-errors", "type": "regex-in-file", "path": "out/load.log", "pattern": "ERROR",
