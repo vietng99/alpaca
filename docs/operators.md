@@ -124,7 +124,8 @@ lifecycle step.
 ## Alpaca's own skills
 
 `.claude/skills/` holds Alpaca's own skills: `alpaca-first-chat` (the first chat before
-onboarding), `alpaca-onboard`, `alpaca-op`, `alpaca-from-notes` and `alpaca-runbook-forge`. They are
+onboarding), `alpaca-onboard`, `alpaca-op`, `alpaca-from-notes`, `alpaca-interview` and
+`alpaca-runbook-forge`. They are
 Claude Code project skills and mechanism paths in `ALPACA-MANIFEST`, so a clone, a copy, a release
 and `alpaca upgrade` all carry them and Claude Code offers each as a `/command` with nothing to
 install. The rest of `.claude/skills/` (the spec-kit and OpenSpec skills `alpaca spec init` writes,

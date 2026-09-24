@@ -27,6 +27,8 @@ from alpaca.gates import verdict
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 EXAMPLE = os.path.join(REPO, "templates", "runbook-example")
+# the worked example as it was in format 1, kept so format 1 stays tested
+EXAMPLE_V1 = os.path.join(REPO, "alpaca", "tests", "fixtures", "runbook-example-v1")
 
 
 # ------------------------------------------------------------------------------- fixtures
@@ -187,7 +189,7 @@ def test_minimal_runbook_passes(tmp_path):
 
 
 def test_worked_example_passes_against_its_own_spec():
-    result = runbook.check(os.path.join(EXAMPLE, "runbook.yaml"))
+    result = runbook.check(os.path.join(EXAMPLE_V1, "runbook.yaml"))
     assert result["errors"] == [], result["errors"]
     assert result["verdict"] == "PASS"
     assert result["spec"]["format"] == "spec-kit"
@@ -1089,3 +1091,723 @@ def test_example_plugin_blocks_on_a_count_that_is_not_whole(tmp_path):
         code, reason = runbook.evaluate(chk, workdir=str(tmp_path), runbook_dir=EXAMPLE)
         assert code == verdict.BLOCKED, (counts, reason)
         assert "whole number" in reason, reason
+
+
+# ================================================================= format 2 (op-003 part A)
+# `runbook: 2` adds numbered edge cases (EC-nnn) as spec items, known failures with a detection
+# and a response (`detect`, `then`, recovery stages), and provenance (`source`). A `runbook: 1`
+# file reads and checks as before; the only new thing it can get is the EC-IGNORED warning.
+SPEC_EC = """\
+# Feature Specification: Nightly report
+
+## User Scenarios & Testing
+
+### Edge Cases
+
+- **EC-001**: An empty day mails a summary that says no orders.
+- **EC-002**: A day with more than 100000 orders still finishes.
+
+## Success Criteria
+
+- **SC-001**: The summary counts every order of the day.
+- **SC-002**: The job finishes in under 15 minutes.
+"""
+
+
+def minimal2(**over):
+    """minimal() as format 2."""
+    return minimal(**dict({"runbook": 2}, **over))
+
+
+def spec_file(tmp_path, text, name="spec.md"):
+    path = tmp_path / name
+    path.write_text(text, encoding="utf-8")
+    return str(path)
+
+
+def ec_runbook():
+    """Format 2, covering SC-001 and EC-001 by checks and EC-002 by a fail case."""
+    data = minimal2()
+    data["stages"][0]["checks"][0]["covers"] = ["SC-001", "EC-001"]
+    data["stages"].append({"id": "free-port", "recovery": True, "run": "make free-port",
+                           "checks": [{"id": "port-free", "type": "exit-code"}]})
+    data["stages"][1]["fails"] = [{"id": "too-many", "when": "the day holds too many orders",
+                                   "detect": {"type": "regex-in-file", "path": "out/load.log",
+                                              "pattern": "MemoryError"},
+                                   "then": "stop", "covers": ["EC-002"]}]
+    return data
+
+
+def warn_codes(result):
+    """The warning codes, without COVERS-WITHOUT-SPEC (a check with `covers` read with no spec)."""
+    return [w["code"] for w in result["warnings"] if w["code"] != "COVERS-WITHOUT-SPEC"]
+
+
+def where_codes(result, key="errors"):
+    return {(e["code"], e["where"]) for e in result[key]}
+
+
+# ------------------------------------------------------------------------ the version
+def test_format_2_is_the_newest_and_format_1_still_reads(tmp_path):
+    assert runbook.FORMAT == 2 and runbook.FORMATS == (1, 2)
+    assert runbook.check(write(tmp_path, minimal2()))["errors"] == []
+    assert runbook.check(write(tmp_path, minimal()))["errors"] == []
+    result = runbook.check(write(tmp_path, minimal(runbook=3)))
+    assert codes(result) == ["VERSION-UNSUPPORTED"]
+    assert "runbook: 2" in result["errors"][0]["message"]
+
+
+def test_format_1_refuses_the_format_2_fields(tmp_path):
+    data = minimal()
+    data["knobs"][0]["source"] = "default"
+    data["stages"][0]["recovery"] = False
+    data["stages"][0]["checks"][0]["source"] = "spec:SC-001"
+    data["stages"][1]["fails"] = [{"id": "f", "when": "w", "detect": {"type": "exit-code"},
+                                   "then": "stop", "covers": ["SC-002"], "source": "default"}]
+    data["stages"].append({"id": "ship", "owner_gate": {"approve": "the owner ships", "source": "owner:x"}})
+    result = runbook.check(write(tmp_path, data))
+    unknown = {w for c, w in where_codes(result) if c == "FIELD-UNKNOWN"}
+    assert unknown == {"knobs[0].source", "stages[0].recovery", "stages[0].checks[0].source",
+                       "stages[1].fails[0].detect", "stages[1].fails[0].then", "stages[1].fails[0].covers",
+                       "stages[1].fails[0].source", "stages[2].owner_gate.source"}, result["errors"]
+    assert set(codes(result)) == {"FIELD-UNKNOWN"}
+    # the same file as format 2 is clean
+    data["runbook"] = 2
+    assert runbook.check(write(tmp_path, data))["errors"] == []
+
+
+# ------------------------------------------------------------------ A1: edge cases
+@pytest.mark.parametrize("line", [
+    "- **EC-001**: an empty day mails an empty summary",
+    "- **EC-001:** an empty day mails an empty summary",
+    "1. **EC-001**: an empty day mails an empty summary",
+    "EC-001: an empty day mails an empty summary",
+    "### EC-001: an empty day mails an empty summary",
+    "| EC-001 | an empty day mails an empty summary |",
+])
+def test_edge_case_item_shapes(tmp_path, line):
+    path = spec_file(tmp_path, "# Feature Specification: x\n\n## Success Criteria\n\n- **SC-001**: one\n\n"
+                               "### Edge Cases\n\n%s\n" % line)
+    spec = runbook.parse_spec(path)
+    # the items of format 1 are what they always were
+    assert [i["id"] for i in spec["items"]] == ["SC-001"]
+    assert [(i["id"], i["kind"], i["required"], i["text"]) for i in spec["edge_cases"]] == [
+        ("EC-001", "EC", True, "an empty day mails an empty summary")]
+    assert not spec["edge_cases"][0].get("loose")
+    assert [i["id"] for i in runbook.spec_items(spec, 2)] == ["EC-001", "SC-001"]
+    assert [i["id"] for i in runbook.spec_items(spec, 1)] == ["SC-001"]
+    assert spec["unnumbered"] == []
+
+
+def test_edge_cases_are_required_items_in_format_2(tmp_path):
+    spec = spec_file(tmp_path, SPEC_EC)
+    result = runbook.check(write(tmp_path, ec_runbook()), spec_path=spec)
+    assert result["errors"] == [], result["errors"]
+    assert result["verdict"] == "PASS"
+    assert result["spec"]["required"] == 4 and result["spec"]["items"] == 4
+    cov = result["coverage"]
+    assert cov["covered"]["EC-001"] == ["build-exit"]
+    # a fail case that detects and answers an edge case covers it
+    assert cov["covered"]["EC-002"] == ["fail:load/too-many"]
+    assert result["warnings"] == []
+
+
+def test_an_uncovered_edge_case_fails_like_a_criterion(tmp_path):
+    spec = spec_file(tmp_path, SPEC_EC)
+    data = ec_runbook()
+    del data["stages"][1]["fails"][0]["covers"]
+    result = runbook.check(write(tmp_path, data), spec_path=spec)
+    assert result["verdict"] == "FAIL"
+    assert [e["where"] for e in result["errors"] if e["code"] == "SPEC-UNCOVERED"] == ["EC-002"]
+    assert result["coverage"]["missing"] == ["EC-002"]
+    msg = [e for e in result["errors"] if e["code"] == "SPEC-UNCOVERED"][0]["message"]
+    assert "no runbook check covers EC-002" in msg and "fail case" in msg
+
+
+def test_a_loose_edge_case_id_still_counts(tmp_path):
+    spec = spec_file(tmp_path, SPEC_EC + "\n## Assumptions\n\nAlso EC-003 matters: a holiday has no orders.\n")
+    result = runbook.check(write(tmp_path, ec_runbook()), spec_path=spec)
+    assert result["coverage"]["missing"] == ["EC-003"]
+    loose = [w for w in result["warnings"] if w["code"] == "SPEC-UNPARSED"]
+    assert [w["where"] for w in loose] == ["EC-003"]
+    assert "a required edge case" in loose[0]["message"] and "line 17" in loose[0]["message"]
+
+
+def test_an_unnumbered_edge_case_bullet_is_an_error(tmp_path):
+    text = SPEC_EC.replace("- **EC-002**: A day with", "- A day with")
+    text = text.replace("says no orders.\n", "says no orders.\n  - a nested detail line is not an edge case\n")
+    spec = spec_file(tmp_path, text)
+    data = ec_runbook()
+    del data["stages"][1]["fails"][0]["covers"]
+    result = runbook.check(write(tmp_path, data), spec_path=spec)
+    assert result["verdict"] == "FAIL"
+    bad = [e for e in result["errors"] if e["code"] == "EC-UNNUMBERED"]
+    assert [e["where"] for e in bad] == ["%s:9" % spec], result["errors"]
+    assert "line 9" in bad[0]["message"] and "A day with more than 100000 orders" in bad[0]["message"]
+    assert "EC-001" in bad[0]["message"]
+    # the reader never numbers a bullet by its position
+    assert [i["id"] for i in runbook.parse_spec(spec)["edge_cases"]] == ["EC-001"]
+
+
+def test_edge_case_heading_levels_and_section_end(tmp_path):
+    text = ("# Feature Specification: x\n\n## Edge Cases\n\n- **EC-001**: one\n- unnumbered two\n\n"
+            "## Success Criteria\n\n- **SC-001**: a bullet outside the section\n- not an edge case\n")
+    spec = runbook.parse_spec(spec_file(tmp_path, text))
+    assert [u["line"] for u in spec["unnumbered"]] == [6]
+    assert spec["edge_case_bullets"] == 2
+
+
+def test_format_1_ignores_edge_cases_with_one_warning(tmp_path):
+    text = SPEC_EC.replace("- **EC-002**: A day with", "- A day with")
+    spec = spec_file(tmp_path, text)
+    result = runbook.check(write(tmp_path, minimal()), spec_path=spec)
+    assert result["errors"] == [] and result["verdict"] == "PASS"
+    assert [(w["code"], w["where"]) for w in result["warnings"]] == [("EC-IGNORED", spec)]
+    assert "format 1 does not cover edge cases; move to runbook: 2" in result["warnings"][0]["message"]
+    assert result["spec"]["required"] == 2
+    # an EC id is not an item in format 1
+    data = minimal()
+    data["stages"][0]["checks"][0]["covers"] = ["SC-001", "EC-001"]
+    assert "COVERS-UNKNOWN" in codes(runbook.check(write(tmp_path, data), spec_path=spec))
+
+
+def test_format_1_example_fixture_still_passes_with_only_the_ec_warning():
+    result = runbook.check(os.path.join(EXAMPLE_V1, "runbook.yaml"))
+    assert result["errors"] == [] and result["verdict"] == "PASS"
+    assert [w["code"] for w in result["warnings"]] == ["EC-IGNORED"]
+    assert sorted(result["coverage"]["covered"]) == ["SC-001", "SC-002", "SC-003", "SC-004"]
+
+
+def test_openspec_reads_the_same_under_format_2(tmp_path):
+    spec = spec_file(tmp_path, OPENSPEC_MAIN)
+    covers = ["Session Timeout/Idle timeout", "Session Timeout/Activity resets the clock",
+              "Logout/Explicit logout"]
+    for fmt in (1, 2):
+        data = openspec_runbook(covers)
+        data["runbook"] = fmt
+        result = runbook.check(write(tmp_path, data), spec_path=spec)
+        assert result["errors"] == [] and result["warnings"] == [], fmt
+        assert result["spec"]["required"] == 3
+
+
+# ------------------------------------------------------------ A2: detect and then
+def fails2(**fail):
+    """Format 2 with a recovery stage `free-port` and one fail case on stage `load`."""
+    data = minimal2()
+    data["stages"].append({"id": "free-port", "recovery": True, "run": "make free-port",
+                           "checks": [{"id": "port-free", "type": "exit-code"}]})
+    data["stages"][1]["fails"] = [dict({"id": "port-busy", "when": "the port is taken"}, **fail)]
+    return data
+
+
+DETECT = {"type": "regex-in-file", "path": "out/load.log", "pattern": "Address already in use"}
+
+
+@pytest.mark.parametrize("then", ["retry", "stop", "ask-owner", {"run": "free-port"}])
+def test_a_fail_case_with_detect_and_then_passes(tmp_path, then):
+    result = runbook.check(write(tmp_path, fails2(detect=DETECT, then=then)))
+    assert result["errors"] == [] and result["verdict"] == "PASS", result["errors"]
+
+
+def test_a_fail_case_without_detect_keeps_its_format_1_shape(tmp_path):
+    assert runbook.check(write(tmp_path, fails2()))["errors"] == []
+
+
+@pytest.mark.parametrize("fail,code,where", [
+    ({"detect": DETECT}, "THEN-MISSING", "stages[1].fails[0].then"),
+    ({"detect": DETECT, "then": "again"}, "THEN-UNKNOWN", "stages[1].fails[0].then"),
+    ({"detect": DETECT, "then": {"run": "free-port", "wait": 5}}, "THEN-UNKNOWN", "stages[1].fails[0].then"),
+    ({"detect": DETECT, "then": {"run": 5}}, "THEN-UNKNOWN", "stages[1].fails[0].then"),
+    ({"detect": DETECT, "then": {"run": "nowhere"}}, "RECOVERY-UNKNOWN", "stages[1].fails[0].then.run"),
+    ({"detect": DETECT, "then": {"run": "build"}}, "RECOVERY-NOT-MARKED", "stages[1].fails[0].then.run"),
+    ({"detect": {"type": "regex-in-file", "path": "out/load.log"}, "then": "stop"},
+     "DETECT-INVALID", "stages[1].fails[0].detect.pattern"),
+    ({"detect": dict(DETECT, id="d"), "then": "stop"}, "DETECT-INVALID", "stages[1].fails[0].detect.id"),
+    ({"detect": dict(DETECT, covers=["SC-001"]), "then": "stop"}, "DETECT-INVALID",
+     "stages[1].fails[0].detect.covers"),
+    ({"detect": dict(DETECT, source="default"), "then": "stop"}, "DETECT-INVALID",
+     "stages[1].fails[0].detect.source"),
+    ({"detect": dict(DETECT, pattern="(unclosed"), "then": "stop"}, "DETECT-INVALID",
+     "stages[1].fails[0].detect.pattern"),
+    ({"detect": {"type": "smoke-signal"}, "then": "stop"}, "DETECT-INVALID", "stages[1].fails[0].detect.type"),
+    ({"detect": "grep -q busy out/load.log", "then": "stop"}, "DETECT-INVALID", "stages[1].fails[0].detect"),
+    ({"detect": {"type": "plugin", "script": "checks/none.py"}, "then": "stop"}, "DETECT-INVALID",
+     "stages[1].fails[0].detect.script"),
+    ({"covers": "SC-001"}, "FIELD-NOT-LIST", "stages[1].fails[0].covers"),
+])
+def test_fail_case_refusals(tmp_path, fail, code, where):
+    result = runbook.check(write(tmp_path, fails2(**fail)))
+    assert (code, where) in where_codes(result), result["errors"]
+    assert result["verdict"] == "FAIL"
+
+
+def test_detect_invalid_names_the_check_rule_it_broke(tmp_path):
+    result = runbook.check(write(tmp_path, fails2(detect={"type": "regex-in-file", "path": "out/load.log"},
+                                                  then="stop")))
+    bad = [e for e in result["errors"] if e["code"] == "DETECT-INVALID"]
+    assert len(bad) == 1 and "FIELD-MISSING" in bad[0]["message"] and "pattern" in bad[0]["message"]
+
+
+def test_no_stage_may_need_a_recovery_stage_and_a_recovery_stage_needs_nothing(tmp_path):
+    data = fails2()
+    data["stages"].insert(2, {"id": "report", "needs": ["free-port"], "run": "make report",
+                              "checks": [{"id": "report-exit", "type": "exit-code"}]})
+    data["stages"][3]["needs"] = ["build"]
+    result = runbook.check(write(tmp_path, data))
+    got = where_codes(result)
+    assert ("RECOVERY-NEEDED", "stages[2].needs[0]") in got, result["errors"]
+    assert ("RECOVERY-NEEDED", "stages[3].needs") in got
+    assert "NEEDS-UNKNOWN" not in codes(result)
+    # a recovery stage declared earlier is still refused as a need, not taken as a run-order stage
+    data = fails2()
+    data["stages"].insert(0, data["stages"].pop())
+    data["stages"][1]["needs"] = ["free-port"]
+    assert ("RECOVERY-NEEDED", "stages[1].needs[0]") in where_codes(runbook.check(write(tmp_path, data)))
+
+
+def test_a_recovery_stage_may_not_send_to_itself(tmp_path):
+    data = fails2()
+    data["stages"][2]["fails"] = [{"id": "still-busy", "when": "w", "detect": DETECT,
+                                   "then": {"run": "free-port"}}]
+    result = runbook.check(write(tmp_path, data))
+    assert where_codes(result) == {("RECOVERY-SELF", "stages[2].fails[0].then.run")}, result["errors"]
+
+
+def test_a_recovery_stage_runs_a_command_and_is_never_an_owner_gate(tmp_path):
+    data = fails2()
+    del data["stages"][2]["run"]
+    del data["stages"][2]["checks"]
+    data["stages"][2]["owner_gate"] = {"approve": "the owner frees the port"}
+    got = where_codes(runbook.check(write(tmp_path, data)))
+    assert ("RUN-MISSING", "stages[2]") in got and ("FIELD-UNKNOWN", "stages[2].owner_gate") in got, got
+    data = fails2()
+    data["stages"][2]["checks"] = []
+    assert ("CHECKS-EMPTY", "stages[2].checks") in where_codes(runbook.check(write(tmp_path, data)))
+    data = fails2()
+    data["stages"][2]["recovery"] = "yes"
+    assert ("FIELD-TYPE", "stages[2].recovery") in where_codes(runbook.check(write(tmp_path, data)))
+
+
+# ------------------------------------------------------------------- A4: provenance
+@pytest.mark.parametrize("source", ["spec:SC-002", "spec:Session Timeout/Idle timeout",
+                                    "note:input/notes/20260924T101500Z-0123456789ab.md",
+                                    "interview:thresholds", "owner:decision d-004", "default"])
+def test_source_shapes_that_are_accepted(tmp_path, source):
+    data = fails2(detect=DETECT, then="stop", source=source)
+    data["knobs"][0]["source"] = source
+    data["stages"][0]["checks"][0]["source"] = source
+    data["stages"].append({"id": "ship", "needs": ["load"], "owner_gate": {"approve": "the owner ships",
+                                                                             "source": source}})
+    result = runbook.check(write(tmp_path, data))
+    assert result["errors"] == [] and warn_codes(result) == [], (result["errors"], result["warnings"])
+
+
+@pytest.mark.parametrize("source", ["the meeting on Tuesday", "note:../secret.md", "note:input/other/a.md",
+                                    "note:input/notes/", "interview:Done Bar", "spec:", "owner:", "defaults",
+                                    "note:input/notes/../../x.md"])
+def test_a_source_of_another_shape_is_a_warning(tmp_path, source):
+    data = minimal2()
+    data["knobs"][0]["source"] = source
+    result = runbook.check(write(tmp_path, data))
+    assert result["errors"] == [] and result["verdict"] == "PASS"
+    assert [(w["code"], w["where"]) for w in result["warnings"]
+            if w["code"] != "COVERS-WITHOUT-SPEC"] == [("SOURCE-SHAPE", "knobs[0].source")]
+
+
+def test_a_source_must_be_text(tmp_path):
+    data = minimal2()
+    data["stages"][0]["checks"][0]["source"] = 5
+    assert ("FIELD-TYPE", "stages[0].checks[0].source") in where_codes(runbook.check(write(tmp_path, data)))
+
+
+def test_a_note_source_must_exist_when_a_spec_is_given(tmp_path):
+    proj = tmp_path / "proj"
+    domain = proj / "domain"
+    domain.mkdir(parents=True)
+    (proj / "project.yaml").write_text("name: p\n", encoding="utf-8")
+    spec = spec_file(domain, SPEC_KIT)
+    data = minimal2()
+    data["stages"][1]["checks"][0]["covers"] = ["SC-002", "SC-003"]
+    data["knobs"][0]["source"] = "note:input/notes/a.md"
+    path = write(domain, data)
+    # without a spec only the shape is read
+    assert "SOURCE-MISSING" not in [w["code"] for w in runbook.check(path)["warnings"]]
+    result = runbook.check(path, spec_path=spec)
+    assert result["errors"] == []
+    missing = [w for w in result["warnings"] if w["code"] == "SOURCE-MISSING"]
+    assert [w["where"] for w in missing] == ["knobs[0].source"]
+    assert "input/notes/a.md" in missing[0]["message"]
+    # the project root is the folder that holds project.yaml; the note is found there
+    (proj / "input" / "notes").mkdir(parents=True)
+    (proj / "input" / "notes" / "a.md").write_text("the load test uses two workers\n", encoding="utf-8")
+    result = runbook.check(path, spec_path=spec)
+    assert "SOURCE-MISSING" not in [w["code"] for w in result["warnings"]]
+    # --no-files skips the look-up, as it skips the plugin look-ups
+    (proj / "input" / "notes" / "a.md").unlink()
+    assert "SOURCE-MISSING" not in [w["code"] for w in runbook.check(path, spec_path=spec, check_files=False)["warnings"]]
+
+
+def test_a_note_above_the_project_root_is_not_found(tmp_path):
+    (tmp_path / "input" / "notes").mkdir(parents=True)
+    (tmp_path / "input" / "notes" / "a.md").write_text("x\n", encoding="utf-8")
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "project.yaml").write_text("name: p\n", encoding="utf-8")
+    spec = spec_file(proj, SPEC_KIT)
+    data = minimal2(spec="spec.md")
+    data["stages"][1]["checks"][0]["covers"] = ["SC-002", "SC-003"]
+    data["stages"][1]["checks"][0]["source"] = "note:input/notes/a.md"
+    result = runbook.check(write(proj, data))
+    assert result["spec"]["path"].endswith("spec.md") and spec
+    assert [w["where"] for w in result["warnings"] if w["code"] == "SOURCE-MISSING"] == [
+        "stages[1].checks[0].source"]
+
+
+# ------------------------------------------------------------------ A2: respond()
+def respond_data(*thens):
+    data = minimal2()
+    data["stages"].append({"id": "free-port", "recovery": True, "run": "make free-port",
+                           "checks": [{"id": "port-free", "type": "exit-code"}]})
+    stage = data["stages"][1]
+    stage["checks"] += [{"id": "codes", "type": "exit-code"}, {"id": "other", "type": "exit-code"}]
+    stage["retry"]["stop_on"] = ["codes"]
+    stage["fails"] = [{"id": "f%d" % n, "when": "w", "detect": {"type": "exit-code", "expect": 9}, "then": t}
+                      for n, t in enumerate(thens)]
+    return data, stage
+
+
+P, F, B = verdict.PASS, verdict.FAIL, verdict.BLOCKED
+FAILED = {"p95": F, "codes": P, "other": P}
+
+
+def test_respond_stop_ends_fail():
+    data, stage = respond_data("stop")
+    step = runbook.respond(data, stage, FAILED, 1, runbook.knob_values(data), {"f0": P})
+    assert (step["retry"], step["run"], step["end"], step["fail"]) == (False, None, F, "f0")
+    assert "f0" in step["reason"]
+
+
+def test_respond_ask_owner_ends_paused():
+    data, stage = respond_data("ask-owner")
+    step = runbook.respond(data, stage, FAILED, 1, runbook.knob_values(data), {"f0": P})
+    assert (step["retry"], step["run"], step["end"], step["fail"]) == (False, None, verdict.PAUSED, "f0")
+
+
+def test_respond_retry_goes_through_the_retry_rule_and_its_limits():
+    data, stage = respond_data("retry")
+    knobs = runbook.knob_values(data)
+    # `other` is not in on_fail, so the retry rule alone would stop; the fail case names the
+    # failure as one a new attempt may fix
+    results = {"p95": P, "codes": P, "other": F}
+    assert not runbook.next_attempt(data, stage, results, 1, knobs)["retry"]
+    step = runbook.respond(data, stage, results, 1, knobs, {"f0": P})
+    assert step["retry"] and step["knobs"]["WORKERS"] == 4 and step["end"] is None and step["fail"] == "f0"
+    # the attempts still run out
+    step = runbook.respond(data, stage, results, 3, knobs, {"f0": P})
+    assert not step["retry"] and step["end"] == F and "3 of 3" in step["reason"]
+    # the knob range still holds
+    step = runbook.respond(data, stage, results, 1, {"WORKERS": 8}, {"f0": P})
+    assert not step["retry"] and step["end"] == F and "range" in step["reason"]
+    # a stop_on check still stops
+    step = runbook.respond(data, stage, {"p95": P, "codes": F, "other": P}, 1, knobs, {"f0": P})
+    assert not step["retry"] and step["end"] == F and "stop_on" in step["reason"]
+
+
+def test_respond_run_sends_to_the_recovery_stage_while_an_attempt_is_left():
+    data, stage = respond_data({"run": "free-port"})
+    knobs = runbook.knob_values(data)
+    step = runbook.respond(data, stage, FAILED, 1, knobs, {"f0": P})
+    assert (step["retry"], step["run"], step["end"], step["fail"]) == (False, "free-port", None, "f0")
+    assert step["knobs"] == knobs and "free-port" in step["reason"]
+    # the rerun after the recovery is an attempt of the failed stage: none left, no recovery
+    step = runbook.respond(data, stage, FAILED, 3, knobs, {"f0": P})
+    assert (step["run"], step["end"]) == (None, F) and "3 of 3" in step["reason"]
+    # a stop_on check that failed is never run again, recovered or not
+    step = runbook.respond(data, stage, {"p95": F, "codes": F, "other": P}, 1, knobs, {"f0": P})
+    assert (step["run"], step["end"]) == (None, F)
+    # a recovery may supply what a BLOCKED check missed
+    step = runbook.respond(data, stage, {"p95": B, "codes": P, "other": P}, 1, knobs, {"f0": P})
+    assert step["run"] == "free-port"
+
+
+def test_respond_first_recognized_fail_case_in_file_order_decides():
+    data, stage = respond_data("stop", "ask-owner")
+    knobs = runbook.knob_values(data)
+    assert runbook.respond(data, stage, FAILED, 1, knobs, {"f0": P, "f1": P})["fail"] == "f0"
+    step = runbook.respond(data, stage, FAILED, 1, knobs, {"f0": F, "f1": P})
+    assert step["fail"] == "f1" and step["end"] == verdict.PAUSED
+    # a fail case without a detect is never recognized, whatever the caller passes
+    stage["fails"].insert(0, {"id": "plain", "when": "w"})
+    assert runbook.respond(data, stage, FAILED, 1, knobs, {"plain": P, "f1": P})["fail"] == "f1"
+
+
+def test_respond_with_no_fail_case_recognized_is_the_retry_rule():
+    data, stage = respond_data("stop")
+    knobs = runbook.knob_values(data)
+    cases = [({"p95": F, "codes": P, "other": P}, 1, P, None), ({"p95": F, "codes": P, "other": P}, 3, P, F),
+             ({"p95": F, "codes": F, "other": P}, 1, P, F), ({"p95": B, "codes": P, "other": P}, 1, P, B),
+             ({"p95": F, "codes": P, "other": P}, 1, F, None), ({"p95": verdict.PAUSED, "codes": P, "other": P}, 1,
+                                                               None, verdict.PAUSED)]
+    for results, attempt, det, end in cases:
+        detected = {} if det is None else {"f0": det}
+        if det == P:
+            detected = {"f9": P}             # names no fail case of the stage
+        want = runbook.next_attempt(data, stage, results, attempt, knobs)
+        step = runbook.respond(data, stage, results, attempt, knobs, detected)
+        assert {k: step[k] for k in want} == want, (results, attempt)
+        assert (step["run"], step["fail"], step["end"]) == (None, None, end), (results, attempt, step)
+
+
+def test_respond_passes_when_every_check_passed_whatever_was_detected():
+    data, stage = respond_data("stop")
+    step = runbook.respond(data, stage, {"p95": P, "codes": P, "other": P}, 1, runbook.knob_values(data), {"f0": P})
+    assert (step["retry"], step["run"], step["end"], step["fail"]) == (False, None, P, None)
+
+
+def test_respond_on_a_format_1_stage_is_next_attempt():
+    data, stage = load_stage()
+    knobs = runbook.knob_values(data)
+    for results in ({"p95": F, "codes": P}, {"p95": P, "codes": P}, {"p95": F, "codes": F}):
+        want = runbook.next_attempt(data, stage, results, 1, knobs)
+        step = runbook.respond(data, stage, results, 1, knobs, {})
+        assert {k: step[k] for k in want} == want
+
+
+# --------------------------------------------------------- bar_parts (for intake, B1)
+def bar_data():
+    return {"runbook": 2, "id": "bars", "title": "Bars",
+            "knobs": [{"id": "P95_MS", "description": "d", "type": "float", "default": 50, "owner_only": True,
+                       "source": "spec:SC-002"},
+                      {"id": "WORKERS", "description": "d", "type": "int", "default": 2, "source": "default"}],
+            "stages": [
+                {"id": "build", "run": "make", "checks": [
+                    {"id": "build-exit", "type": "exit-code"},
+                    {"id": "artifact", "type": "file-exists", "path": "out/app.bin", "source": "interview:done-bar"},
+                    {"id": "any-log", "type": "file-exists", "path": "out/app.log", "non_empty": False}]},
+                {"id": "load-test", "needs": ["build"], "run": "make load W=${WORKERS}", "retry": {"max_attempts": 2},
+                 "checks": [
+                    {"id": "redirect-p95", "type": "json-field", "path": "out/p95.json", "field": "p95_ms",
+                     "op": "<=", "value": "${P95_MS}", "source": "spec:SC-002"},
+                    {"id": "no-errors", "type": "regex-in-file", "path": "out/load.log", "pattern": "ERROR",
+                     "absent": True, "ignore_case": True},
+                    {"id": "codes", "type": "plugin", "script": "checks/codes.py",
+                     "args": ["out/load.json", 301, "${WORKERS}"]},
+                    {"id": "tag", "type": "json-field", "path": "out/v.json", "field": "tag", "op": "==",
+                     "value": "ok"}],
+                 "fails": [{"id": "port-busy", "when": "the port is taken", "detect": DETECT,
+                            "then": {"run": "free-port"}, "source": "note:input/notes/a.md"},
+                           {"id": "flaky", "when": "the network\n drops"},
+                           {"id": "full", "when": "w", "detect": {"type": "exit-code", "expect": 3},
+                            "then": "ask-owner"}]},
+                {"id": "release", "needs": ["load-test"], "owner_gate": {"approve": "the owner reads\n  the load report",
+                                                                         "source": "owner:d-001"}},
+                {"id": "free-port", "recovery": True, "run": "make free-port", "checks": [
+                    {"id": "port-free", "type": "exit-code", "expect": 0}]}]}
+
+
+def test_bar_parts_renders_every_part_in_the_item_file_shapes(tmp_path):
+    data = bar_data()
+    assert runbook.check(write(tmp_path, data), check_files=False)["errors"] == []
+    parts = runbook.bar_parts(data)["parts"]
+    bars = {who: part["bar"] for who, part in parts.items()}
+    assert bars == {
+        "build-exit": "build/build-exit: exit-code exit == 0",
+        "artifact": "build/artifact: file-exists out/app.bin exists, non-empty",
+        "any-log": "build/any-log: file-exists out/app.log exists",
+        "redirect-p95": "load-test/redirect-p95: json-field out/p95.json p95_ms <= 50 (knob P95_MS, owner only)",
+        "no-errors": "load-test/no-errors: regex-in-file out/load.log does not match /ERROR/i",
+        "codes": "load-test/codes: plugin checks/codes.py out/load.json 301 2 exits 0 (knob WORKERS)",
+        "tag": 'load-test/tag: json-field out/v.json tag == "ok"',
+        "fail:load-test/port-busy": "fail load-test/port-busy: detect regex-in-file out/load.log matches "
+                                    "/Address already in use/ then run free-port",
+        "fail:load-test/flaky": "fail load-test/flaky: when the network drops",
+        "fail:load-test/full": "fail load-test/full: detect exit-code exit == 3 then ask-owner",
+        "gate:release": "owner approves: the owner reads the load report",
+        "port-free": "free-port/port-free: exit-code exit == 0",
+    }
+    assert {who: (p["kind"], p["stage"]) for who, p in parts.items()}["fail:load-test/flaky"] == ("fail", "load-test")
+    assert parts["gate:release"]["kind"] == "gate" and parts["gate:release"]["stage"] == "release"
+    assert parts["redirect-p95"]["kind"] == "check" and parts["redirect-p95"]["knobs"] == ["P95_MS"]
+    assert parts["build-exit"]["knobs"] == []
+
+
+def test_bar_parts_gives_run_order_positions_and_sources():
+    out = runbook.bar_parts(bar_data())
+    assert out["stages"] == {
+        "build": {"position": 1, "of": 3, "label": "1/3 build", "recovery": False},
+        "load-test": {"position": 2, "of": 3, "label": "2/3 load-test", "recovery": False},
+        "release": {"position": 3, "of": 3, "label": "3/3 release", "recovery": False},
+        "free-port": {"position": None, "of": 3, "label": "recovery free-port", "recovery": True},
+    }
+    sources = {who: p["source"] for who, p in out["parts"].items() if p["source"]}
+    assert sources == {"artifact": "interview:done-bar", "redirect-p95": "spec:SC-002",
+                       "fail:load-test/port-busy": "note:input/notes/a.md", "gate:release": "owner:d-001"}
+    assert out["knobs"] == {"P95_MS": {"default": 50, "owner_only": True, "source": "spec:SC-002"},
+                            "WORKERS": {"default": 2, "owner_only": False, "source": "default"}}
+
+
+@pytest.mark.parametrize("default,shown", [(50, "50"), (50.0, "50"), (49.5, "49.5"), (0.25, "0.25")])
+def test_bar_parts_writes_a_whole_number_the_same_way_in_both_types(default, shown):
+    data = bar_data()
+    data["knobs"][0]["default"] = default
+    bar = runbook.bar_parts(data)["parts"]["redirect-p95"]["bar"]
+    assert bar == "load-test/redirect-p95: json-field out/p95.json p95_ms <= %s (knob P95_MS, owner only)" % shown
+
+
+def test_bar_parts_on_the_worked_example():
+    with open(os.path.join(EXAMPLE, "runbook.yaml"), encoding="utf-8") as fh:
+        data = yaml.safe_load(fh)
+    out = runbook.bar_parts(data)
+    assert out["parts"]["redirect-p95"]["bar"] == ("load-test/redirect-p95: json-field out/load.json "
+                                                   "redirect.p95_ms <= 50 (knob P95_LIMIT_MS, owner only)")
+    assert out["stages"]["load-test"]["label"] == "4/5 load-test"
+    assert out["stages"]["free-port"]["position"] is None
+
+
+# ------------------------------------------------------------ A5: the worked example
+def test_worked_example_is_format_2_and_passes():
+    with open(os.path.join(EXAMPLE, "runbook.yaml"), encoding="utf-8") as fh:
+        data = yaml.safe_load(fh)
+    assert data["runbook"] == 2
+    result = runbook.check(os.path.join(EXAMPLE, "runbook.yaml"))
+    assert result["errors"] == [] and result["warnings"] == [], (result["errors"], result["warnings"])
+    cov = result["coverage"]
+    assert cov["missing"] == []
+    assert sorted(cov["covered"]) == ["EC-001", "EC-002", "EC-003", "SC-001", "SC-002", "SC-003", "SC-004"]
+    assert cov["covered"]["EC-003"] == ["fail:load-test/port-busy"]
+    stages = {s["id"]: s for s in data["stages"]}
+    assert [s["id"] for s in data["stages"] if s.get("recovery")] == ["free-port"]
+    fails = [f for s in data["stages"] for f in s.get("fails", []) if "detect" in f]
+    assert {"then" in f for f in fails} == {True}
+    assert {"run": "free-port"} in [f["then"] for f in fails]
+    assert stages["load-test"]["retry"]["max_attempts"] >= 2
+    sources = [k.get("source") for k in data["knobs"]] + [
+        c.get("source") for s in data["stages"] for c in s.get("checks", [])]
+    assert "spec:SC-002" in sources
+
+
+def test_worked_example_spec_numbers_its_edge_cases():
+    spec = runbook.parse_spec(os.path.join(EXAMPLE, "spec.md"))
+    assert [i["id"] for i in spec["edge_cases"]] == ["EC-001", "EC-002", "EC-003"]
+    assert spec["unnumbered"] == [] and not any(i.get("loose") for i in spec["edge_cases"])
+
+
+# ---------------------------------------------------------------- A5: the document
+def test_format_doc_describes_format_2():
+    with open(os.path.join(REPO, "docs", "runbook-format.md"), encoding="utf-8") as fh:
+        doc = fh.read()
+    for must in ("## Format 1 and format 2", "`runbook: 2`", "`recovery: true`", "`respond`",
+                 "`EC-001`", "`fail:<stage>/<fail id>`", "`spec:<item id>`", "`note:input/notes/",
+                 "`interview:<slot id>`", "`owner:<decision ref>`", "`default`", "`then`", "`detect`",
+                 "## Edge cases", "## Known failures", "## Provenance"):
+        assert must in doc, must
+    assert chr(0x2014) not in doc          # no em dash
+
+
+# ------------------------------------------------------------ review and trial fixes (op-003)
+OPENSPEC_EC_NAMED = """# Service Specification
+
+## Requirements
+
+### Requirement: Startup
+
+The service SHALL start.
+
+#### Scenario: Starts clean
+
+- WHEN started
+- THEN it listens
+
+#### Scenario: EC-001 port taken
+
+- WHEN the port is taken
+- THEN it exits with a clear message
+"""
+
+
+def test_an_openspec_scenario_named_ec_under_its_own_requirement_stays_a_scenario(tmp_path):
+    """OpenSpec is unchanged (design A1): a scenario whose name starts with EC-nnn under a
+    requirement of another name keeps its `<requirement>/<scenario>` key. Only the shape the
+    move to OpenSpec writes (`### Requirement: EC-001` with `#### Scenario: EC-001`) keeps the
+    edge case id."""
+    spec = spec_file(tmp_path, OPENSPEC_EC_NAMED)
+    items = {i["id"]: i for i in runbook.parse_spec(spec)["items"]}
+    item = items["Startup/EC-001 port taken"]
+    assert "alias" not in item and item["kind"] == "scenario" and item["required"] is True
+    for fmt in (1, 2):
+        data = openspec_runbook(["Startup/Starts clean", "Startup/EC-001 port taken"])
+        data["runbook"] = fmt
+        result = runbook.check(write(tmp_path, data), spec_path=spec)
+        assert result["errors"] == [], (fmt, result["errors"])
+        assert sorted(result["coverage"]["covered"]) == ["Startup/EC-001 port taken", "Startup/Starts clean"]
+    # the moved shape keeps the id
+    moved = spec_file(tmp_path, "## Requirements\n\n### Requirement: EC-001\n\nThe system SHALL handle it.\n\n"
+                                "#### Scenario: EC-001\n\nThe port is taken.\n", name="moved.md")
+    assert [(i.get("alias"), i["kind"]) for i in runbook.parse_spec(moved)["items"]] == [("EC-001", "EC")]
+
+
+def test_only_a_fail_case_that_detects_covers(tmp_path):
+    """A fail case covers an item only when it detects the failure and answers it; one with no
+    `detect` is never recognized, so its `covers` is refused and counts for nothing."""
+    spec = spec_file(tmp_path, SPEC_EC)
+    for fail in ({"id": "too-many", "when": "the day holds too many orders", "covers": ["EC-002"]},
+                 {"id": "too-many", "when": "the day holds too many orders", "then": "stop",
+                  "covers": ["EC-002"]}):
+        data = ec_runbook()
+        data["stages"][1]["fails"] = [fail]
+        result = runbook.check(write(tmp_path, data), spec_path=spec)
+        assert result["verdict"] == "FAIL"
+        assert ("COVERS-NO-DETECT", "stages[1].fails[0].covers") in where_codes(result), result["errors"]
+        assert "EC-002" not in result["coverage"]["covered"]
+        assert result["coverage"]["missing"] == ["EC-002"]
+
+
+def test_a_recovery_stage_never_sends_to_another_recovery_stage(tmp_path):
+    """A recovery stage that fails ends the failed stage with FAIL (design A2), so its fail case
+    may not send on to a second recovery stage: two that send to each other would loop."""
+    data = fails2(detect=DETECT, then={"run": "free-port"})
+    data["stages"].append({"id": "kill-port", "recovery": True, "run": "make kill-port",
+                           "checks": [{"id": "port-killed", "type": "exit-code"}]})
+    data["stages"][2]["fails"] = [{"id": "still-busy", "when": "w", "detect": DETECT, "then": {"run": "kill-port"}}]
+    data["stages"][3]["fails"] = [{"id": "kill-failed", "when": "w", "detect": DETECT, "then": {"run": "free-port"}}]
+    result = runbook.check(write(tmp_path, data))
+    assert where_codes(result) == {("RECOVERY-CHAIN", "stages[2].fails[0].then.run"),
+                                   ("RECOVERY-CHAIN", "stages[3].fails[0].then.run")}, result["errors"]
+
+
+def test_respond_on_a_recovery_stage_never_runs_another_recovery_stage():
+    data, _stage = respond_data({"run": "free-port"})
+    rec_a = {"id": "rec-a", "recovery": True, "run": "a", "checks": [{"id": "a-exit", "type": "exit-code"}],
+             "retry": {"max_attempts": 3},
+             "fails": [{"id": "a-bad", "when": "w", "detect": {"type": "exit-code", "expect": 1},
+                        "then": {"run": "rec-b"}}]}
+    step = runbook.respond(data, rec_a, {"a-exit": F}, 1, {}, {"a-bad": P})
+    assert (step["run"], step["end"], step["fail"]) == (None, F, "a-bad"), step
+    assert "recovery stage" in step["reason"]
+
+
+@pytest.mark.parametrize("retry", [None, {"max_attempts": 1}])
+def test_a_fail_case_that_runs_a_recovery_stage_needs_an_attempt_left(tmp_path, retry):
+    """After the recovery stage passes, the failed stage runs again as one more attempt; with one
+    attempt the recovery stage could never run, and the check says so before any run."""
+    data = fails2(detect=DETECT, then={"run": "free-port"})
+    if retry is None:
+        del data["stages"][1]["retry"]
+    else:
+        data["stages"][1]["retry"] = retry
+    result = runbook.check(write(tmp_path, data))
+    assert where_codes(result) == {("RECOVERY-NO-ATTEMPT", "stages[1].fails[0].then.run")}, result["errors"]
+    msg = result["errors"][0]["message"]
+    assert "max_attempts" in msg and "free-port" in msg
+
+
+def test_fr_uncovered_names_edge_cases_in_format_2(tmp_path):
+    text = SPEC_EC + "\n## Requirements\n\n- **FR-001**: The job reads the orders table.\n"
+    spec = spec_file(tmp_path, text)
+    result = runbook.check(write(tmp_path, ec_runbook()), spec_path=spec)
+    fr = [w for w in result["warnings"] if w["code"] == "FR-UNCOVERED"]
+    assert len(fr) == 1 and "only success criteria and edge cases must be covered" in fr[0]["message"]
+    data = minimal()
+    result = runbook.check(write(tmp_path, data), spec_path=spec)
+    fr = [w for w in result["warnings"] if w["code"] == "FR-UNCOVERED"]
+    assert len(fr) == 1 and "only success criteria must be covered" in fr[0]["message"]

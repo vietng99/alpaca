@@ -31,6 +31,12 @@ by a release event or by lease expiry). M2.5 formalizes claims/leases/takeover k
 worker; it depends on this task and writes the same write-ahead claim event, so the board
 keeps deriving `doing` whether the claim came from the board or from M2.5.
 
+Rows that `alpaca intake` made carry `intake` on their card: the item key, the runbook id, the
+stage that shows the item first (`3/5 load-test`) and `waiting_on`, the stage its first stage
+`needs` that still has a row not done (an open row only; None otherwise). These come from the
+latest intake event of each (op, runbook id), so they are derived too. A board for one op lists
+the intake rows first, in run order (runbook, stage position, key), then the other rows.
+
 Interface (M2.3), consumed by the export (M2.18) and the review card (M3.5):
 
     view(conn, op=None) -> dict
@@ -198,6 +204,72 @@ def card_for(conn, row, live, index=None) -> dict:
     }
 
 
+#: the event kind `alpaca intake` records (alpaca/intake.py EVENT)
+INTAKE_EVENT = "intake"
+
+
+def _stage_position(label):
+    """The position in `3/5 load-test`, or None (a recovery stage, a withdrawn row, no stage)."""
+    head = str(label or "").split(" ", 1)[0].split("/", 1)[0]
+    return int(head) if head.isdigit() else None
+
+
+def _intake_index(conn, rows) -> dict:
+    """head row id -> {"key", "runbook", "rank", "stage", "stage_id", "position", "needs"} for every
+    row the latest intake event of each (op, runbook id) names. `rank` orders the runbooks of an op
+    by their first intake; `needs` are the stages the row's first stage needs."""
+    latest = {}
+    for e in db.events(conn, kind=INTAKE_EVENT, limit=10 ** 9):
+        d = e["data"] if isinstance(e["data"], dict) else {}
+        if d.get("op") and d.get("runbook_id"):
+            latest.setdefault((d["op"], d["runbook_id"]), [len(latest), None])[1] = d
+    out = {}
+    for (op, rb_id), (rank, d) in latest.items():
+        run_order = d.get("run_order") if isinstance(d.get("run_order"), dict) else {}
+        for key, entry in sorted((d.get("items") or {}).items()):
+            if not isinstance(entry, dict):
+                continue
+            head = supersession.head(rows, entry.get("row"))
+            if head is None:
+                continue
+            label = entry.get("stage") if entry.get("step") != "withdrawn" else None
+            sid = str(label).split()[-1] if label and label != "-" else None
+            needs = (run_order.get(sid) or {}).get("needs") if sid else None
+            out[head["id"]] = {"key": key, "runbook": rb_id, "op": op, "rank": rank, "stage": label,
+                               "stage_id": sid, "position": _stage_position(label),
+                               "needs": [str(n) for n in (needs or [])]}
+    return out
+
+
+def _mark_intake(cards, index) -> None:
+    """Put `intake` on the card of every intake row, with `waiting_on`: the first stage (in the
+    order of `needs`) the row's first stage needs that still has a row not done in the same op
+    and runbook. Only an open row (todo or doing) waits."""
+    not_done = {}
+    for card in cards:
+        info = index.get(card["row_id"])
+        if info and info["stage_id"] and card["column"] != DONE:
+            not_done.setdefault((info["op"], info["runbook"]), set()).add(info["stage_id"])
+    for card in cards:
+        info = index.get(card["row_id"])
+        if not info:
+            card["intake"] = None
+            continue
+        waiting = None
+        if card["column"] in (TODO, DOING):
+            pending = not_done.get((info["op"], info["runbook"]), set())
+            waiting = next((n for n in info["needs"] if n in pending), None)
+        card["intake"] = {"key": info["key"], "runbook": info["runbook"], "stage": info["stage"],
+                          "waiting_on": waiting}
+
+
+def _run_order_key(card, index):
+    info = index.get(card["row_id"])
+    if not info:
+        return (1, 0, True, 0, str(card["row_id"]))
+    return (0, info["rank"], info["position"] is None, info["position"] or 0, info["key"])
+
+
 def _heads_only(rows) -> list:
     """The head of every supersession chain: a row that no other row supersedes. A superseded
     original stays in the store as history but never shows on the board."""
@@ -212,13 +284,18 @@ def view(conn, op=None) -> dict:
     return carries the flat card list, the cards bucketed by column, and one swimlane per
     phase (each swimlane again bucketed by column). Nothing here is stored as a column."""
     live = live_claims(conn)
-    rows = _heads_only(_all_rows(conn))
+    every = _all_rows(conn)
+    rows = _heads_only(every)
     rows = [r for r in rows if (r.get("kind") or "item") != verdict_row.KIND]
     if op is not None:
         rows = [r for r in rows if r.get("op") == op]
     rows = sorted(rows, key=lambda r: str(r.get("id")))
     index = verdict_row.verdict_index(conn)
     cards = [card_for(conn, r, live, index) for r in rows]
+    intake_rows = _intake_index(conn, every)
+    _mark_intake(cards, intake_rows)
+    if op is not None:
+        cards.sort(key=lambda c: _run_order_key(c, intake_rows))
 
     def _bucket(subset) -> dict:
         b = {c: [] for c in COLUMNS}
@@ -308,6 +385,11 @@ def render_text(v) -> str:
             for card in lane["by_column"][col]:
                 tail = (" (%s)" % card["reason"]) if card["reason"] else ""
                 who = (" @%s" % card["claimant"]) if card["claimant"] else ""
+                item = card.get("intake")
+                if item:
+                    who = " %s%s%s%s" % (item["key"], " [%s]" % item["stage"] if item["stage"] else "",
+                                         " waiting on %s" % item["waiting_on"] if item["waiting_on"] else "",
+                                         who)
                 lines.append("  [%-7s] %s %s%s%s" % (col, card["row_id"],
                              card["tag"] or "-", who, tail))
     return "\n".join(lines) + "\n"

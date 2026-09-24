@@ -85,7 +85,10 @@ TABLE: dict[str, dict] = {
     "runbook": {"keys": ("verdict", "runbook", "spec", "errors", "warnings", "coverage"), "group": "spec"},
     "intake": {"keys": ("verdict", "op", "spec", "runbook", "rows", "tasks", "profile", "dry_run"),
                "group": "spec"},
-    "start": {"keys": ("verdict", "kit", "mode", "reason", "steps", "prepared"), "group": "spec"},
+    "start": {"keys": ("verdict", "kit", "mode", "reason", "interview", "steps", "prepared"), "group": "spec"},
+    "note": {"keys": ("verdict", "file", "sha256", "bytes", "new", "notes"), "group": "spec"},
+    "interview": {"keys": ("verdict", "progress", "slots", "open", "uncited_notes", "signoff", "buckets",
+                           "file", "log_sha256"), "group": "spec"},
     # knowledge and output
     "sort": {"keys": ("verdict", "sorted", "unsorted"), "group": "knowledge"},
     "wiki": {"keys": ("verdict", "vault", "out"), "group": "knowledge"},

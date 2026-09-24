@@ -10,7 +10,8 @@ import shutil
 
 from alpaca.tests.conftest import REPO
 
-EXAMPLE = os.path.join(REPO, "templates", "runbook-example")
+# format 1 behaviour: the worked example as it was in format 1, kept as a fixture
+EXAMPLE = os.path.join(REPO, "alpaca", "tests", "fixtures", "runbook-example-v1")
 NOTES = "A small service that shortens links and counts how often each one is followed."
 
 
@@ -36,7 +37,9 @@ def test_a_new_thing_goes_to_spec_kit(project, capsys):
     assert rc == 0, out
     assert out["kit"] == "spec-kit" and out["mode"] == "new" and "no spec yet" in out["reason"]
     names = [s["step"] for s in out["steps"]]
-    assert names == ["prepare", "spec", "clarify", "runbook", "op", "intake"]
+    # raw notes and no signed interview: the notes go to the inbox and the interview comes first
+    assert names == ["note", "interview", "prepare", "spec", "clarify", "runbook", "op", "intake"]
+    assert out["interview"] == "needed"
     commands = " ".join(s["command"] for s in out["steps"])
     assert "/speckit-specify" in commands and ".claude/skills/alpaca-runbook-forge/SKILL.md" in commands
     assert "alpaca intake specs/<NNN-name>/spec.md" in commands
@@ -152,3 +155,105 @@ def test_two_features_with_one_capability_name_are_refused(project, capsys, monk
     rc, out = _cli(["start", NOTES, "--prepare", "--json"], capsys)
     assert rc == 2 and "link-shortener" in out["reason"], out
     assert not os.path.exists(os.path.join(project, "openspec", "specs", "link-shortener"))
+
+
+# ------------------------------------------------------------------ the interview comes first
+def _signed_interview(project, capsys):
+    rc, note = _cli(["note", "add", NOTES, "--json"], capsys)
+    assert rc == 0, note
+    from alpaca import interview
+    for slot in interview.slot_ids(project):
+        rc, out = _cli(["interview", "set", slot, "--answered", "--value", "v " + slot,
+                        "--source", note["file"]], capsys)
+        assert rc == 0, out
+    rc, out = _cli(["interview", "signoff", "--by", "the operator", "--json"], capsys)
+    assert rc == 0, out
+    return out["file"]
+
+
+def test_raw_notes_start_with_the_inbox_and_the_interview(project, capsys):
+    notes = os.path.join(project, "notes.md")
+    with open(notes, "w", encoding="utf-8") as fh:
+        fh.write(NOTES + "\n")
+    rc, out = _cli(["start", notes, "--json"], capsys)
+    assert rc == 0, out
+    assert out["interview"] == "needed"
+    assert [s["step"] for s in out["steps"]][:2] == ["note", "interview"]
+    assert out["steps"][0]["command"] == "alpaca note add --file %s" % notes
+    assert "/alpaca-interview" in out["steps"][1]["command"]
+    assert "alpaca interview signoff" in out["steps"][1]["command"]
+    rc, text = _cli(["start", NOTES], capsys)
+    assert rc == 0 and "interview: needed" in text
+    assert "alpaca note add" in text and "/alpaca-interview" in text
+
+
+def test_a_signed_interview_goes_straight_to_the_spec_and_a_later_change_makes_it_stale(project, capsys):
+    signed = _signed_interview(project, capsys)
+    rc, out = _cli(["start", NOTES, "--json"], capsys)
+    assert rc == 0, out
+    assert out["interview"] == "signed"
+    names = [s["step"] for s in out["steps"]]
+    assert names == ["prepare", "spec", "clarify", "runbook", "op", "intake"]
+    spec = [s for s in out["steps"] if s["step"] == "spec"][0]
+    assert signed in spec["do"]
+    rc, _ = _cli(["interview", "set", "thresholds", "--answered", "--value", "p95 40 ms",
+                  "--source", "round:1/q1"], capsys)
+    assert rc == 0
+    rc, out = _cli(["start", NOTES, "--json"], capsys)
+    assert rc == 0 and out["interview"] == "stale"
+    assert [s["step"] for s in out["steps"]][:2] == ["note", "interview"]
+    assert "stale" in out["steps"][1]["do"]
+
+
+# ------------------------------------------------------------------ review and trial fixes (op-003)
+def test_new_notes_after_a_signoff_go_to_the_inbox_and_the_interview(project, capsys):
+    """Raw notes that are not in the inbox yet are new input: start keeps them and sends them
+    through the interview again, instead of the earlier signed brief."""
+    _signed_interview(project, capsys)
+    new = "second change: add CSV export, must never leak other users' links"
+    rc, out = _cli(["start", new, "--json"], capsys)
+    assert rc == 0, out
+    assert out["interview"] == "stale", out["interview"]
+    assert [s["step"] for s in out["steps"]][:2] == ["note", "interview"]
+    assert out["steps"][0]["command"] == "alpaca note add \"<the notes>\""
+    assert "new notes" in out["steps"][1]["do"]
+    # once kept, the new note alone makes the sign-off stale
+    rc, _ = _cli(["note", "add", new], capsys)
+    rc, out = _cli(["start", new, "--json"], capsys)
+    assert out["interview"] == "stale" and "new notes" in out["steps"][1]["do"]
+
+
+def test_a_note_from_the_inbox_is_not_added_again(project, capsys):
+    rc, note = _cli(["note", "add", NOTES, "--json"], capsys)
+    assert rc == 0, note
+    rc, out = _cli(["start", os.path.join(project, note["file"]), "--json"], capsys)
+    assert rc == 0, out
+    step = out["steps"][0]
+    assert step["step"] == "note" and "note add" not in step["command"], step
+    assert note["file"] in step["do"]
+
+
+def test_the_signed_brief_as_the_notes_keeps_the_signoff(project, capsys):
+    signed = _signed_interview(project, capsys)
+    rc, out = _cli(["start", os.path.join(project, signed), "--json"], capsys)
+    assert rc == 0 and out["interview"] == "signed", out
+    assert [s["step"] for s in out["steps"]][0] == "prepare"
+
+
+def test_a_rerun_with_the_same_notes_keeps_the_first_pick(project, capsys, monkeypatch):
+    """After `start <brief> --prepare` picked spec-kit and the spec was written from the brief, a
+    rerun with the same brief keeps the pick instead of calling it a change to move to OpenSpec."""
+    from alpaca import spec_kits
+    monkeypatch.setattr(spec_kits, "init", lambda root, kit, force=False: None)
+    signed = _signed_interview(project, capsys)
+    brief = os.path.join(project, signed)
+    rc, out = _cli(["start", brief, "--prepare", "--json"], capsys)
+    assert rc == 0 and out["kit"] == "spec-kit" and out["mode"] == "new", out
+    _feature(project)                                  # the spec written from the brief
+    rc, out = _cli(["start", brief, "--json"], capsys)
+    assert rc == 0, out
+    assert (out["kit"], out["mode"]) == ("spec-kit", "new"), out["reason"]
+    assert "started before" in out["reason"] and "specs/001-link-shortener/spec.md" in out["reason"]
+    # other notes are still a change
+    rc, out = _cli(["start", "a new change: add CSV export", "--json"], capsys)
+    assert (out["kit"], out["mode"]) == ("openspec", "change")

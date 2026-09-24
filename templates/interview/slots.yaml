@@ -1,0 +1,42 @@
+# The slots a runbook needs, and what fills each one. `alpaca interview` reads this list.
+#
+# A project adds or replaces slots in input/interview/slots.yaml, in the same shape: a slot whose
+# id is already here replaces this one, a new id is added after these. `becomes` says where the
+# settled answer goes after the sign-off. docs/interview.md is the reference.
+slots:
+  - id: goal
+    fills: what is being built or changed, for whom, and why now
+    becomes: the summary and user stories of the spec
+  - id: scope-out
+    fills: what is explicitly left out
+    becomes: the out-of-scope list of the spec
+  - id: done-bar
+    fills: how anyone checks it is done without asking the owner
+    becomes: SC items
+  - id: thresholds
+    fills: every number the done bar needs (latency, size, count), with units
+    becomes: the numbers in the SC items, and owner-only knobs in the runbook
+  - id: edge-cases
+    fills: inputs and states at the boundary
+    becomes: EC items
+  - id: failures
+    fills: known ways it goes wrong, how each is recognized, and what to do
+    becomes: runbook fail cases with detect and then
+  - id: never
+    fills: what must never happen, even on a retry
+    becomes: stop_on checks or absent checks in the runbook
+  - id: owner-gates
+    fills: what only a person may approve, who, and on what evidence
+    becomes: owner gates in the runbook
+  - id: rollback
+    fills: how to undo a change, and what proves the undo worked
+    becomes: a rollback stage or an owner gate with its evidence
+  - id: evidence
+    fills: which files prove each part
+    becomes: the paths the runbook checks read
+  - id: knobs
+    fills: settings a retry may move, their range, and which are owner only
+    becomes: runbook knobs and the retry move rules
+  - id: commands
+    fills: how to build, run, test and measure
+    becomes: the run commands of the runbook stages
