@@ -17,7 +17,8 @@ Intake is a front door onto the checklist engine Alpaca already has, not a secon
     removed one gets a withdrawal row that cites it and a waiver (`checklist.verdict_row.waive`) that
     says why. A new one is added. Nothing is edited in place and nothing is deleted. A row of item
     format 1 (no bar) is kept as it is: its bar is recorded as the baseline (BAR-BASELINE).
-  * task contracts: one task per runbook stage and one per owner gate, added through
+  * task contracts: one task per runbook stage and one per owner gate (a recovery stage gets none;
+    the fail case line that sends to it names it), added through
     `ops.add_task` and contracted through `taskcontract.record` (the newest contract is current).
   * profile: the runbook's stage ids become the project's profile stages. Unless the project names
     a profile of its own, intake writes `intake_profile.py` (a `RunbookProfile`) and sets

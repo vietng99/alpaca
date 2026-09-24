@@ -9,8 +9,9 @@ docs/runbook-format.md; this module is its one reader.
 
 One runbook is one YAML file (`runbook.yaml`). `check(path, spec_path)` reads it, refuses every
 malformed field at once with a code, a dotted location and a plain message, and, with a spec,
-fails when a success criterion or scenario is covered by no check or owner gate. An empty
-measured population is never a pass: a spec with nothing to cover is refused too.
+fails when a success criterion, edge case (format 2) or scenario is covered by no check, fail
+case or owner gate. An empty measured population is never a pass: a spec with nothing to cover is
+refused too.
 
 The verdicts come from alpaca.gates.verdict (0 PASS, 1 FAIL, 2 BLOCKED, 3 PAUSED); they are
 referenced, never restated. A plugin check reports through the same band, the contract
@@ -1702,7 +1703,7 @@ def _parser(sub):
                                        "(docs/runbook-format.md); build the partner kit")
     v = p.add_subparsers(dest="runbook_verb")
     c = v.add_parser("check", help="refuse a malformed runbook; with a spec, fail on any uncovered "
-                                   "success criterion or scenario; read-only, writes no record")
+                                   "success criterion, edge case or scenario; read-only, writes no record")
     add_check_arguments(c)
     k = v.add_parser("kit", help="build the partner runbook kit (format, checker, schema, agent "
                                  "instructions, templates, example) from this product's own files")

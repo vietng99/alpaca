@@ -128,8 +128,9 @@ bin/alpaca intake <spec> <runbook.yaml>
 ```
 
 Show the person the dry run first when this is the first intake of the op. It lists one row per
-success criterion or scenario (`+` added, `=` kept, `~` superseded, `-` withdrawn), one task per
-stage and per owner gate with its contract, and the profile. Then run it for real and show the
+success criterion, edge case or scenario with its bar (`+` added, `=` kept, `~` superseded, `-`
+withdrawn), one task per stage and per owner gate with its contract (a recovery stage has none:
+the fail case line that sends to it names it), and the profile. Then run it for real and show the
 board: `bin/alpaca board show --op <op>` and `bin/alpaca task list --op <op>`.
 
 ## Step 5: after a change is built
