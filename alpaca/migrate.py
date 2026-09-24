@@ -289,12 +289,18 @@ def _effective_head(conn):
     """Recompute the chain head from the events' CURRENT content, independent of the stored
     hash column. So an in-place edit that does not re-chain (actor rewritten, hash column
     left alone) still moves the effective head and is caught against a recorded anchor."""
+    from alpaca import db, lineage
+    try:
+        lin = lineage.read(conn)
+    except lineage.LineageError:
+        lin = None                  # the chain check reports it; the head then cannot match
     prev = _GENESIS
     n = 0
     for r in conn.execute("SELECT * FROM events ORDER BY id"):
         fields = {"ts": r["ts"], "session": r["session"], "actor": r["actor"],
                   "kind": r["kind"], "op": r["op"], "ref": r["ref"], "data": r["data"]}
-        ch = util.sha256_hex("alpaca-event/v1\n" + util.canonical_json(fields))
+        ch = util.sha256_hex((lineage.event_tag(lin, r["id"]) or db.EVENT_TAG) + "\n"
+                             + util.canonical_json(fields))
         prev = util.sha256_hex(prev + "\n" + ch)
         n += 1
     return {"head": prev, "count": n}

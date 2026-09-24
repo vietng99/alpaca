@@ -8,6 +8,10 @@ from alpaca import paths, util
 
 GENESIS = util.sha256_hex(b"")
 
+#: the tag mixed into every event's content hash; a record carried from an earlier harness names
+#: its own tag for the events it carries (alpaca/lineage.py).
+EVENT_TAG = "alpaca-event/v1"
+
 # Compatibility export; schema.sql is the sole schema definition.
 from alpaca.migrate import schema_sql
 SCHEMA = schema_sql()
@@ -79,8 +83,8 @@ def transaction(conn):
         if conn.in_transaction:
             conn.execute("COMMIT")
 
-def _content_hash(fields: dict) -> str:
-    return util.sha256_hex("alpaca-event/v1\n" + util.canonical_json(fields))
+def _content_hash(fields: dict, tag=None) -> str:
+    return util.sha256_hex((tag or EVENT_TAG) + "\n" + util.canonical_json(fields))
 
 def last_event(conn):
     r = conn.execute("SELECT * FROM events ORDER BY id DESC LIMIT 1").fetchone()
@@ -143,18 +147,34 @@ def append_event(conn, *, session, actor, kind, op=None, ref=None, data=None,
         return _append_event_row(conn, session, actor, kind, op, ref, data, clock, where)
 
 def verify_chain(conn):
+    """(ok, reason). A record carried from an earlier harness (alpaca/lineage.py) is verified
+    with the earlier tag up to its boundary event, whose hash must be the one recorded."""
+    from alpaca import lineage
+    try:
+        lin = lineage.read(conn)
+    except lineage.LineageError as e:
+        return False, "lineage: %s" % e
     prev_hash = GENESIS
     n = 0
+    boundary_seen = False
     for r in conn.execute("SELECT * FROM events ORDER BY id"):
         fields = {"ts": r["ts"], "session": r["session"], "actor": r["actor"], "kind": r["kind"],
                   "op": r["op"], "ref": r["ref"], "data": r["data"]}
-        if _content_hash(fields) != r["content_hash"]:
+        if _content_hash(fields, lineage.event_tag(lin, r["id"])) != r["content_hash"]:
             return False, "content drift at event %d" % r["id"]
         if r["prev_hash"] != prev_hash:
             return False, "chain break at event %d" % r["id"]
         if util.sha256_hex(prev_hash + "\n" + r["content_hash"]) != r["hash"]:
             return False, "hash drift at event %d" % r["id"]
+        if lin and r["id"] == lin["through_event"]:
+            if r["hash"] != lin["through_hash"]:
+                return False, "lineage boundary mismatch at event %d" % r["id"]
+            boundary_seen = True
         prev_hash = r["hash"]; n += 1
+    if lin and not boundary_seen:
+        return False, "lineage names event %d, which the record does not hold" % lin["through_event"]
+    if lin:
+        return True, "%d events (%d carried under %s)" % (n, lin["through_event"], lin["event_tag"])
     return True, "%d events" % n
 
 def events(conn, *, kind=None, session=None, limit=200):

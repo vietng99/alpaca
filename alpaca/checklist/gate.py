@@ -460,9 +460,14 @@ def verify(conn, op, phase, *, spec=None, step_manifest=None, wiring_roots=None,
         info["rows_in_scope"] = len(rows)
 
         # a frozen row edited in place is drift: its recomputed content hash no longer matches
-        # its frozen column. A PASS can never sit on drifted content.
+        # its frozen column. A PASS can never sit on drifted content. A row carried from an
+        # earlier harness is re-derived under that harness's tag (alpaca/lineage.py); the chain
+        # check above already refused an unreadable lineage.
+        from alpaca import lineage
+        lin = lineage.read(conn)
+        numbers = lineage.row_numbers(conn) if lin else {}
         for row in rows:
-            if row.get("content_hash") and _row_content_hash(row) != row["content_hash"]:
+            if row.get("content_hash") and not lineage.row_frozen(row, lin, numbers.get(row["id"])):
                 raise Halt(vc.FAIL, R_HALT_ON_DRIFT,
                            "row %s was edited in place after it was frozen; a correction is a NEW "
                            "row citing supersedes, never an edit of the frozen original" % row["id"])
