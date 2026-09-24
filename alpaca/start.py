@@ -1,7 +1,11 @@
 """alpaca start: the one entry point from raw notes to intake.
 
 It picks the spec tool, prepares the project for it, and prints the steps that take the notes to a
-spec, the spec to a runbook, and the runbook to intake. The skill `.claude/skills/alpaca-from-notes/`
+spec, the spec to a runbook, and the runbook to intake. Raw notes go to the inbox first
+(`alpaca note add`), then through the interview (`/alpaca-interview`, alpaca/interview.py) until
+it is signed; only a signed interview goes to the spec step. `--json` says which case it is:
+`interview: needed` (no signed interview in `input/interview/`), `signed`, or `stale` (the log
+changed after the last sign-off). The skill `.claude/skills/alpaca-from-notes/`
 walks a person through those steps in Claude Code; this verb is its small helper and works the
 same from a shell.
 
@@ -229,15 +233,40 @@ def _notes(arg):
     return arg, "inline"
 
 
-def steps(kit, mode, notes_label, has_op):
-    notes = "the notes in %s" % notes_label if notes_label not in ("inline", "stdin") else "the notes"
+def _note_command(notes_label):
+    if notes_label == "stdin":
+        return "alpaca note add -"
+    if notes_label == "inline":
+        return "alpaca note add \"<the notes>\""
+    return "alpaca note add --file %s" % notes_label
+
+
+def steps(kit, mode, notes_label, has_op, interview=None):
+    """The steps from the notes to intake. `interview` is alpaca.interview.signoff_state; unless
+    it says signed, the notes go to the inbox and through the interview before the spec."""
+    interview = interview or {"state": "needed", "file": None}
     out = []
+    if interview["state"] != "signed":
+        out.append({"step": "note", "do": "keep the raw notes in the inbox as they are, one piece per note",
+                    "command": _note_command(notes_label)})
+        if interview["state"] == "stale":
+            do = ("the sign-off is stale: the interview log changed after %s was signed; settle the "
+                  "change, read it back and sign off again" % interview["file"])
+        else:
+            do = ("settle every slot a runbook needs from the notes and the operator's answers, read "
+                  "it back and sign it off")
+        out.append({"step": "interview", "do": do,
+                    "command": "/alpaca-interview  (in Claude Code; .claude/skills/alpaca-interview/SKILL.md), "
+                               "then alpaca interview status and alpaca interview signoff --by <name>"})
+        brief = "the signed interview (input/interview/signed-<stamp>-<sha12>.md)"
+    else:
+        brief = "the signed interview %s" % interview["file"]
     out.append({"step": "prepare", "do": "install %s and get the project ready" % kit,
                 "command": "alpaca start <notes> --kit %s --prepare" % kit})
     if kit == "spec-kit":
         out += [
-            {"step": "spec", "do": "write the first spec from %s" % notes,
-             "command": "/speckit-specify <the notes>  (in Claude Code; writes specs/<NNN-name>/spec.md)"},
+            {"step": "spec", "do": "write the first spec from %s" % brief,
+             "command": "/speckit-specify <the signed brief>  (in Claude Code; writes specs/<NNN-name>/spec.md)"},
             {"step": "clarify", "do": "answer the open questions until no [NEEDS CLARIFICATION] is left",
              "command": "/speckit-clarify"},
             {"step": "runbook", "do": "write runbook.yaml next to the spec; every SC-nnn gets a check or an owner gate",
@@ -246,8 +275,8 @@ def steps(kit, mode, notes_label, has_op):
         spec = "specs/<NNN-name>/spec.md"
     else:
         out += [
-            {"step": "spec", "do": "propose the change from %s as an OpenSpec change" % notes,
-             "command": "/opsx:propose <the notes>  (in Claude Code; writes openspec/changes/<id>/)"},
+            {"step": "spec", "do": "propose the change from %s as an OpenSpec change" % brief,
+             "command": "/opsx:propose <the signed brief>  (in Claude Code; writes openspec/changes/<id>/)"},
             {"step": "validate", "do": "check the change",
              "command": "bin/openspec validate <id> --strict"},
             {"step": "runbook", "do": "update the runbook: cover every new and changed scenario",
@@ -277,14 +306,18 @@ def run(root, notes_arg, *, kit=None, do_prepare=False, session="cli"):
     if os.path.isfile(paths.db_path(root)) or do_prepare:
         conn = db.connect(root)
         has_op = conn.execute("SELECT COUNT(*) FROM ops WHERE status='open' AND id != 'op-0'").fetchone()[0] > 0
+    from alpaca import interview
+    signed = interview.signoff_state(root)
     result = {"kit": chosen, "mode": mode, "reason": reason, "notes": label,
               "notes_sha256": util.sha256_hex(text), "state": state(root),
-              "steps": steps(chosen, mode, label, has_op), "prepared": []}
+              "interview": signed["state"],
+              "steps": steps(chosen, mode, label, has_op, signed), "prepared": []}
     if do_prepare:
         result["prepared"] = prepare(root, chosen, mode)
         db.append_event(conn, session=session, actor=INSTRUMENT, kind=EVENT,
                         data={"kit": chosen, "mode": mode, "reason": reason, "notes": label,
-                              "notes_sha256": result["notes_sha256"], "prepared": result["prepared"]})
+                              "notes_sha256": result["notes_sha256"], "interview": result["interview"],
+                              "prepared": result["prepared"]})
         result["state"] = state(root)
     return result
 
@@ -292,6 +325,7 @@ def run(root, notes_arg, *, kit=None, do_prepare=False, session="cli"):
 def _print(result):
     print("kit: %s (%s)" % (result["kit"], result["mode"]))
     print("why: %s" % result["reason"])
+    print("interview: %s" % result["interview"])
     for line in result["prepared"]:
         print("prepared: %s" % line)
     print("steps:")

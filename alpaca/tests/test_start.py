@@ -37,7 +37,9 @@ def test_a_new_thing_goes_to_spec_kit(project, capsys):
     assert rc == 0, out
     assert out["kit"] == "spec-kit" and out["mode"] == "new" and "no spec yet" in out["reason"]
     names = [s["step"] for s in out["steps"]]
-    assert names == ["prepare", "spec", "clarify", "runbook", "op", "intake"]
+    # raw notes and no signed interview: the notes go to the inbox and the interview comes first
+    assert names == ["note", "interview", "prepare", "spec", "clarify", "runbook", "op", "intake"]
+    assert out["interview"] == "needed"
     commands = " ".join(s["command"] for s in out["steps"])
     assert "/speckit-specify" in commands and ".claude/skills/alpaca-runbook-forge/SKILL.md" in commands
     assert "alpaca intake specs/<NNN-name>/spec.md" in commands
@@ -153,3 +155,51 @@ def test_two_features_with_one_capability_name_are_refused(project, capsys, monk
     rc, out = _cli(["start", NOTES, "--prepare", "--json"], capsys)
     assert rc == 2 and "link-shortener" in out["reason"], out
     assert not os.path.exists(os.path.join(project, "openspec", "specs", "link-shortener"))
+
+
+# ------------------------------------------------------------------ the interview comes first
+def _signed_interview(project, capsys):
+    rc, note = _cli(["note", "add", NOTES, "--json"], capsys)
+    assert rc == 0, note
+    from alpaca import interview
+    for slot in interview.slot_ids(project):
+        rc, out = _cli(["interview", "set", slot, "--answered", "--value", "v " + slot,
+                        "--source", note["file"]], capsys)
+        assert rc == 0, out
+    rc, out = _cli(["interview", "signoff", "--by", "the operator", "--json"], capsys)
+    assert rc == 0, out
+    return out["file"]
+
+
+def test_raw_notes_start_with_the_inbox_and_the_interview(project, capsys):
+    notes = os.path.join(project, "notes.md")
+    with open(notes, "w", encoding="utf-8") as fh:
+        fh.write(NOTES + "\n")
+    rc, out = _cli(["start", notes, "--json"], capsys)
+    assert rc == 0, out
+    assert out["interview"] == "needed"
+    assert [s["step"] for s in out["steps"]][:2] == ["note", "interview"]
+    assert out["steps"][0]["command"] == "alpaca note add --file %s" % notes
+    assert "/alpaca-interview" in out["steps"][1]["command"]
+    assert "alpaca interview signoff" in out["steps"][1]["command"]
+    rc, text = _cli(["start", NOTES], capsys)
+    assert rc == 0 and "interview: needed" in text
+    assert "alpaca note add" in text and "/alpaca-interview" in text
+
+
+def test_a_signed_interview_goes_straight_to_the_spec_and_a_later_change_makes_it_stale(project, capsys):
+    signed = _signed_interview(project, capsys)
+    rc, out = _cli(["start", NOTES, "--json"], capsys)
+    assert rc == 0, out
+    assert out["interview"] == "signed"
+    names = [s["step"] for s in out["steps"]]
+    assert names == ["prepare", "spec", "clarify", "runbook", "op", "intake"]
+    spec = [s for s in out["steps"] if s["step"] == "spec"][0]
+    assert signed in spec["do"]
+    rc, _ = _cli(["interview", "set", "thresholds", "--answered", "--value", "p95 40 ms",
+                  "--source", "round:1/q1"], capsys)
+    assert rc == 0
+    rc, out = _cli(["start", NOTES, "--json"], capsys)
+    assert rc == 0 and out["interview"] == "stale"
+    assert [s["step"] for s in out["steps"]][:2] == ["note", "interview"]
+    assert "stale" in out["steps"][1]["do"]

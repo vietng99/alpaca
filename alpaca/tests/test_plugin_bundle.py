@@ -17,8 +17,8 @@ Proof test for the Done-when (the fifteen skills of the plugin bundle):
     is traceable back to each hook's upstream path;
   * the plugin hooks are registered under the M1.5 fail-open and timeout contract;
   * the bundle contains no skill beyond those fifteen;
-  * the five Alpaca-native skills alpaca-first-chat, alpaca-onboard, alpaca-op,
-    alpaca-runbook-forge and alpaca-from-notes ship under .claude/skills/.
+  * the six Alpaca-native skills alpaca-first-chat, alpaca-onboard, alpaca-op,
+    alpaca-runbook-forge, alpaca-from-notes and alpaca-interview ship under .claude/skills/.
 
 Every control asserts the POSITIVE and the NEGATIVE path, so none is a tautological pass.
 """
@@ -271,7 +271,7 @@ def test_plugin_json_is_valid():
 
 def test_alpaca_native_skills_ship():
     for name in ("alpaca-first-chat", "alpaca-onboard", "alpaca-op", "alpaca-runbook-forge",
-                 "alpaca-from-notes"):
+                 "alpaca-from-notes", "alpaca-interview"):
         p = os.path.join(REPO, ".claude", "skills", name, "SKILL.md")
         # positive: each Alpaca-native skill ships a SKILL.md.
         assert os.path.isfile(p), "Alpaca-native skill missing: %s" % name
@@ -311,6 +311,7 @@ def test_alpaca_manifest_documents_the_plugin_tree():
     # harness-owned mechanism paths.
     assert "plugin/alpaca/" in text, "ALPACA-MANIFEST must document the plugin bundle"
     assert ".claude/skills/alpaca-from-notes/" in text, "ALPACA-MANIFEST must list the Alpaca-native skills"
+    assert ".claude/skills/alpaca-interview/" in text, "ALPACA-MANIFEST must list the Alpaca-native skills"
     # negative: the manifest still has its two class sections intact.
     assert "[mechanism]" in text and "[memory]" in text
 
