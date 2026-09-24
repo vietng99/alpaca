@@ -26,4 +26,16 @@ bar: a timeout, a port, an attempt count, a knob's starting value or range. Put 
 every value you choose, on its line (`# default chosen by the agent: <why>`), and list it in the
 report.
 
+Format {{FORMAT}} in short (`<kit>/FORMAT.md` has it in full):
+
+- Edge cases are items. In a spec-kit spec, number each edge case `EC-001`, `EC-002`, ... under
+  its Edge Cases heading, and cover each one like a success criterion. An edge case bullet with
+  no id is `EC-UNNUMBERED`. Never change the id of an edge case that has one.
+- A known failure can say how it is recognized and what to do then: `detect` (a check that
+  passes when the failure happened) and `then` (`retry`, `stop`, `ask-owner`, or
+  `{run: <stage id>}`, which sends to a recovery stage: a stage with `recovery: true` that runs
+  only then). A fail case that answers an edge case lists it in its `covers`.
+- Give a knob, a check, a fail case and an owner gate a `source` when you know where it comes
+  from: `spec:SC-002` for a spec item, `default` for a default you chose.
+
 The steps below are the ones our own agents follow.

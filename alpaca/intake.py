@@ -2,17 +2,21 @@
 
 Intake is a front door onto the checklist engine Alpaca already has, not a second engine:
 
-  * rows: every success criterion (spec-kit `SC-nnn`) or scenario (OpenSpec) becomes one item file,
-    a one-row acceptance table written under `.alpaca/intake/<op>/<runbook id>/items/` and named by
-    its own sha256. Each file is read by the acceptance-table parser (`checklist.artifact`), turned
-    into one obligation row by synthesis (`checklist.synthesis`, the step model below) and landed by
-    the bridge (`checklist.bridge`). The row id digests the file bytes, so an unchanged criterion
-    keeps its row id, its row and its verdicts across intakes.
-  * a changed criterion gets a new row that cites the current one (`checklist.supersession.supersede`,
-    cite-and-freeze), landed by the same bridge. Its item file names the row it replaces, so a
-    criterion that goes back to earlier text is a new row too, never a frozen row derived again; a removed one gets a withdrawal row that cites it
-    and a waiver (`checklist.verdict_row.waive`) that says why. A new one is added. Nothing is edited
-    in place and nothing is deleted.
+  * rows: every success criterion (spec-kit `SC-nnn`), edge case (`EC-nnn`, under `runbook: 2`) or
+    scenario (OpenSpec) becomes one item file, a one-row acceptance table written under
+    `.alpaca/intake/<op>/<runbook id>/items/` and named by its own sha256. The row carries its bar
+    (what each covering check, fail case and owner gate asks, from `runbook.bar_parts`), the stage
+    that shows it first in run order, and the sources. Each file is read by the acceptance-table
+    parser (`checklist.artifact`), turned into one obligation row by synthesis (`checklist.synthesis`,
+    the step model below) and landed by the bridge (`checklist.bridge`). The row id digests the file
+    bytes, so an unchanged item keeps its row id, its row and its verdicts across intakes.
+  * a changed criterion, or a changed bar, gets a new row that cites the current one
+    (`checklist.supersession.supersede`, cite-and-freeze), landed by the same bridge. A change of
+    only the stage or the sources keeps the row. Its item file names the row it replaces, so a
+    criterion that goes back to earlier text is a new row too, never a frozen row derived again; a
+    removed one gets a withdrawal row that cites it and a waiver (`checklist.verdict_row.waive`) that
+    says why. A new one is added. Nothing is edited in place and nothing is deleted. A row of item
+    format 1 (no bar) is kept as it is: its bar is recorded as the baseline (BAR-BASELINE).
   * task contracts: one task per runbook stage and one per owner gate, added through
     `ops.add_task` and contracted through `taskcontract.record` (the newest contract is current).
   * profile: the runbook's stage ids become the project's profile stages. Unless the project names
@@ -64,7 +68,7 @@ STEP_MODEL = {
     "steps": [
         {"key": "check", "name": "Shown by runbook checks", "ordinal": 1,
          "witness": "docs/intake.md", "consumes": ["check"],
-         "obligation": "{item}: {cell:criterion} Shown by {cell:shown by}.",
+         "obligation": "{item}: {cell:criterion} Bar: {cell:bar}.",
          "report_back": {"proof": "a sealed proof report citing the results of the checks named on this row",
                          "where": "the runbook stages that hold those checks",
                          "how": "run the stages, then alpaca proof check on the report",
@@ -90,10 +94,12 @@ STEP_MODEL = {
 #: the layout of an intake item file. The file bytes are part of each row's identity (the row id
 #: digests them), so a change to this layout, to `item_text`, `_cell` or `criterion` makes every
 #: intake row look changed at the next intake. Such a change bumps this number and says so in
-#: docs/intake.md; it is never made in passing.
-ITEM_FORMAT = 1
-_ITEM_HEADER = ("Intake item file, format %d. alpaca intake wrote this file from a spec and a runbook "
-                "and never edits it; a later intake that sees a change writes a new file." % ITEM_FORMAT)
+#: docs/intake.md; it is never made in passing. Format 2 added the bar, stage and source columns;
+#: a row of format 1 is kept and never rewritten (BAR-BASELINE).
+ITEM_FORMAT = 2
+_HEADER = ("Intake item file, format %d. alpaca intake wrote this file from a spec and a runbook "
+           "and never edits it; a later intake that sees a change writes a new file.")
+_ITEM_HEADER = _HEADER % ITEM_FORMAT
 _SLUG = re.compile(r"[^a-z0-9]+")
 _OP_ID = re.compile(r"^op-\d+$")
 _LIST_MARK = re.compile(r"^(?:[-*+]|\d{1,9}[.)])\s+")
@@ -303,14 +309,47 @@ def _cell(text):
     return " ".join(str(text).split()).replace("\\", "\\\\").replace("|", "\\|")
 
 
-def item_text(key, crit, shown_by, kind, supersedes=None):
-    """The bytes of one intake item file. `supersedes` is the row this item replaces ("-" for a
-    first row): it keeps a superseding item apart from every earlier row of its key, so a
-    criterion that goes back to earlier text (a revert, or a removed item restored) gets a new row
-    that cites the current one instead of deriving a frozen row's id again."""
-    return ("%s\n\n| key | criterion | shown by | kind | supersedes |\n|---|---|---|---|---|\n"
-            "| %s | %s | %s | %s | %s |\n"
-            % (_ITEM_HEADER, _cell(key), _cell(crit), _cell(shown_by), kind, _cell(supersedes or "-")))
+def item_text(key, crit, shown_by, bar, stage, source, kind, supersedes=None):
+    """The bytes of one intake item file (format 2). `bar` is what the covering parts ask, `stage`
+    the run-order position and id of the first covering stage (`3/5 load-test`), `source` their
+    sources ("-" when none). `supersedes` is the row this item replaces ("-" for a first row): it
+    keeps a superseding item apart from every earlier row of its key, so a criterion that goes
+    back to earlier text (a revert, or a removed item restored) gets a new row that cites the
+    current one instead of deriving a frozen row's id again."""
+    return ("%s\n\n| key | criterion | shown by | bar | stage | source | kind | supersedes |\n"
+            "|---|---|---|---|---|---|---|---|\n| %s | %s | %s | %s | %s | %s | %s | %s |\n"
+            % (_ITEM_HEADER, _cell(key), _cell(crit), _cell(shown_by), _cell(bar), _cell(stage),
+               _cell(source), kind, _cell(supersedes or "-")))
+
+
+#: the cells that say what a row stands for. The bar is compared on its own (a format 1 file has
+#: none), and the stage and the sources are left out: a change of only those keeps the row.
+_SAME_CELLS = ("key", "criterion", "shown by", "kind", "supersedes")
+
+
+def _head_cells(root, head):
+    """The cells of the item file the row `head` was made from, or None when the file is gone or
+    is not the one the row id digests."""
+    from alpaca.checklist import Halt, artifact, synthesis
+    rel = _proof_path(head)
+    full = os.path.join(root, rel) if rel else None
+    if not full or not os.path.isfile(full):
+        return None
+    try:
+        parsed = artifact.parse(full, KEY_COLUMN)
+    except Halt:
+        return None
+    if len(parsed["items"]) != 1:
+        return None
+    item = parsed["items"][0]
+    if synthesis.row_id(head["step"], rel, item["key"], parsed["sha256_raw"]) != head["id"]:
+        return None
+    return dict(item["cells"])
+
+
+def _file_cells(full):
+    from alpaca.checklist import artifact
+    return dict(artifact.parse(full, KEY_COLUMN)["items"][0]["cells"])
 
 
 def _step_model(scratch):
@@ -732,6 +771,15 @@ def _open_op(conn, op):
     return rows[0]["id"]
 
 
+def _shown(who, part):
+    """How the `shown by` cell names one covering part."""
+    if part["kind"] == "gate":
+        return "the owner gate of stage %s" % part["stage"]
+    if part["kind"] == "fail":
+        return "the fail case %s of stage %s" % (who.split("/", 1)[1], part["stage"])
+    return "%s/%s" % (part["stage"], who)
+
+
 def plan(root, conn, spec_path, runbook_path, *, op=None, session="cli", actor=INSTRUMENT):
     """Everything intake would do, and nothing done. Raises IntakeError on a refusal."""
     from alpaca import runbook, taskcontract
@@ -760,10 +808,12 @@ def plan(root, conn, spec_path, runbook_path, *, op=None, session="cli", actor=I
                                                                   old_id),
                           code=BLOCKED)
     stages = [s["id"] for s in data["stages"]]
-    check_stage = {c["id"]: s["id"] for s in data["stages"] for c in (s.get("checks") or [])}
     covered = checked["coverage"]["covered"]
+    bars = runbook.bar_parts(data)
+    run_order = {s["id"]: {"position": bars["stages"][s["id"]]["position"],
+                           "needs": [str(n) for n in (s.get("needs") or [])]} for s in data["stages"]}
 
-    required = [i for i in spec["items"] if i["required"]]
+    required = [i for i in runbook.spec_items(spec, runbook.runbook_format(data)) if i["required"]]
     keys = {}
     for item in required:
         k = item_key(item)
@@ -781,13 +831,34 @@ def plan(root, conn, spec_path, runbook_path, *, op=None, session="cli", actor=I
     try:
         model = _step_model(scratch)
         rows = {"added": [], "kept": [], "superseded": [], "withdrawn": []}
-        files, batch, waive, items_after = {}, [], [], {}
+        files, batch, waive, items_after, baselined, order = {}, [], [], {}, [], {}
 
-        def build(key, crit, shown, kind, supersedes=None):
-            text = item_text(key, crit, shown, kind, supersedes)
+        def build(key, crit, shown, bar, stage, source, kind, supersedes=None):
+            text = item_text(key, crit, shown, bar, stage, source, kind, supersedes)
             rel = "%s/%s.%s.md" % (item_dir, _slug(key), util.sha256_hex(text)[:12])
             row = _derive(model, scratch, rel, text, kind, op, session, actor)
             return rel, text, row
+
+        def same_item(key, head, rel, bar):
+            """Whether `head` stands for the item written at `rel` (in scratch) with only its stage
+            or sources changed. A head of item format 1 has no bar: it is the same when its other
+            cells are, and the bar the previous intake recorded (if any) is the current one; with
+            none recorded, the current bar becomes the baseline (BAR-BASELINE)."""
+            if head.get("step") == "withdrawn":
+                return False
+            old = _head_cells(root, head)
+            if old is None:
+                return False
+            new = _file_cells(os.path.join(scratch, rel))
+            if any(old.get(c) != new.get(c) for c in _SAME_CELLS):
+                return False
+            if "bar" in old:
+                return old["bar"] == new["bar"]
+            recorded = (base_items.get(key) or {}).get("bar")
+            if recorded is None:
+                baselined.append(key)
+                return True
+            return recorded == bar
 
         def head_of(key):
             entry = base_items.get(key)
@@ -812,19 +883,30 @@ def plan(root, conn, spec_path, runbook_path, *, op=None, session="cli", actor=I
 
         for key, item in keys.items():
             who = covered.get(item["id"]) or []
-            checks = [w for w in who if not w.startswith("gate:")]
-            shown = ", ".join("%s/%s" % (check_stage.get(w, "?"), w) if not w.startswith("gate:")
-                              else "the owner gate of stage %s" % w[5:] for w in who)
-            kind = "check" if checks else "review"
+            parts = [bars["parts"][w] for w in who]
+            shown = ", ".join(_shown(w, p) for w, p in zip(who, parts))
+            kind = "check" if [p for p in parts if p["kind"] != "gate"] else "review"
+            bar = "; ".join(p["bar"] for p in parts)
+            first = min((bars["stages"][p["stage"]] for p in parts), default={"position": None, "label": "-"},
+                        key=lambda st: (st["position"] is None, st["position"] or 0))
+            sources = []
+            for p in parts:
+                if p["source"] and str(p["source"]) not in sources:
+                    sources.append(str(p["source"]))
+            stage, source = first["label"], ", ".join(sources) or "-"
+            order[key] = (first["position"] is None, first["position"] or 0, key)
             head = head_of(key)
             # the item as the current head would hold it: same text, same predecessor
-            rel, text, row = build(key, criterion(item), shown, kind, head and head.get("supersedes"))
-            entry = {"key": key, "row": row["id"], "step": kind, "shown_by": shown}
-            if head is not None and head["id"] == row["id"]:
+            rel, text, row = build(key, criterion(item), shown, bar, stage, source, kind,
+                                   head and head.get("supersedes"))
+            entry = {"key": key, "row": row["id"], "step": kind, "shown_by": shown, "bar": bar,
+                     "stage": stage, "source": source}
+            if head is not None and (head["id"] == row["id"] or same_item(key, head, rel, bar)):
                 from alpaca.checklist import verdict_row
-                rows["kept"].append(dict(entry, status=verdict_row.status_fold(conn, row["id"])))
+                entry["row"] = head["id"]
+                rows["kept"].append(dict(entry, status=verdict_row.status_fold(conn, head["id"])))
             elif head is not None:
-                rel, text, row = build(key, criterion(item), shown, kind, head["id"])
+                rel, text, row = build(key, criterion(item), shown, bar, stage, source, kind, head["id"])
                 new = supersede(key, head, rel, text, row)
                 rows["superseded"].append(dict(entry, old=head["id"], new=new["id"]))
                 entry["row"] = new["id"]
@@ -834,7 +916,7 @@ def plan(root, conn, spec_path, runbook_path, *, op=None, session="cli", actor=I
                 batch.append(row)
                 files[rel] = text
                 rows["added"].append(entry)
-            items_after[key] = {"row": entry["row"], "step": kind}
+            items_after[key] = {"row": entry["row"], "step": kind, "bar": bar, "stage": stage, "source": source}
 
         for key, entry in base_items.items():
             if key in keys:
@@ -858,7 +940,8 @@ def plan(root, conn, spec_path, runbook_path, *, op=None, session="cli", actor=I
                     old_crit = (old["items"][0]["cells"].get("criterion") or "")
                 except Halt:
                     old_crit = ""
-            rel, text, row = build(key, old_crit or "(the text is not on file)", "-", "withdrawn", head["id"])
+            rel, text, row = build(key, old_crit or "(the text is not on file)", "-", "-", "-", "-", "withdrawn",
+                                   head["id"])
             new = supersede(key, head, rel, text, row)
             waive.append(new["id"])
             rows["withdrawn"].append({"key": key, "old": head["id"], "new": new["id"],
@@ -866,6 +949,8 @@ def plan(root, conn, spec_path, runbook_path, *, op=None, session="cli", actor=I
             items_after[key] = {"row": new["id"], "step": "withdrawn"}
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
+    for group in rows.values():                 # run order: stage position, then key
+        group.sort(key=lambda r: order.get(r["key"], (True, 0, r["key"])))
 
     held = _held_by_other_runbooks(conn, op, rb_id, keys, store)
     lvl = _level(conn, session, root) if waive else None    # a dry run refuses what the run would
@@ -907,15 +992,23 @@ def plan(root, conn, spec_path, runbook_path, *, op=None, session="cli", actor=I
                            "this spec item in %s, so the op carries two rows for it. If %s is the old id "
                            "of this runbook, its rows and tasks stay open until you close or withdraw "
                            "them by hand (docs/intake.md)" % (key, other, row, op, other)
-                           for key, (other, row) in sorted(held.items())],
+                           for key, (other, row) in sorted(held.items())]
+                        + ["BAR-BASELINE %s: the previous intake of %s stored no bar (item format 1), so "
+                           "intake kept the row %s and recorded its bar as the baseline: %s. From now on "
+                           "a change of the bar supersedes the row" % (key, key, items_after[key]["row"],
+                                                                       items_after[key]["bar"])
+                           for key in sorted(baselined, key=lambda k: order[k])],
             "_files": files, "_batch": batch, "_waive": waive, "_items": items_after, "_level": lvl,
+            "_base_items": base_items, "_run_order": run_order,
             "_profile": prof, "_task_writes": task_writes, "_existing_tasks": existing}
 
 
 def _changed(p):
+    """Whether apply would write anything. A kept row whose stage, sources or baseline bar changed
+    changes the entry the intake event records, so that is a change too."""
     r, t = p["rows"], p["tasks"]
     return bool(r["added"] or r["superseded"] or r["withdrawn"] or t["added"] or t["contracts"]
-                or p["_profile"]["writes"] or p["_waive"])
+                or p["_profile"]["writes"] or p["_waive"] or p["_items"] != p["_base_items"])
 
 
 def apply(root, conn, p, *, session="cli", actor=INSTRUMENT):
@@ -1006,7 +1099,8 @@ def apply(root, conn, p, *, session="cli", actor=INSTRUMENT):
     db.append_event(conn, session=session, actor=actor, kind=EVENT, op=p["op"], ref=p["runbook_id"],
                     data={"op": p["op"], "runbook": p["runbook"], "runbook_id": p["runbook_id"],
                           "spec": p["spec"], "spec_shape": p["spec_shape"], "format": p["format"],
-                          "items": p["_items"], "tasks": ids, "profile": p["profile"]["module"],
+                          "item_format": ITEM_FORMAT, "items": p["_items"], "run_order": p["_run_order"],
+                          "tasks": ids, "profile": p["profile"]["module"],
                           "changes": summary})
     return p
 
@@ -1045,6 +1139,14 @@ def run(root, spec_path, runbook_path, *, op=None, dry_run=False, session="cli",
 
 
 # ------------------------------------------------------------------------------ the verb
+def _run_key(row):
+    """Run order of a listed row: the position of its stage (`3/5 load-test`), then its key. A row
+    without a position (withdrawn, or first shown by a recovery stage) comes after the others."""
+    head = str(row.get("stage") or "").split(" ", 1)[0]
+    number = head.split("/", 1)[0]
+    return (not number.isdigit(), int(number) if number.isdigit() else 0, row["key"])
+
+
 def _print(result):
     print("intake: %s (%s %s, %d required item(s)) with runbook %s (%s, %d stage(s)) into %s%s"
           % (result["spec"], result["format"], result["spec_shape"], result["required"], result["runbook"],
@@ -1053,14 +1155,25 @@ def _print(result):
     rows = result["rows"]
     print("rows: %d added, %d kept, %d superseded, %d withdrawn"
           % (len(rows["added"]), len(rows["kept"]), len(rows["superseded"]), len(rows["withdrawn"])))
-    for r in rows["added"]:
-        print("  + %s  %s  (%s: %s)" % (r["key"], r["row"], r["step"], r["shown_by"]))
-    for r in rows["superseded"]:
-        print("  ~ %s  %s supersedes %s" % (r["key"], r["new"], r["old"]))
-    for r in rows["withdrawn"]:
-        print("  - %s  %s withdraws %s (waived)" % (r["key"], r["new"], r["old"]))
-    for r in rows["kept"]:
-        print("  = %s  %s  [%s]" % (r["key"], r["row"], r["status"]))
+    # one list in run order (each group is in run order already; a withdrawn row has no stage)
+    listed = []
+    for mark in ("+", "~", "=", "-"):
+        group = rows[{"+": "added", "~": "superseded", "=": "kept", "-": "withdrawn"}[mark]]
+        listed += [(mark, r) for r in group]
+    position = {r["key"]: n for n, r in enumerate(sorted(
+        (r for _m, r in listed), key=lambda r: _run_key(r)))}
+    for mark, r in sorted(listed, key=lambda mr: position[mr[1]["key"]]):
+        stage = "  [%s]" % r["stage"] if r.get("stage") else ""
+        if mark == "+":
+            print("  + %s  %s%s  (%s: %s)" % (r["key"], r["row"], stage, r["step"], r["shown_by"]))
+        elif mark == "~":
+            print("  ~ %s  %s supersedes %s%s" % (r["key"], r["new"], r["old"], stage))
+        elif mark == "=":
+            print("  = %s  %s%s  [%s]" % (r["key"], r["row"], stage, r["status"]))
+        else:
+            print("  - %s  %s withdraws %s (waived)" % (r["key"], r["new"], r["old"]))
+        if r.get("bar"):
+            print("      bar: %s" % r["bar"])
     t = result["tasks"]
     print("tasks: %d added, %d contract(s) updated, %d kept, %d no longer in the runbook"
           % (len(t["added"]), len(t["contracts"]), len(t["kept"]), len(t["orphaned"])))

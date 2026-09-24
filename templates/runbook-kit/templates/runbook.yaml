@@ -2,9 +2,10 @@
 # placeholder. FORMAT.md in the kit explains each field; example/runbook.yaml is a finished one.
 # Check it with:   python3 <kit>/check_runbook.py runbook.yaml --spec spec.md
 #
-# As shipped it passes against templates/spec.md, which has one success criterion (SC-001).
+# As shipped it passes against templates/spec.md, which has one success criterion (SC-001) and
+# one edge case (EC-001).
 
-runbook: 1                      # the format version; keep it
+runbook: 2                      # the format version; keep it
 id: my-service                  # a short name: lower-case letters, digits, '.', '_', '-'
 title: My service               # one line a person reads
 description: >-
@@ -21,6 +22,7 @@ knobs:
     default: 2
     min: 1
     max: 8
+    source: default             # where a value comes from: spec:<item id>, default, ...
 
 # Stages run in the order they are listed; `needs` names earlier stages only.
 stages:
@@ -47,13 +49,19 @@ stages:
         field: failed
         op: "=="                # quote the op in YAML
         value: 0
-        covers: [SC-001]        # the spec items this check shows
+        covers: [SC-001, EC-001]  # the spec items this check shows
+        source: spec:SC-001
     retry:
       max_attempts: 2           # total runs, the first one included
       on_fail: [tests-pass]
     fails:
       - id: no-summary
         when: the test run stops before it writes out/test.json
+        detect:                 # a check that passes when this failure happened
+          type: regex-in-file
+          path: out/test.log
+          pattern: 'Killed|MemoryError'
+        then: retry             # retry, stop, ask-owner, or {run: <recovery stage id>}
 
   # A step only a person may approve: a release, a deploy, anything that spends money.
   - id: release

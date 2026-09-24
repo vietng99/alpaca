@@ -56,9 +56,8 @@ The creator of a link reads its hit count.
 
 ### Edge Cases
 
-- **EC-001**: A URL longer than 2048 characters is refused with 400.
-- **EC-002**: The same long URL posted twice gets two different codes.
-- **EC-003**: When the port the service listens on is already taken, the load test frees it and runs again instead of reporting a latency failure.
+- A URL longer than 2048 characters is refused with 400.
+- The same long URL posted twice gets two different codes.
 
 ## Requirements *(mandatory)*
 
