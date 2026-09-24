@@ -127,8 +127,9 @@ The barrier reads every object the push would send (`git rev-list --objects <loc
   (`sub/.env`), and `*` or `?` match within one path part. `.env.example` is not protected;
 - a sealed term, case-insensitive, in any file, in a member of a compressed file, in any path name
   (files, links, folders and submodule entries), in an author, committer or tagger, in a commit or
-  tag message (every tag of a tag chain), or in a pushed ref name (a ref the push deletes
-  included: its name reaches the server too);
+  tag message (every tag of a tag chain), or in a pushed ref name (a delete of a ref the remote
+  does not have included, since its name reaches the server too; deleting a ref the remote has
+  sends nothing new and is not stopped);
 - a shape the term list cannot enumerate (an e-mail address, a `/home/<user>` path) in a file or a
   path name, unless an allow rule clears that exact value; an author, committer or tagger e-mail
   that has the shape of a real address, unless an allow rule names it;

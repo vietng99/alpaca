@@ -991,8 +991,11 @@ def _prepush_scan(root, data, cfg, notices):
             continue
         local_ref, local_sha, remote_ref, remote_sha = cols[:4]
         if set(local_sha) == {"0"}:
-            # a delete pushes no objects, but its ref name still reaches the server (N23c)
-            refs.append((remote_ref, None))
+            # a delete pushes no objects, but its ref name reaches the server (N23c). When the
+            # remote already has that ref (it reports a sha), the name is there already and the
+            # delete removes it: nothing new leaves, so the delete is not stopped (N23d).
+            if set(remote_sha) == {"0"}:
+                refs.append((remote_ref, None))
             continue
         refs.append((local_ref, local_sha))
         if remote_ref != local_ref:
