@@ -143,6 +143,16 @@ def handle(payload):
     if live:
         t = live[0]
         head.append("DO NOT RACE: %s is claimed by %s until %s; confirm it is stalled before taking over." % (t["id"], t["claimant"], t["lease_until"]))
+    # Pricing gaps: the dashboard and the cost selftest leave a notice when a model answered but
+    # has no rate card, so its responses show no cost. The agent labels it from the official page.
+    # A broken notice or record must never cost the boot context, so any failure here is skipped.
+    try:
+        from alpaca.analytics import ratecards
+        for gap in ratecards.read_gaps(root)[:3]:
+            head.append("PRICING GAP: %s has %d unpriced response(s) in %d session(s) (no rate card). Check its official "
+                        "price and record it: %s; then bin/alpaca analytics selftest." % (gap["model"], gap["responses"], gap["sessions"], gap["fix"]))
+    except Exception:
+        pass
     if payload.get("dashboard"):
         from alpaca import serve
         url = serve.ensure_running(root)

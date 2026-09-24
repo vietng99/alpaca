@@ -430,3 +430,30 @@ def test_blocking_hook_error_has_error_status_without_disclosing_content(project
     result = analyze(project)
     assert result['hooks']['events'][0]['status'] == 'error'
     assert 'PRIVATE' not in json.dumps(result)
+
+
+def test_client_model_usage_keeps_token_counts_beside_cost(project):
+    records = [claude(), {'type': 'cost-state', 'totalCostUSD': 1.5, 'modelUsage': {
+        'claude-opus-5': {'inputTokens': 40, 'outputTokens': 17832, 'thinkingTokens': 9363,
+                          'cacheReadInputTokens': 1919502, 'cacheCreationInputTokens': 83082,
+                          'webSearchRequests': 0, 'costUSD': 1.25},
+        'claude-haiku-4-5-20251001': {'costUSD': 0.25, 'inputTokens': 'many'}}}]
+    write(transcripts.local_path(project, 's1'), records)
+    register(project)
+    models = analyze(project)['cost']['reported_models']
+    assert models[0] == {'model': 'claude-opus-5', 'cost_usd': 1.25, 'input_tokens': 40,
+                         'output_tokens': 17832, 'cache_read_tokens': 1919502,
+                         'cache_write_tokens': 83082}
+    assert models[1] == {'model': 'claude-haiku-4-5-20251001', 'cost_usd': 0.25, 'input_tokens': None,
+                         'output_tokens': None, 'cache_read_tokens': None, 'cache_write_tokens': None}
+
+
+def test_model_rollups_name_the_provider_and_why_responses_are_unpriced(project):
+    unknown = claude('unknown', 'u2')
+    unknown['message']['model'] = 'unpublished-future-model'
+    write(transcripts.local_path(project, 's1'), [claude(), unknown])
+    register(project)
+    models = {row['model']: row for row in analyze(project)['models']}
+    assert models['claude-haiku-4-5-20251001']['provider'] == 'anthropic'
+    assert models['claude-haiku-4-5-20251001']['unpriced'] == {}
+    assert models['unpublished-future-model']['unpriced'] == {'unverified_model': 1}

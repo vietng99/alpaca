@@ -48,6 +48,31 @@ def test_claude_cache_durations_are_distinct_and_input_is_not_counted_twice():
         "cache_write": 0, "output": .0025})
 
 
+def test_opus_5_5_rates_come_from_the_pricing_page_with_their_own_date():
+    result = estimate("claude-opus-5-5", usage(
+        input_tokens=4500, uncached_input_tokens=1000,
+        cached_input_tokens=2000, cache_write_input_tokens=1500,
+        cache_creation_5m_tokens=1000, cache_creation_1h_tokens=500,
+        output_tokens=100, service_tier="standard", speed="standard"))
+    assert result["status"] == "estimated"
+    assert result["total_usd"] == pytest.approx(0.0154)
+    assert result["breakdown_usd"] == pytest.approx({
+        "uncached_input": .004, "cached_input": .0004,
+        "cache_write_5m": .005, "cache_write_1h": .004,
+        "cache_write": 0, "output": .002})
+    card = result["rate_card"]
+    assert card["source_url"] == "https://platform.claude.com/docs/en/about-claude/pricing"
+    assert card["verified_at"] == "2026-09-25"
+    assert "2026-09-25" in result["assumptions"][1]
+
+
+def test_opus_5_5_fast_mode_doubles_every_category():
+    result = estimate("claude-opus-5-5", usage(speed="fast"))
+    assert result["status"] == "estimated"
+    assert result["total_usd"] == pytest.approx(2 * 0.006)
+    assert result["rate_card"]["service_tier"] == "fast"
+
+
 def test_fable_cache_read_does_not_inherit_predecessor_rate():
     result = estimate("claude-fable-5-1", usage(
         input_tokens=100_000, cached_input_tokens=100_000, output_tokens=0))
@@ -190,3 +215,58 @@ def test_astra_cumulative_usage_does_not_apply_request_threshold_to_session_tota
     result = estimate("gpt-6-astra", usage(input_tokens=900000, usage_scope="session"))
     assert result["total_usd"] is None
     assert result["reason_code"] == "request_boundaries_required"
+
+
+def test_built_in_cards_say_where_they_come_from():
+    card = estimate("claude-opus-5", usage())["rate_card"]
+    assert card["origin"] == "built-in"
+    assert "label" not in card
+
+
+def test_unknown_model_reason_names_the_model_and_how_to_record_a_card():
+    result = estimate("claude-opus-9", usage())
+    assert result["reason_code"] == "unverified_model"
+    assert "claude-opus-9" in result["reason"]
+    assert "alpaca analytics price-check --model claude-opus-9" in result["reason"]
+
+
+def recorded_card(**overrides):
+    card = {"provider": "anthropic", "source_url": "https://platform.claude.com/docs/en/about-claude/pricing",
+            "source_urls": ["https://platform.claude.com/docs/en/about-claude/pricing"],
+            "rates": ("5", "0.5", "6.25", "10", None, "25"), "context_threshold_tokens": None,
+            "verified_at": "2026-09-25",
+            "label": {"method": "agent-entered", "source_sha256": None, "source_copy": None, "row": None,
+                      "verified_by": "cli", "recorded_at": "2026-09-25T00:00:00+00:00"}}
+    card.update(overrides)
+    return card
+
+
+def test_recorded_cards_price_models_without_a_built_in_card():
+    result = estimate("claude-opus-4-7", usage(), cards={"claude-opus-4-7": recorded_card()})
+    assert result["total_usd"] == pytest.approx(0.0075)
+    assert result["rate_card"]["origin"] == "recorded"
+    assert result["rate_card"]["label"]["method"] == "agent-entered"
+    assert result["rate_card"]["verified_at"] == "2026-09-25"
+
+
+@pytest.mark.parametrize("broken", [{"rates": ("5", "0.5")}, {"rates": ("5", "x", "6.25", "10", None, "25")},
+                                    {"provider": "azure"}, {"label": None}])
+def test_malformed_recorded_cards_are_not_used(broken):
+    result = estimate("claude-opus-4-7", usage(), cards={"claude-opus-4-7": recorded_card(**broken)})
+    assert result["total_usd"] is None
+    assert result["reason_code"] == "unverified_model"
+
+
+@pytest.mark.parametrize("broken", [
+    {"rates": ("10001", "0.5", "6.25", "10", None, "25")},
+    {"rates": ("0", "0.5", "6.25", "10", None, "25")},
+    {"rates": ("5", "0.5", "6.25", "10", None, "0")},
+    {"rates": ("1E+400", "0.5", "6.25", "10", None, "25")},
+    {"fast_multiplier": "0.5"},
+    {"fast_multiplier": "1E+400"},
+    {"source_url": "HTTPS://platform.claude.com/docs/en/about-claude/pricing"},
+])
+def test_recorded_cards_outside_the_bounds_are_not_used(broken):
+    result = estimate("claude-opus-4-7", usage(), cards={"claude-opus-4-7": recorded_card(**broken)})
+    assert result["total_usd"] is None
+    assert result["reason_code"] == "unverified_model"

@@ -66,3 +66,47 @@ def test_session_start_without_an_env_file_still_boots(project):
                        input=json.dumps({"session_id": "s-no-env", "cwd": project}), capture_output=True,
                        text=True, encoding="utf-8", cwd=project, env={**env_clean, **env})
     assert p.returncode == 0 and "Alpaca BOOT" in p.stdout
+
+
+def _boot(project):
+    env = {"CLAUDE_PROJECT_DIR": project, "PYTHONPATH": os.path.dirname(os.path.dirname(os.path.dirname(__file__)))}
+    rc, out, err = run_hook("alpaca.hooks.session_start", {"session_id": "abcd1234-0000", "transcript_path": "", "cwd": project},
+                            cwd=project, env_extra=env)
+    assert rc == 0, err
+    return json.loads(out)["hookSpecificOutput"]["additionalContext"]
+
+
+def test_session_start_names_a_pricing_gap_and_its_fix(project):
+    from alpaca.analytics import ratecards
+    run_hook("alpaca.hooks.session_start", {"session_id": "seed-0000", "transcript_path": "", "cwd": project},
+             cwd=project, env_extra={"CLAUDE_PROJECT_DIR": project,
+                                     "PYTHONPATH": os.path.dirname(os.path.dirname(os.path.dirname(__file__)))})
+    ratecards.write_gaps(project, [{"model": "claude-opus-9-1", "provider": "anthropic", "responses": 42,
+                                    "sessions": 3, "fix": ratecards.fix_command("claude-opus-9-1", "anthropic")}])
+    ctx = _boot(project)
+    assert "PRICING GAP: claude-opus-9-1 has 42 unpriced response(s) in 3 session(s)" in ctx
+    assert "bin/alpaca analytics price-check --model claude-opus-9-1" in ctx
+
+
+def test_session_start_is_quiet_without_gaps_or_for_a_model_with_a_card(project):
+    from alpaca.analytics import ratecards
+    assert "PRICING GAP" not in _boot(project)
+    # A stale notice for a model that has a built-in card never nags.
+    ratecards.write_gaps(project, [{"model": "claude-opus-5-5", "provider": "anthropic", "responses": 9, "sessions": 1}])
+    assert "PRICING GAP" not in _boot(project)
+
+
+def test_session_start_keeps_its_boot_context_when_the_gap_notice_cannot_be_read(project, monkeypatch):
+    # The hook runs in a subprocess; a sitecustomize on PYTHONPATH makes read_gaps raise there.
+    boom = Path(project).parent / "boom"
+    boom.mkdir()
+    (boom / "sitecustomize.py").write_text(
+        "from alpaca.analytics import ratecards\n"
+        "def _raise(root):\n    raise RuntimeError('broken notice')\n"
+        "ratecards.read_gaps = _raise\n", encoding="utf-8")
+    repo = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    rc, out, err = run_hook("alpaca.hooks.session_start", {"session_id": "abcd1234-0000", "transcript_path": "", "cwd": project},
+                            cwd=project, env_extra={"CLAUDE_PROJECT_DIR": project, "PYTHONPATH": repo + os.pathsep + str(boom)})
+    assert rc == 0, err
+    ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert "Alpaca BOOT" in ctx and "PRICING GAP" not in ctx

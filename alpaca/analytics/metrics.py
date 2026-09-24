@@ -17,7 +17,7 @@ import re
 import threading
 
 from alpaca import pool, transcripts
-from alpaca.analytics import detail
+from alpaca.analytics import detail, ratecards
 
 MAX_LEDGER = 5000
 MAX_HOOKS = 2000
@@ -288,7 +288,7 @@ class _Scan:
                 self.reported_source = source
                 # These client aggregates can cover more than the captured parent.
                 # Preserve them separately from per-response measured counters.
-                self.reported_models = [{'model': _safe(model), 'cost_usd': _number(_mapping(value).get('costUSD'))}
+                self.reported_models = [_reported_model(model, value)
                                         for model, value in list(_mapping(rec.get('modelUsage')).items())[:200]]
             if typ == 'event_msg' and payload.get('type') == 'item_completed':
                 item = _mapping(payload.get('item'))
@@ -379,7 +379,18 @@ class _Scan:
         return list(self.claude.values()), 'claude-response-ids' if self.claude else 'unavailable'
 
 
-def _finish_entries(rows):
+def _reported_model(model, value):
+    # Client token counts let the selftest bound the client's own cost for this model.
+    value = _mapping(value)
+    return {'model': _safe(model), 'cost_usd': _number(value.get('costUSD')),
+            'input_tokens': _int(value.get('inputTokens')), 'output_tokens': _int(value.get('outputTokens')),
+            'cache_read_tokens': _int(value.get('cacheReadInputTokens')),
+            'cache_write_tokens': _int(value.get('cacheCreationInputTokens'))}
+
+
+def _finish_entries(rows, cards=None):
+    """Attach excerpts, tools and a cost estimate. `cards` are recorded rate cards
+    (ratecards.load); built-in cards are always used first."""
     from alpaca.analytics import pricing
     for row in rows:
         messages = row.pop('_messages')
@@ -393,7 +404,7 @@ def _finish_entries(rows):
                 tools[tool['id']] = {'id': _safe(tool['id']), 'name': _safe(tool['name']), 'status': tool['status']}
         row['tools'] = list(tools.values())
         row['context_tokens'] = row['usage']['input_tokens'] if row['usage'] else None
-        row['cost'] = pricing.estimate(row['model'], row['usage'] or {}, provider=row['provider'])
+        row['cost'] = pricing.estimate(row['model'], row['usage'] or {}, provider=row['provider'], cards=cards)
 
 
 def _context(scan, rows):
@@ -469,7 +480,15 @@ def _rollups(rows, capture, hooks):
         costs = [row['cost']['total_usd'] for row in group if row['cost']['total_usd'] is not None]
         return {'responses': len(group), 'tokens': _sum_usage(row['usage'] for row in group),
                 'estimated_cost_usd': sum(costs) if costs else None, 'costed_responses': len(costs)}
-    return ([{'model': model, **aggregate(group)} for model, group in model_rows.items()],
+    def unpriced(group):
+        reasons = OrderedDict()
+        for row in group:
+            if row['cost']['total_usd'] is None:
+                code = row['cost'].get('reason_code') or 'unavailable'
+                reasons[code] = reasons.get(code, 0) + 1
+        return dict(reasons)
+    return ([{'model': model, 'provider': group[0]['provider'], **aggregate(group), 'unpriced': unpriced(group)}
+             for model, group in model_rows.items()],
             [{'hour': hour, 'tools': value['tools'], 'hooks': value['hooks'], **aggregate(value['_rows'])}
              for hour, value in sorted(hourly.items())], list(tool_stats.values()))
 
@@ -621,7 +640,7 @@ def _analyze(root, sid, child, revision):
                 source = 'tool-pool'
         rows, method = scan.responses()
         imported_usage = _imported_usage(conn, sid, capture) if not child else _imported_usage(None, sid, capture)
-        _finish_entries(rows)
+        _finish_entries(rows, ratecards.load(conn) if conn else {})
         if rows and all(row['ts'] for row in rows):
             rows.sort(key=lambda row: row['ts'])
         coverage = detail._coverage(capture, has_transcript, False, source, children_truncated)
@@ -714,6 +733,28 @@ def _analyze(root, sid, child, revision):
             conn.close()
 
 
+def _keyed(root, sid, child):
+    """(real root, cache key, revision) for one conversation; ValueError for a bad identifier."""
+    if not isinstance(sid, str) or not detail._IDENTIFIER.fullmatch(sid):
+        raise ValueError('invalid session identifier')
+    if child is not None and (not isinstance(child, str) or not re.fullmatch(r'child-[0-9a-f]{24}', child)):
+        raise ValueError('invalid child identifier')
+    root = os.path.realpath(root)
+    # A newly recorded rate card reprices every cached analysis.
+    revision = dict(detail.source_revision(root, sid), ratecards=ratecards.revision(root))
+    key = (root, sid, child, json.dumps(revision, sort_keys=True), MAX_READ_BYTES, MAX_LINE_BYTES,
+           detail.MAX_RECORDS, MAX_LEDGER, MAX_HOOKS)
+    return root, key, revision
+
+
+def analysis_key(root, sid, child=None):
+    """The exact cache key analyze() uses: source revision, rate-card revision and read bounds.
+
+    Callers that keep their own derived rows (metrics_index) key them on this, so a changed
+    transcript or a newly recorded card recomputes the row and nothing else does."""
+    return _keyed(root, sid, child)[1]
+
+
 def analyze(root, sid, child=None):
     """Return selected-conversation analytics, cached by bounded source revision.
 
@@ -721,14 +762,7 @@ def analyze(root, sid, child=None):
     discovered by detail's contained-directory scanner. Cache storage is bounded
     by both entries and serialized size; callers receive independent objects.
     """
-    if not isinstance(sid, str) or not detail._IDENTIFIER.fullmatch(sid):
-        raise ValueError('invalid session identifier')
-    if child is not None and (not isinstance(child, str) or not re.fullmatch(r'child-[0-9a-f]{24}', child)):
-        raise ValueError('invalid child identifier')
-    root = os.path.realpath(root)
-    revision = detail.source_revision(root, sid)
-    key = (root, sid, child, json.dumps(revision, sort_keys=True), MAX_READ_BYTES, MAX_LINE_BYTES,
-           detail.MAX_RECORDS, MAX_LEDGER, MAX_HOOKS)
+    root, key, revision = _keyed(root, sid, child)
     with _CACHE_LOCK:
         if key in _CACHE:
             _CACHE.move_to_end(key)

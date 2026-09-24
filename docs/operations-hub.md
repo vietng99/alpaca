@@ -78,6 +78,67 @@ The read services are `/hub/analytics-index.json`, `/hub/analytics.json?sid=SESS
 
 Run metadata is read independently per file; malformed metadata is reported without hiding valid runs. A document's recorded seal is historical; full proof verification still uses `alpaca proof check`.
 
+### Rate cards, pricing gaps and the cost selftest
+
+The estimated API cost of a response comes from a rate card: the provider's published
+list price per million tokens for each token category. `alpaca/analytics/pricing.py` holds
+the cards verified when the code was written. A model released later has no card there, so
+its responses show "Unavailable" until someone records one. That record is an agent's job
+and needs no code change:
+
+1. **Detect.** The Sessions page lists every model that answered without a card, with the
+   command that fixes it. The cost selftest fails on the same gap, and the dashboard and the
+   selftest leave `.alpaca/analytics/pricing-gaps.json`; the next session start prints a
+   `PRICING GAP` line from it.
+2. **Check and label.** For a Claude model, fetch the official price page and record its row:
+
+```bash
+bin/alpaca analytics price-check --model claude-example-9-1 --dry-run
+bin/alpaca analytics price-check --model claude-example-9-1
+bin/alpaca analytics price-check        # every current gap
+```
+
+   `price-check` downloads `https://platform.claude.com/docs/en/about-claude/pricing.md`,
+   keeps one copy per content hash under `.alpaca/analytics/pricing-sources/`, reads the
+   model's row of the "Model pricing" table and the "Fast mode pricing" table, and appends
+   one `ratecard-verified` event with the rates, the source URL, the page sha256, the row
+   text and the date. It refuses when the table header differs from the five expected
+   columns, when no row or more than one row matches, or when a price cell does not parse.
+   The page and every redirect must stay on https `platform.claude.com`; the final URL is
+   the one recorded. It refuses a model that already has a built-in card; an identical
+   repeat (same rates, source and page hash, on any day) records nothing. Rates must lie
+   between 0 and 10000 USD per million tokens (input and output above 0) and a fast mode
+   multiplier between 1 and 10. For another provider, read its official price page
+   yourself and record what it says:
+
+```bash
+bin/alpaca analytics price-label --model example-model --provider openai \
+  --source https://example.com/official-pricing --input 10 --cache-read 1 --cache-write 12.5 --output 50
+```
+
+   Every category the provider bills is required (Claude cards take `--cache-write-5m` and
+   `--cache-write-1h`; OpenAI cards take `--cache-write`), and the source must be https.
+3. **Confirm.** The live server sees the new event, reprices every cached analysis and
+   pushes the change; the Sessions page updates the affected cells in place.
+
+The selftest checks the cost analytics end to end and saves its report under
+`.alpaca/analytics/selftest/`:
+
+```bash
+bin/alpaca analytics selftest                  # offline checks
+bin/alpaca analytics selftest --online         # also compare every Claude card with the official page
+bin/alpaca analytics selftest --label-gaps     # record each Claude gap from the official page first
+```
+
+Its checks: `arithmetic` (every card against an independent calculation and pinned
+known answers), `coverage` (every response of every session with a transcript is priced;
+a model without a card fails with its fix command, other unpriced responses warn by
+reason), `client-snapshot` (where a transcript carries the client's own cost record, the
+client cost must fall between our all-5-minute and all-1-hour cache-write bounds),
+`online` and `label-gaps` (skipped unless requested). It exits FAIL when any check fails.
+Recorded cards are current list prices checked on the recorded date, not a historical
+invoice.
+
 ## Operation and rollback
 
 The hub uses the existing Python server, authentication, and Cloudflare origin. No browser CDN or Node build is required. IBM Plex fonts are bundled under their SIL Open Font License; interface icons are original SVG paths.

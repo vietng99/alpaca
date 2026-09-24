@@ -45,3 +45,58 @@ def test_crew_totals_include_each_conversation_once_without_client_cost(project)
     main = metrics_index.index(project, [{'sid': 'parent', 'class': 'work'}])
     assert main['totals']['total_tokens'] == 110
     assert main['sessions'][0]['cost']['reported_usd'] == 999
+
+
+def test_index_totals_report_pricing_gaps(project):
+    register(project, 'parent')
+    write(transcripts.local_path(project, 'parent'), 'main-response', 1)
+    totals = metrics_index.index(project, [{'sid': 'parent', 'class': 'work'}])['totals']
+    assert totals['unpriced_models'] == [] and totals['unpriced_other'] == 0
+    path = Path(transcripts.local_path(project, 'parent'))
+    path.write_text(path.read_text().replace('claude-opus-5', 'claude-opus-9'))
+    totals = metrics_index.index(project, [{'sid': 'parent', 'class': 'work'}])['totals']
+    assert totals['unpriced_models'] == [{'model': 'claude-opus-9', 'provider': 'anthropic', 'responses': 1,
+                                          'sessions': 1,
+                                          'fix': 'bin/alpaca analytics price-check --model claude-opus-9'}]
+    assert totals['unpriced_other'] == 0
+
+
+def test_index_reuses_rows_for_unchanged_sessions_beyond_the_analysis_cache(project, monkeypatch):
+    # The record holds more work sessions than metrics.MAX_CACHE; shrink the cache to show it.
+    from alpaca import db as record
+    from alpaca.analytics import metrics, pricing, ratecards
+    monkeypatch.setattr(metrics, 'MAX_CACHE', 1)
+    for sid in ('a', 'b', 'c'):
+        register(project, sid)
+        write(transcripts.local_path(project, sid), sid + '-response', 1)
+    calls = []
+    real = metrics._analyze
+    monkeypatch.setattr(metrics, '_analyze', lambda *args: calls.append(args[1]) or real(*args))
+    sessions = [{'sid': sid, 'class': 'work'} for sid in ('a', 'b', 'c')]
+    first = metrics_index.index(project, sessions)
+    assert sorted(calls) == ['a', 'b', 'c']
+    second = metrics_index.index(project, sessions)
+    assert sorted(calls) == ['a', 'b', 'c']          # no session analysed again
+    assert second == first
+    second['sessions'][0]['summary']['responses'] = 999
+    assert metrics_index.index(project, sessions)['sessions'][0]['summary']['responses'] == 1
+    assert metrics.analysis_key(project, 'a') == metrics.analysis_key(project, 'a')
+    path = Path(transcripts.local_path(project, 'b'))
+    path.write_text(path.read_text().replace('claude-opus-5', 'claude-opus-9'))
+    del calls[:]
+    third = metrics_index.index(project, sessions)
+    assert calls == ['b']                            # only the changed transcript
+    assert [row['model'] for row in third['totals']['unpriced_models']] == ['claude-opus-9']
+    del calls[:]
+    conn = record.connect(project)
+    record.append_event(conn, session='cli', actor='analytics', kind=ratecards.EVENT, ref='claude-opus-9',
+                        data={'model': 'claude-opus-9', 'provider': 'anthropic',
+                              'source_url': pricing.CLAUDE_PRICING, 'source_urls': [pricing.CLAUDE_PRICING],
+                              'rates': ['5', '0.5', '6.25', '10', None, '25'], 'context_threshold_tokens': None,
+                              'verified_at': '2026-09-25', 'fast_multiplier': None,
+                              'label': {'method': 'agent-entered', 'verified_by': 'cli',
+                                        'recorded_at': '2026-09-25T00:00:00+00:00'}})
+    conn.close()
+    fourth = metrics_index.index(project, sessions)
+    assert sorted(calls) == ['a', 'b', 'c']          # a new card reprices every session
+    assert fourth['totals']['unpriced_models'] == []

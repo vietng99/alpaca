@@ -40,7 +40,7 @@ import threading
 import time
 
 from alpaca import cli, db, export, paths, render, util
-from alpaca.analytics import build_index
+from alpaca.analytics import build_index, metrics_index, ratecards
 
 POLL_S = 0.7                 # watcher cadence; also the debounce floor for pushes
 FOLD_MIN_S = 60              # the watcher refolds analytics at most this often (a fold reads every
@@ -49,7 +49,10 @@ FOLD_MIN_S = 60              # the watcher refolds analytics at most this often 
 BOARD_MIN_S = 15             # the watcher rebuilds the status board at most this often; each new
                              # board is a live push that makes open pages re-render, so match the
                              # pages' own 15 s refresh
+GAPS_MIN_S = 900             # without a viewer, recompute the index for the pricing gap notice this often
+INDEX_VIEW_S = 600           # a viewer's index request keeps the watcher warming the index this long
 DATA_WAIT_S = 60             # an analytics request waits this long for the first fold
+RETRY_FOLD_S = 10            # Retry-After for an index request that arrives before the first fold
 HEARTBEAT_S = 15             # SSE keep-alive comment interval
 IDLE_SHUTDOWN_S = 1800       # exit when no viewer (SSE client) for this long, so servers never orphan
 LIB_EXTS = (".html", ".md")
@@ -398,6 +401,10 @@ def _profile_live_sig(root):
     return str(profile.load(root).live_revision(root) or "")
 
 
+class FoldPending(Exception):
+    """The analytics index was asked for before the first successful fold."""
+
+
 class Live:
     """Latest folded data + library, recomputed by the watcher thread only.
 
@@ -417,6 +424,14 @@ class Live:
         self.board_json = "{}"
         self.board_rev = ""
         self._online_board_rev = ""
+        self.pricing_rev = ""                  # ratecards.revision: recorded rate cards reprice analytics
+        self._pricing_sig = None
+        self._index = None                     # ((data_rev, pricing_rev), json body, etag) of the index
+        self._gaps_at = 0.0                    # when the index (and the pricing gap notice) was last computed
+        self._index_lock = threading.Lock()    # one index computation at a time; waiters reuse it
+        self._warm_thread = None
+        self._index_requested_at = 0.0         # last /hub/analytics-index.json request (HTTP handler only)
+        self._warm_pending = False             # a warm was due but skipped; the watcher re-checks it
         self._data_sig = None
         self._lib_sig = None
         self._job_sig = None
@@ -523,6 +538,20 @@ class Live:
         with self.lock:
             retry_degraded = self.health.get("state") != "fresh"
         now = time.time()
+        index_moved = False
+        # A recorded rate card is an event, so the pricing revision can only move when the input
+        # signature (which covers the event-chain head) moves. It reprices every session analysis.
+        if dsig is not None and dsig != self._pricing_sig:
+            # A failed read waits for the next input change rather than retrying every poll.
+            self._pricing_sig = dsig
+            try:
+                revision = ratecards.revision(self.root)
+                with self.lock:
+                    if revision != self.pricing_rev:
+                        self.pricing_rev = revision
+                        changed = index_moved = True
+            except Exception as e:
+                self.failure("pricing", e)
         # The status board first: it is the cockpit's payload and takes a fraction of a second.
         if dsig is not None and (dsig != (self._board_sig or self._data_sig) or not self.board_rev) and (
                 not throttle or now - self._board_at >= BOARD_MIN_S):
@@ -560,7 +589,7 @@ class Live:
                 with self.lock:
                     if rev != self.data_rev:
                         self.data_json, self.data_rev = dj, rev
-                        changed = True
+                        changed = index_moved = True
                 self._data_sig = dsig
                 self.refreshed_at = time.time()
                 changed = self._set_health("fresh", "analytics fold and status board match current inputs") or changed
@@ -608,6 +637,81 @@ class Live:
             with self.cond:
                 self.gen += 1
                 self.cond.notify_all()
+        if index_moved or self._warm_pending:
+            self._warm_index()
+
+    def note_index_request(self):
+        """The HTTP handler records that a viewer asked for the index; only such a request makes
+        the watcher warm it for viewers (a cockpit-only viewer never pays for it)."""
+        with self.lock:
+            self._index_requested_at = time.time()
+
+    def analytics_index(self):
+        """The project analytics index as (JSON body, etag), computed once per revision pair.
+
+        metrics_index.index analyzes every work session (seconds on a large record), and the
+        index changes only with the analytics fold or the recorded rate cards. The result is kept
+        for the current (data_rev, pricing_rev); concurrent requests wait on one computation.
+        """
+        with self._index_lock:
+            with self.lock:
+                key = (self.data_rev, self.pricing_rev)
+                cached = self._index
+                data_json = self.data_json
+            if not key[0]:
+                # No successful fold yet (still running, or failed and set data_ready): an index
+                # over no sessions would read as "0 sessions" and would erase the gap notice.
+                raise FoldPending("first analytics fold pending")
+            if cached is not None and cached[0] == key:
+                return cached[1], cached[2]
+            sessions = json.loads(data_json).get("sessions", [])
+            value = metrics_index.index(self.root, sessions)
+            body = json.dumps(value, ensure_ascii=True)
+            etag = util.sha256_hex(body)
+            with self.lock:
+                self._index = (key, body, etag)
+                self._gaps_at = time.time()
+            try:
+                # The pricing gap notice the next session start reads (models without a rate card).
+                # With no gap and no notice yet there is nothing to say, so a read creates no file.
+                gaps = value.get("totals", {}).get("unpriced_models") or []
+                if gaps or os.path.isfile(ratecards.gaps_path(self.root)):
+                    ratecards.write_gaps(self.root, gaps, scope="work")
+            except Exception as error:
+                self.failure("pricing_gaps", error)
+            return body, etag
+
+    def _warm_index(self):
+        """Recompute a stale index off the watcher thread after the fold or the pricing moved.
+
+        Two reasons to warm: a viewer is connected and asked for the index within INDEX_VIEW_S,
+        or GAPS_MIN_S passed since the last computation, so the pricing gap notice stays current
+        for the next session start without a viewer. Never before the first successful fold. A
+        warm that is due but skipped (no reason yet, or one already running) stays pending and
+        the watcher re-checks it on every tick.
+        """
+        now = time.time()
+        with self.lock:
+            key = (self.data_rev, self.pricing_rev)
+            stale = bool(key[0]) and (self._index is None or self._index[0] != key)
+            viewer = self.clients > 0 and now - self._index_requested_at < INDEX_VIEW_S
+            wanted = viewer or now - self._gaps_at >= GAPS_MIN_S
+        running = self._warm_thread is not None and self._warm_thread.is_alive()
+        if not stale:
+            self._warm_pending = False
+            return
+        if not wanted or running:
+            self._warm_pending = True
+            return
+        self._warm_pending = False
+
+        def warm():
+            try:
+                self.analytics_index()
+            except Exception as error:
+                self.failure("analytics_index", error)
+        self._warm_thread = threading.Thread(target=warm, daemon=True)
+        self._warm_thread.start()
 
     def watch(self):
         while True:
@@ -617,11 +721,11 @@ class Live:
     def rev_blob(self):
         """One revision per surface. The board payload carries its own component, so a
         transcript that moved does not make the board refetch, and a card that moved does not
-        make the analytics view refetch."""
+        make the analytics view refetch. `pricing` moves when a rate card is recorded."""
         board_revision = self.board_snapshot()[1]
         with self.lock:
             return json.dumps({"data": self.data_rev, "lib": self.lib_rev,
-                               "board": board_revision})
+                               "board": board_revision, "pricing": self.pricing_rev})
 
 
 FILES_ROOT_DENY = {".git", ".venv", "node_modules", "__pycache__", ".pytest_cache", "analytics"}
@@ -818,7 +922,7 @@ def make_handler(live, root, remote=False):
         def log_message(self, *a):
             pass
 
-        def _send(self, body, ctype, code=200, etag=None, cache="no-store"):
+        def _send(self, body, ctype, code=200, etag=None, cache="no-store", headers=None):
             # Conditional GET: when the caller gives an ETag (the payload's content revision) and the
             # client already holds it, answer 304 with no body. The revision already excludes the
             # volatile `generated` stamp, so an unchanged record revalidates to an empty 304 instead
@@ -834,6 +938,8 @@ def make_handler(live, root, remote=False):
                     return
             self.send_response(code)
             self.send_header("Content-Type", ctype)
+            for name, value in (headers or {}).items():
+                self.send_header(name, value)
             # gzip the large text/JSON bodies when the client accepts it. data.json is ~0.5 MB of
             # highly compressible JSON pulled on a timer; over the http2 tunnel (QUIC is blocked
             # here) the uncompressed body could not keep up and the page stalled. gzip cuts it about
@@ -971,6 +1077,7 @@ def make_handler(live, root, remote=False):
                       "live.js": "text/javascript; charset=utf-8", "live.css": "text/css; charset=utf-8",
                       "theme.js": "text/javascript; charset=utf-8", "theme.css": "text/css; charset=utf-8",
                       "icons.js": "text/javascript; charset=utf-8",
+                      "liveflags.js": "text/javascript; charset=utf-8", "morph.js": "text/javascript; charset=utf-8",
                       "system.js": "text/javascript; charset=utf-8",
                       "vendor/plex-sans.woff2": "font/woff2", "vendor/plex-sans-medium.woff2": "font/woff2",
                       "vendor/plex-mono.woff2": "font/woff2"}
@@ -1021,11 +1128,14 @@ def make_handler(live, root, remote=False):
                     from alpaca.analytics.metrics import analyze
                     value = analyze(root, one("sid"), child=one("child") or None)
                 elif path == "/hub/analytics-index.json":
-                    from alpaca.analytics.metrics_index import index
                     live.data_ready.wait(DATA_WAIT_S)
-                    with live.lock:
-                        sessions = json.loads(live.data_json).get("sessions", [])
-                    value = index(root, sessions)
+                    live.note_index_request()
+                    try:
+                        body, etag = live.analytics_index()
+                    except FoldPending as pending:
+                        return self._send(json.dumps({"error": str(pending)}).encode("utf-8"), "application/json",
+                                          503, headers={"Retry-After": str(RETRY_FOLD_S)})
+                    return self._send(body.encode("utf-8"), "application/json", etag=etag, cache="no-cache")
                 elif path == "/hub/analytics-children.json":
                     from alpaca.analytics.metrics_index import family
                     value = family(root, one("sid"))

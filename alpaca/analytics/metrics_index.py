@@ -2,12 +2,48 @@
 
 The server supplies its classified session list. Children stay separate and
 client cost snapshots are deliberately not summed across overlapping scopes.
+
+A project has more work sessions than metrics keeps whole analyses for (metrics.MAX_CACHE),
+so index() keeps its own small row per session: only the pieces it reads, keyed on
+metrics.analysis_key. An unchanged session is never analysed again; a changed transcript or a
+newly recorded rate card changes the key and recomputes that row.
 """
-from alpaca.analytics import metrics
+from collections import OrderedDict
+import copy
+import threading
+
+from alpaca.analytics import metrics, ratecards
+
+MAX_ROWS = 2048
+_ROWS = OrderedDict()
+_ROWS_LOCK = threading.RLock()
+_MODEL_KEYS = ("model", "provider", "responses", "costed_responses", "unpriced")
+
+
+def _analysis_row(root, sid):
+    """The pieces of metrics.analyze(root, sid) that index() needs, cached per analysis key."""
+    key = metrics.analysis_key(root, sid)
+    with _ROWS_LOCK:
+        if key in _ROWS:
+            _ROWS.move_to_end(key)
+            return copy.deepcopy(_ROWS[key])
+    analysis = metrics.analyze(root, sid)
+    row = {"summary": analysis["summary"], "coverage": analysis["coverage"], "cost": analysis["cost"],
+           "operator": analysis["session"].get("operator"),
+           "models": [{name: model.get(name) for name in _MODEL_KEYS} for model in analysis.get("models") or []]}
+    with _ROWS_LOCK:
+        # One row per conversation: a new revision replaces the old one.
+        for stale in [candidate for candidate in _ROWS if candidate[:3] == key[:3]]:
+            del _ROWS[stale]
+        _ROWS[key] = copy.deepcopy(row)
+        while len(_ROWS) > MAX_ROWS:
+            _ROWS.popitem(last=False)
+    return row
 
 
 def index(root, sessions):
     rows = []
+    analysed = []
     totals = {"measured_sessions": 0, "total_tokens": None, "responses": 0,
               "estimated_cost_usd": None, "costed_responses": 0, "partial_sessions": 0,
               "listed_sessions": 0, "unavailable_sessions": 0, "complete_sessions": 0}
@@ -17,10 +53,11 @@ def index(root, sessions):
         totals["listed_sessions"] += 1
         row = {key: session.get(key) for key in ("sid", "title", "first", "operator")}
         try:
-            analysis = metrics.analyze(root, session["sid"])
+            analysis = _analysis_row(root, session["sid"])
+            analysed.append((session["sid"], {"models": analysis["models"]}))
             row.update({key: analysis[key] for key in ("summary", "coverage", "cost")})
             summary = analysis["summary"]
-            row["operator"] = analysis["session"].get("operator") or row["operator"]
+            row["operator"] = analysis["operator"] or row["operator"]
             totals["responses"] += summary["responses"]
             totals["costed_responses"] += summary["costed_responses"]
             total = (summary["tokens"] or {}).get("total_tokens")
@@ -41,6 +78,11 @@ def index(root, sessions):
             totals["unavailable_sessions"] += 1
             row.update(coverage={"state": "unavailable"}, error="No readable analytics source for this session.")
         rows.append(row)
+    # Pricing gaps: models that answered but have no rate card, each with the command that
+    # records one, and a count of responses unpriced for any other reason.
+    gaps = ratecards.tally(analysed)
+    totals["unpriced_models"] = gaps["unpriced_models"]
+    totals["unpriced_other"] = gaps["unpriced_other"]
     totals["incomplete_project"] = bool(totals["partial_sessions"])
     totals["denominator"] = "listed work sessions; totals cover available main-conversation measurements"
     return {"sessions": rows, "totals": totals, "scope": "main conversations only"}

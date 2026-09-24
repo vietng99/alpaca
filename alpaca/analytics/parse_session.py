@@ -2,11 +2,13 @@
 import collections, datetime, glob, hashlib, json, os
 from alpaca import where
 
-def notional_cost(model, u):
-    """Compatibility entry point for the canonical exact-model rate-card estimate."""
+def notional_cost(model, u, *, cards=None):
+    """Compatibility entry point for the canonical exact-model rate-card estimate.
+
+    `cards` are recorded rate cards (ratecards.load); built-in cards are used first."""
     from alpaca.analytics import metrics, pricing
     measured = metrics._usage(u, 'anthropic')
-    return pricing.estimate(model, measured or {}, provider='anthropic')['total_usd']
+    return pricing.estimate(model, measured or {}, provider='anthropic', cards=cards)['total_usd']
 
 
 def _valid_usage(u):
@@ -54,11 +56,12 @@ def _dt(ts):
 def _empty():
     return {"turns": 0, "tools": 0, "prompts": 0}
 
-def parse(path, subagents_dir=None, *, include_children=True):
+def parse(path, subagents_dir=None, *, include_children=True, cards=None):
     """Legacy shape backed by the canonical response/call and pricing normalizer.
 
     Direct callers may fold children explicitly; project session summaries pass
     include_children=False so their scope matches the selected-conversation API.
+    `cards` are recorded rate cards (ratecards.load) for models without a built-in card.
     """
     from alpaca.analytics import detail, metrics
     class SummaryCapture(metrics._AnalyticsCapture):
@@ -89,7 +92,7 @@ def parse(path, subagents_dir=None, *, include_children=True):
         if index == 0 and capture.stats["unreadable_sources"]:
             raise OSError("transcript source is unreadable")
         responses, _method = scan.responses()
-        metrics._finish_entries(responses)
+        metrics._finish_entries(responses, cards)
         rows.extend(responses)
         complete &= (capture.stats["total_is_exact"] and not capture.stats["unreadable_sources"]
                      and not scan.snapshot_gaps and not scan.snapshot_resets
