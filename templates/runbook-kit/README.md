@@ -31,7 +31,10 @@ is left unshown.
 | `example/` | a finished example: a spec, its runbook and one plugin check script |
 | `VERSION`, `SHA256SUMS`, `LICENSE` | what the kit was built from, file checksums, the MIT license |
 
-The `.claude` folder is hidden in most file browsers; `ls -a` shows it.
+The `.claude` folder is hidden in most file browsers; `ls -a` shows it. `unzip` keeps the file
+modes of the zip; a tool that drops them leaves `example/checks/status_codes.py` not executable,
+and the checker then reports `PLUGIN-NOT-EXECUTABLE` on the example: run
+`chmod +x check_runbook.py example/checks/status_codes.py` in the kit folder.
 
 ## Before you start
 
