@@ -94,7 +94,7 @@ the runbook states it once, a check compares against it, and no retry can loosen
 | `env` | no | extra environment variables, a mapping of names to text or numbers |
 | `inputs` | no | the files or folders the stage reads (paths or globs) |
 | `outputs` | no | what the stage writes: a path, or a mapping with `path` and `what` |
-| `checks` | yes when `run` is set | the pass checks; a stage that runs a command needs at least one |
+| `checks` | yes when `run` is set; not allowed without `run` | the pass checks; a stage that runs a command needs at least one, and a stage without `run` has none |
 | `retry` | no | the retry rule (below); without it a stage runs once |
 | `fails` | no | known ways the stage fails: mappings with `id` and `when` |
 | `owner_gate` | no | a step only a person may approve (below) |
@@ -316,8 +316,11 @@ autodrive level.
 | `evidence` | no | the files the owner reads before approving |
 | `covers` | no | the spec items this approval judges |
 
-A stage with an `owner_gate` waits for the approval before its `run` starts. A stage may be only
-a gate (no `run`, no checks), for example a release sign-off.
+A stage with an `owner_gate` waits for the approval before its `run` starts, and its checks judge
+that `run`. A stage may be only a gate (no `run`, no `checks`), for example a release sign-off.
+Such a stage runs nothing, so a check there would never be judged: the check refuses it
+(`CHECKS-WITHOUT-RUN`). A number the owner should see before approving goes in `evidence`; a
+threshold a machine should judge goes in a check of the stage whose `run` writes the number.
 
 ## `alpaca runbook check`
 
@@ -358,6 +361,7 @@ Every error is reported at once, one per line: `ERROR <code> <where>: <message>`
 | `NEEDS-UNKNOWN` | `needs` names a stage that is not declared earlier |
 | `RUN-MISSING` | a stage has neither `run` nor `owner_gate` |
 | `CHECKS-EMPTY` | a stage runs a command but has no check |
+| `CHECKS-WITHOUT-RUN` | a stage without `run` lists `checks` (nothing would judge them) |
 | `CHECK-TYPE-UNKNOWN` | a check `type` outside the list above |
 | `REGEX-INVALID` | a `pattern` does not compile |
 | `OP-UNKNOWN` | a `json-field` `op` outside the list above |
@@ -389,6 +393,43 @@ Warnings (`WARN <code> <where>: <message>`) do not change the verdict: `FR-UNCOV
 `SPEC-CLARIFY`, `COVERS-WITHOUT-SPEC` and `SPEC-UNPARSED` (an id found outside the known item
 shapes; it is still counted, see "Linking checks to the spec").
 
+## The partner kit: `alpaca runbook kit`
+
+```
+alpaca runbook kit [--out <dir>] [--zip]
+```
+
+A partner who has none of Alpaca writes a runbook with the partner kit: a folder,
+`alpaca-runbook-kit-v<format>`, that they hand to their own agent (Claude Code, Codex, Cursor,
+any agent that reads `AGENTS.md`, or a chat model). The verb builds it from this product's own
+files, so the kit cannot drift from what `alpaca runbook check` and `alpaca intake` take:
+
+| kit file | what it is |
+|---|---|
+| `check_runbook.py` | this checker in one file: `alpaca/runbook.py` with the verdict contract and the OpenSpec change reader of `alpaca/intake.py` inlined, Python 3.9 or later and PyYAML; the same options, messages, codes and exit status as `alpaca runbook check`, plus 65 when PyYAML is missing. Only the reading side is carried: `evaluate` and `next_attempt`, which run checks, stay out |
+| `runbook.schema.json` | a JSON Schema (draft 2020-12) generated from the field tables of `alpaca/runbook.py`, for editors and other tools; the checker stays the authority |
+| `FORMAT.md` | this document, rewritten for the partner: product paths removed, intake marked as our side |
+| `AGENTS.md`, `CLAUDE.md`, `.claude/skills/runbook-forge/SKILL.md` | the steps of `/alpaca-runbook-forge` for any agent, and as a Claude Code skill |
+| `README.md` | one page for the person: what to hand the agent, how to check, what to send back |
+| `templates/`, `example/` | an empty runbook, a spec template, a note on OpenSpec; the worked example of `templates/runbook-example/` |
+| `VERSION`, `LICENSE`, `SHA256SUMS` | the format version and product commit, the MIT license, a checksum of every file |
+
+`--out` is the folder the kit folder goes in (default: the current folder). A kit folder built
+earlier is replaced; anything else in its place is refused (BLOCKED). `--zip` also writes
+`<kit>.zip`, the same bytes on every build of the same sources. Before it answers PASS the verb
+runs the built `check_runbook.py` on the example and the template, the way a partner runs it.
+
+The kit-only texts live in `templates/runbook-kit/` (its `ABOUT.md` maps every kit file to its
+source). When this document or the forge skill changes so that a rule of the builder
+(`alpaca/runbook_kit.py`) no longer fits, the build stops and names the rule, instead of
+shipping a half rewritten text. Exit status: 0 PASS, 1 FAIL (the kit could not be built from
+these sources), 2 BLOCKED, 64 usage error.
+
+A partner sends back the runbook, its spec and its plugin scripts, in their own folder layout.
+`alpaca intake` takes a runbook only from inside the project, so copy the delivered folder into
+the project first (for example to `partner/<name>/`, keeping its layout), run
+`alpaca runbook check` on the copy, then intake it.
+
 ## What intake takes from a runbook
 
 `alpaca intake <spec> <runbook>` (`docs/intake.md`) builds on pieces Alpaca already has, and the
@@ -396,9 +437,10 @@ runbook fields line up with them:
 
 - Each stage `id` becomes a profile stage (`alpaca/profile.py`, `stages()`), so
   `alpaca task add --stage` and the hub can name it.
-- Each stage gives one task contract (`alpaca/taskcontract.py`): `inputs` gives the input lines,
-  `outputs` the expected lines, the checks (with their thresholds) the done bar, and `fails` the
-  fail cases.
+- Each stage with a `run` gives one task contract (`alpaca/taskcontract.py`): `inputs` gives the
+  input lines, `outputs` the expected lines, the checks (with their thresholds) the done bar, and
+  `fails` the fail cases. A stage that is only an owner gate gives the owner's decision alone,
+  which is why it may not list checks.
 - Each covered spec item becomes one checklist row whose evidence is the checks that cover it; a
   row covered only by an owner gate is discharged by review, the others by a run.
 - Owner gates become decisions the owner records; they are never moved by an agent.

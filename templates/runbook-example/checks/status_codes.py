@@ -6,9 +6,10 @@ Usage: status_codes.py <result.json> <status>
 The result file holds {"status": {"<code>": <count>, ...}}. The check passes when at least one
 response was counted and every counted response has <status>.
 
-It follows the plugin check contract in docs/runbook-format.md: exit 0 PASS, 1 FAIL,
-2 BLOCKED (the result file is missing or unreadable, or a count is not a whole number, so there
-is nothing to judge), and the last line printed to stdout is the reason.
+It follows the plugin check contract of the runbook format (docs/runbook-format.md, or
+FORMAT.md in the partner runbook kit): exit 0 PASS, 1 FAIL, 2 BLOCKED (the result file is
+missing or unreadable, or a count is not a whole number, so there is nothing to judge), and the
+last line printed to stdout is the reason.
 """
 import json
 import sys

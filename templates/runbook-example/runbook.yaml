@@ -1,6 +1,8 @@
-# Runbook for the link shortener in spec.md. Check it with:
-#   alpaca runbook check templates/runbook-example/runbook.yaml
-# The format is documented in docs/runbook-format.md.
+# Runbook for the link shortener in spec.md, the worked example of the runbook format.
+# Check it from the folder that holds it:
+#   alpaca runbook check runbook.yaml          (in the product)
+#   python3 ../check_runbook.py runbook.yaml   (in the partner runbook kit, folder example/)
+# The format is documented in docs/runbook-format.md (FORMAT.md in the partner kit).
 runbook: 1
 id: link-shortener
 title: Link shortener service

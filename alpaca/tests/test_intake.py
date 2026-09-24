@@ -448,6 +448,30 @@ def test_a_runbook_that_leaves_a_criterion_uncovered_is_refused(kit, capsys):
     assert _counts(kit["root"]) == before
 
 
+def test_a_gate_only_stage_with_checks_is_refused_so_no_check_is_lost(kit, capsys):
+    # Without `run` the release stage is only an owner gate: intake makes an approval task for it
+    # and no stage task, so its two checks would sit in no task contract.
+    _op(capsys)
+    _edit(kit["runbook"], "    run: ./deploy.sh production --health-out out/health.json\n", "")
+    before = _counts(kit["root"])
+    rc, out = _cli(["intake", kit["spec"], kit["runbook"], "--dry-run"], capsys)
+    assert rc == 1, out
+    assert "CHECKS-WITHOUT-RUN stages[4].checks" in out and "GATE alpaca-intake: FAIL" in out
+    assert _counts(kit["root"]) == before
+
+
+def test_every_check_of_an_accepted_runbook_is_in_a_task_contract(kit):
+    import yaml
+    from alpaca import intake
+    with open(kit["runbook"], encoding="utf-8") as fh:
+        data = yaml.safe_load(fh)
+    plan = intake._task_plan(data, "domain/runbook.yaml")
+    bars = "\n".join(line for _key, _title, _statement, contract in plan for line in contract["done_bar"])
+    for stage in data["stages"]:
+        for chk in stage.get("checks") or []:
+            assert "%s/%s (" % (stage["id"], chk["id"]) in bars, chk["id"]
+
+
 def test_intake_needs_an_open_op(kit, capsys):
     rc, out = _cli(["intake", kit["spec"], kit["runbook"], "--json"], capsys)
     assert rc == 2 and out["verdict"] == "BLOCKED" and "op new" in out["reason"]

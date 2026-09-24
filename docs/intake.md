@@ -93,7 +93,10 @@ alpaca intake <spec> <runbook> [--op <op>] [--dry-run] [--json]
   change is refused; intake `openspec/specs` instead.
 
 `<runbook>` is the `runbook.yaml` that covers the spec; it must sit inside the project. Relative
-paths are read from the folder the command runs in. `--op` names the op; without it intake fills
+paths are read from the folder the command runs in. A runbook a partner sends (written with the
+partner kit, `docs/runbook-format.md`) arrives outside the project: copy the delivered folder into
+the project first, for example to `partner/<name>/`, keeping its layout, then run intake on the
+copy. `--op` names the op; without it intake fills
 the open op opened last, and refuses when none is open. The op must be open.
 
 ### What it does
