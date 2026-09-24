@@ -683,8 +683,9 @@ def test_a_hand_written_intake_profile_is_not_overwritten(kit, capsys):
 
 
 def test_row_statement_is_plain_text_and_the_item_file_has_a_format_line(project, capsys):
-    """L6: the criterion loses its markdown emphasis and ends with a period before "Shown by", and
-    the item file names its format, so a later layout change is a deliberate one."""
+    """L6: the criterion loses its markdown emphasis and ends with a period before "Bar:" (item
+    format 2; "Shown by" in format 1), and the item file names its format, so a later layout change
+    is a deliberate one."""
     _op(capsys)
     specs, rb = _openspec(project)
     rc, out = _cli(["intake", specs, rb, "--json"], capsys)
@@ -693,10 +694,10 @@ def test_row_statement_is_plain_text_and_the_item_file_has_a_format_line(project
     row = _row(project, rid)
     assert "**" not in row["statement"], row["statement"]
     assert "WHEN a client posts an http URL" in row["statement"]
-    assert "7-character code. Shown by test/tests-exit." in row["statement"], row["statement"]
+    assert "7-character code. Bar: test/tests-exit: exit-code exit == 0." in row["statement"], row["statement"]
     item = row["proof"][len("local:"):].rsplit(":", 1)[0]
     text = open(os.path.join(project, item), encoding="utf-8").read()
-    assert "format 1" in text.splitlines()[0]
+    assert "format 2" in text.splitlines()[0]
     from alpaca import intake
     assert intake.criterion({"text": "it works"}) == "it works."
     assert intake.criterion({"text": "Is it *fast*?"}) == "Is it fast?"
