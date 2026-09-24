@@ -62,7 +62,9 @@ CARRY = (
     ("alpaca/runbook.py", {"drop": {
         # the parts that give a check its meaning when a stage runs: a runner's, not a reader's
         "knob_values", "substitute", "_field", "_inside", "_compare", "evaluate", "_run_plugin",
-        "next_attempt", "PLUGIN_TIMEOUT",
+        "next_attempt", "_step_end", "respond", "PLUGIN_TIMEOUT",
+        # the bar of an intake row, written on our side
+        "bar_parts", "_bar_shown", "_bar_check", "_bar_note",
         # the product CLI glue; the kit has its own entry point
         "_from_caller", "USAGE_TEXT", "cmd_runbook", "_parser", "_register"}}),
     ("alpaca/intake.py", {"keep": {
@@ -214,9 +216,10 @@ sections below are carried from these product files:
 
 Each definition is copied as it is; the imports of those modules and their `verdict.`,
 `runbook.` and `intake.` prefixes are removed, because everything now sits in this one file. Left
-out on purpose: the parts that run a stage command or a plugin script (the product's evaluate
-and next_attempt), and everything that writes a record. This file only reads files. Only `main`
-at the end is written for the kit.
+out on purpose: the parts that run a stage command or a plugin script and decide the next step
+(the product's evaluate, next_attempt and respond), the bar text of an intake row (bar_parts),
+and everything that writes a record. This file only reads files. Only `main` at the end is
+written for the kit.
 
 Needs Python 3.9 or later and PyYAML. Exit status: 0 PASS, 1 FAIL, 2 BLOCKED, 64 usage error,
 65 PyYAML is not installed.
@@ -359,11 +362,13 @@ def schema():
         "type": {"enum": list(runbook.KNOB_TYPES)}, "default": {"description": "fits the type (and "
                                                                   "min..max, or one of values)"},
         "min": {"type": "number"}, "max": {"type": "number"},
-        "values": {"type": "array", "minItems": 1}, "owner_only": {"type": "boolean"}},
+        "values": {"type": "array", "minItems": 1}, "owner_only": {"type": "boolean"},
+        "source": ref("text")},
         {"allOf": knob_kind})
 
     check_base = dict(runbook.CHECK_KEYS)
-    common = {"id": slug, "type": None, "description": ref("text"), "covers": ref("texts")}
+    common = {"id": slug, "type": None, "description": ref("text"), "covers": ref("texts"),
+              "source": ref("text")}
     number_ops = [op for op in runbook.OPS if op not in ("==", "!=")]
 
     def whole(bounds):
@@ -384,24 +389,28 @@ def schema():
             "path": {"type": "string", "pattern": "\\S", "not": {"pattern": "^(?:/|\\.\\.(?:/|$))"},
                      "description": "relative to the runbook folder, never climbing out of it"},
             "knob": knob}
-    branches = []
-    for kind in runbook.CHECK_TYPES:
-        name = "check_" + kind.replace("-", "_")
-        table = dict(check_base)
-        table.update(runbook.TYPE_KEYS[kind])
-        props = dict(common, type={"const": kind})
-        props.update(type_props[kind])
-        extra = None
-        if kind == "json-field":
-            extra = {"if": {"required": ["op"], "properties": {"op": {"enum": number_ops}}},
-                     "then": {"properties": {"value": {"anyOf": [
-                         {"type": "number"}, {"type": "string", "pattern": "^\\$\\{[^}]*\\}$"}]}}}}
-        defs[name] = block(table, props, extra)
-        branches.append({"if": {"required": ["type"], "properties": {"type": {"const": kind}}},
-                         "then": ref(name)})
-    defs["check"] = {"type": "object", "required": [k for k, r in check_base.items() if r],
-                     "properties": {"id": slug, "type": {"enum": list(runbook.CHECK_TYPES)}},
-                     "allOf": branches}
+    # a check, and a fail case's detect: the same types, the detect without id, covers and source
+    for prefix, base in (("check", check_base), ("detect", dict(runbook.DETECT_KEYS))):
+        branches = []
+        for kind in runbook.CHECK_TYPES:
+            name = "%s_%s" % (prefix, kind.replace("-", "_"))
+            table = dict(base)
+            table.update(runbook.TYPE_KEYS[kind])
+            props = {k: v for k, v in common.items() if k in base}
+            props.update(type={"const": kind})
+            props.update(type_props[kind])
+            extra = None
+            if kind == "json-field":
+                extra = {"if": {"required": ["op"], "properties": {"op": {"enum": number_ops}}},
+                         "then": {"properties": {"value": {"anyOf": [
+                             {"type": "number"}, {"type": "string", "pattern": "^\\$\\{[^}]*\\}$"}]}}}}
+            defs[name] = block(table, props, extra)
+            branches.append({"if": {"required": ["type"], "properties": {"type": {"const": kind}}},
+                             "then": ref(name)})
+        defs[prefix] = {"type": "object", "required": [k for k, r in base.items() if r],
+                        "properties": {"type": {"enum": list(runbook.CHECK_TYPES)}}, "allOf": branches}
+        if "id" in base:
+            defs[prefix]["properties"] = {"id": slug, "type": {"enum": list(runbook.CHECK_TYPES)}}
     defs["move"] = block(runbook.MOVE_KEYS, {
         "knob": {"type": "string", "pattern": runbook.KNOB_ID.pattern},
         "by": {"type": "number", "not": {"const": 0}}})
@@ -409,10 +418,16 @@ def schema():
         "max_attempts": {"type": "integer", "minimum": 1, "maximum": runbook.MAX_ATTEMPTS},
         "on_fail": ref("texts"), "stop_on": ref("texts"), "move": ref("move")})
     defs["owner_gate"] = block(runbook.GATE_KEYS, {"approve": ref("text"), "evidence": ref("texts"),
-                                                   "covers": ref("texts")})
+                                                   "covers": ref("texts"), "source": ref("text")})
     defs["output"] = {"anyOf": [ref("text"), block(runbook.OUTPUT_KEYS, {"path": ref("text"),
                                                                          "what": ref("text")})]}
-    defs["fail"] = block(runbook.FAIL_KEYS, {"id": slug, "when": ref("text")})
+    defs["then"] = {"anyOf": [{"enum": list(runbook.THEN_WORDS)},
+                              {"type": "object", "required": ["run"], "properties": {"run": ref("text")},
+                               "additionalProperties": False}]}
+    defs["fail"] = block(runbook.FAIL_KEYS, {"id": slug, "when": ref("text"), "detect": ref("detect"),
+                                             "then": ref("then"), "covers": ref("texts"),
+                                             "source": ref("text")},
+                         {"if": {"required": ["detect"]}, "then": {"required": ["then"]}})
     defs["stage"] = block(runbook.STAGE_KEYS, {
         "id": slug, "title": ref("text"), "description": ref("text"), "needs": ref("texts"),
         "run": ref("text"), "workdir": ref("path"),
@@ -420,20 +435,34 @@ def schema():
         "env": {"type": "object", "additionalProperties": {"type": ["string", "number"]}},
         "inputs": ref("texts"), "outputs": {"type": "array", "items": ref("output")},
         "checks": {"type": "array", "items": ref("check")}, "retry": ref("retry"),
-        "fails": {"type": "array", "items": ref("fail")}, "owner_gate": ref("owner_gate")},
+        "fails": {"type": "array", "items": ref("fail")}, "owner_gate": ref("owner_gate"),
+        "recovery": {"type": "boolean"}},
         {"anyOf": [{"required": ["run"]}, {"required": ["owner_gate"]}],
          "if": {"required": ["run"]},
          "then": {"required": ["checks"], "properties": {"checks": {"minItems": 1}}},
-         "else": {"not": {"required": ["checks"]}}})
+         "else": {"not": {"required": ["checks"]}},
+         # a recovery stage runs a command and is never an owner gate
+         "allOf": [{"if": {"required": ["recovery"], "properties": {"recovery": {"const": True}}},
+                    "then": {"required": ["run"], "not": {"required": ["owner_gate"]}}}]})
+    # a `runbook: 1` file has none of the fields format 2 added
+    no = lambda name: {k: False for k in runbook.SINCE_2[name]}      # noqa: E731
+    format_1 = {"properties": {
+        "knobs": {"items": {"properties": no("knob")}},
+        "stages": {"items": {"properties": dict(
+            no("stage"), checks={"items": {"properties": no("check")}},
+            fails={"items": {"properties": no("fail")}}, owner_gate={"properties": no("gate")})}}}}
     top = block(runbook.TOP_KEYS, {
-        "runbook": {"const": runbook.FORMAT}, "id": slug, "title": ref("text"),
+        "runbook": {"enum": list(runbook.FORMATS)}, "id": slug, "title": ref("text"),
         "description": ref("text"), "spec": ref("path"), "owner": ref("text"),
         "knobs": {"type": "array", "items": ref("knob")},
-        "stages": {"type": "array", "minItems": 1, "items": ref("stage")}})
+        "stages": {"type": "array", "minItems": 1, "items": ref("stage")}},
+        {"if": {"required": ["runbook"], "properties": {"runbook": {"const": 1}}}, "then": format_1})
     out = {"$schema": "https://json-schema.org/draft/2020-12/schema",
            "title": "Alpaca runbook, format %d" % runbook.FORMAT,
-           "description": "The shape of runbook.yaml (FORMAT.md). check_runbook.py is the authority: "
-                          "a file this schema accepts can still fail the checker.",
+           "description": "The shape of runbook.yaml (FORMAT.md), format %d; a `runbook: 1` file is "
+                          "read too, without the fields format %d added. check_runbook.py is the "
+                          "authority: a file this schema accepts can still fail the checker."
+                          % (runbook.FORMAT, runbook.FORMAT),
            "$comment": "Generated by the kit build from the checker's field tables. A JSON Schema "
                        "cannot state these checker rules: ids unique in the runbook, needs naming "
                        "an earlier stage, ${NAME} naming a knob or built-in variable, retry lists "
@@ -441,7 +470,9 @@ def schema():
                        "that is not owner_only, a knob default inside min..max or among values, a "
                        "pattern that compiles, a plugin script that exists and is executable, a "
                        "path that leaves the folder only after normalising, a whole number written "
-                       "as 2.0, keys given twice, and coverage of the spec."}
+                       "as 2.0, keys given twice, a fail case sending to a recovery stage that "
+                       "exists and is not itself, no stage needing a recovery stage, the shape of a "
+                       "source, numbered edge cases, and coverage of the spec."}
     out.update(top)
     out["$defs"] = defs
     return out
@@ -478,6 +509,9 @@ FORMAT_RULES = (
      "the way our intake reads it:", 1),
     ("spec-kit to OpenSpec", "keeps its runbook (see `docs/intake.md`).", "keeps its runbook.", 1),
     ("retry rule owner", "`alpaca.runbook.next_attempt` implements this rule.", "Our runner applies this rule.", 1),
+    ("fail case owner", "`alpaca.runbook.respond` implements it.", "Our runner applies it.", 1),
+    ("note look-up root", "up to the project root, the first folder that holds `project.yaml`",
+     "up to the project root (on our side, the folder of the project's settings)", 1),
     ("owner gate levels", "Nothing in Alpaca moves it on its own, at any autodrive level.",
      "Nothing on our side moves it on its own.", 1),
     ("usage line", "alpaca runbook check <file> [--spec <path>] [--no-files] [--json]",

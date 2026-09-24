@@ -11,11 +11,13 @@ A runbook is one YAML file, `runbook.yaml`. It says how your work is shown to be
 - the checks that decide whether a stage passed (an exit status, a file, a line in a log, a
   number in a JSON report, or a small script of yours);
 - the settings a retry may change, and how many attempts a stage gets;
+- the known ways a stage fails, how each is recognized, and what to do then (retry, stop, ask a
+  person, or run a recovery stage);
 - the steps only a person may approve (owner gates), such as a release.
 
-Each check names the items of your spec it shows (success criteria `SC-001`, ... or OpenSpec
-scenarios). The checker fails while any success criterion has no check, so nothing in the spec
-is left unshown.
+Each check names the items of your spec it shows (success criteria `SC-001`, edge cases
+`EC-001`, ... or OpenSpec scenarios). The checker fails while any success criterion or edge
+case has no check, so nothing in the spec is left unshown.
 
 ## What is in the kit
 
@@ -39,7 +41,7 @@ and the checker then reports `PLUGIN-NOT-EXECUTABLE` on the example: run
 ## Before you start
 
 - Python 3.9 or later, with PyYAML: `python3 -m pip install pyyaml`.
-- A spec. Either a spec-kit `spec.md` with `FR-001` and `SC-001` ids, or an OpenSpec spec
+- A spec. Either a spec-kit `spec.md` with `FR-001`, `SC-001` and `EC-001` ids, or an OpenSpec spec
   (`### Requirement:` blocks with `#### Scenario:` children). If you have none yet, start from
   `templates/spec.md`.
 
