@@ -479,6 +479,20 @@ def test_n23c_deleting_a_remote_ref_named_with_a_term_is_refused(repo):
     assert "ref-name" in r.stdout
 
 
+def test_n23d_deleting_a_ref_the_remote_already_has_passes_whatever_its_name(repo):
+    """The remote already holds that name, so deleting it sends nothing new; the barrier must not
+    stand between the owner and removing a ref that got out (the remote reports its sha)."""
+    root, bare = repo
+    _ready(root, bare)
+    name = "refs/heads/" + TERM.lower()
+    seed = subprocess.run(["git", "-C", root, "push", "--no-verify", "origin", "main:" + name],
+                          capture_output=True, text=True, env=_push_env(root))
+    assert seed.returncode == 0 and _remote_has(bare, name)
+    r = _push(root, ":" + name)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert not _remote_has(bare, name)
+
+
 def test_n23c_deleting_a_clean_branch_still_passes(repo):
     root, bare = repo
     _ready(root, bare)
