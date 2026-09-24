@@ -422,3 +422,164 @@ def test_board_lists_intake_rows_in_run_order_and_marks_waiting_rows(kit2, capsy
     assert waiting["SC-004"] == "load-test"
     # a done row is never marked
     assert waiting["SC-003"] is None
+
+
+# ------------------------------------------------------------------------------ recovery stages and tasks
+#: the stage tasks and gate tasks of the format 2 example: none for the recovery stage free-port
+TASK_KEYS = ["gate:release", "stage:install", "stage:load-test", "stage:release", "stage:restart-test",
+             "stage:unit-test"]
+
+
+def test_a_recovery_stage_gets_no_task_and_stays_a_profile_stage(kit2, capsys):
+    from alpaca import db, profile, taskcontract
+    _op(capsys)
+    out = _intake(kit2, capsys)
+    tasks = {t["key"]: t for t in out["tasks"]["added"]}
+    # free-port runs only when the fail case port-busy sends to it: it has no task of its own
+    assert sorted(tasks) == TASK_KEYS
+    assert "free-port" in out["stages"] and "free-port" in out["profile"]["stages"]
+    assert "free-port" in list(profile.load(kit2["root"]).stages())
+    contracts = taskcontract.latest(db.connect(kit2["root"]))
+    load = contracts[tasks["stage:load-test"]["task"]]["fail_cases"]
+    busy = [l for l in load if l.startswith("port-busy: ")]
+    assert len(busy) == 1, load
+    line = busy[0]
+    assert "port 8080 is already taken" in line
+    assert "detect (regex-in-file): out/load.log matches /Address already in use/" in line
+    assert "then run the recovery stage free-port: python3 tools/free_port.py 8080 --out out/free-port.json" in line
+    assert "free-port/port-free (json-field): out/free-port.json field free == True" in line
+    assert "then this stage runs again as one more attempt" in line and "ends FAIL" in line
+    unit = contracts[tasks["stage:unit-test"]["task"]]["fail_cases"]
+    stop = [l for l in unit if l.startswith("import-error: ")]
+    assert len(stop) == 1, unit
+    assert ("detect (regex-in-file): out/junit.xml matches /ModuleNotFoundError|ImportError|SyntaxError/"
+            in stop[0])
+    assert "then stop: the stage ends FAIL without another attempt" in stop[0]
+    # a rerun keeps the contracts and adds no task
+    again = _intake(kit2, capsys)
+    assert not again["tasks"]["added"] and not again["tasks"]["contracts"]
+
+
+def _example2():
+    import yaml
+    with open(os.path.join(EXAMPLE2, "runbook.yaml"), encoding="utf-8") as fh:
+        return yaml.safe_load(fh)
+
+
+def test_every_check_of_a_format_2_runbook_is_in_a_task_contract():
+    from alpaca import intake
+    data = _example2()
+    plan = intake._task_plan(data, "domain/runbook.yaml")
+    assert sorted(key for key, _t, _s, _c in plan) == TASK_KEYS
+    lines = "\n".join(line for _k, _t, _s, contract in plan
+                      for line in contract["done_bar"] + contract["fail_cases"])
+    for stage in data["stages"]:
+        for chk in stage.get("checks") or []:
+            assert "%s/%s (" % (stage["id"], chk["id"]) in lines, chk["id"]
+
+
+THEN_TEXTS = {
+    "retry": "then retry: another attempt through the retry rule of the stage",
+    "ask-owner": "then ask the owner: the stage pauses for a decision",
+    "stop": "then stop: the stage ends FAIL without another attempt",
+}
+
+
+@pytest.mark.parametrize("then", sorted(THEN_TEXTS))
+def test_every_fail_case_line_names_its_detect_and_its_then(then):
+    from alpaca import intake
+    data = _example2()
+    load = [s for s in data["stages"] if s["id"] == "load-test"][0]
+    load["fails"][0]["then"] = then
+    load["fails"].append({"id": "no-log", "when": "the load run wrote no log."})
+    load["fails"].append({"id": "slow-disk", "when": "the disk is slow",
+                          "detect": {"type": "json-field", "path": "out/load.json", "field": "disk_ms",
+                                     "op": ">", "value": "${P95_LIMIT_MS}"}, "then": "ask-owner"})
+    plan = {key: contract for key, _t, _s, contract in intake._task_plan(data, "domain/runbook.yaml")}
+    fails = plan["stage:load-test"]["fail_cases"]
+    busy = [l for l in fails if l.startswith("port-busy: ")][0]
+    assert "detect (regex-in-file): out/load.log matches /Address already in use/" in busy
+    assert THEN_TEXTS[then] in busy and "free-port" not in busy
+    # a fail case without detect keeps its format 1 line
+    assert "no-log: the load run wrote no log." in fails
+    slow = [l for l in fails if l.startswith("slow-disk: ")][0]
+    assert "detect (json-field): out/load.json field disk_ms > ${P95_LIMIT_MS} (50)" in slow
+    assert THEN_TEXTS["ask-owner"] in slow
+
+
+# ------------------------------------------------------------------------------ the move to OpenSpec
+EC3_TEXT = ("When the port the service listens on is already taken, the load test frees it and runs again "
+            "instead of reporting a latency failure.")
+
+
+def test_the_move_to_openspec_carries_the_edge_cases():
+    from alpaca import start
+    text = start.moved_spec_text(os.path.join(EXAMPLE2, "spec.md"), "domain/spec.md")
+    for ec in ("EC-001", "EC-002", "EC-003"):
+        assert "### Requirement: %s\n" % ec in text and "#### Scenario: %s\n" % ec in text, ec
+    assert "#### Scenario: EC-003\n\n%s\n" % EC3_TEXT in text
+    assert "The system SHALL handle edge case EC-003." in text
+    # SC first, then EC, then FR
+    assert text.index("Requirement: SC-004") < text.index("Requirement: EC-001") < text.index("Requirement: FR-001")
+
+
+def test_an_edge_case_scenario_keeps_its_id_and_is_required(tmp_path):
+    from alpaca import runbook
+    assert runbook.scenario_alias("EC-003") == ("EC-003", "")
+    assert runbook.scenario_alias("EC-003: port taken") == ("EC-003", "port taken")
+    spec = tmp_path / "spec.md"
+    spec.write_text("## Requirements\n\n### Requirement: EC-003\n\nThe system SHALL handle it.\n\n"
+                    "#### Scenario: EC-003\n\n%s\n" % EC3_TEXT, encoding="utf-8")
+    items = runbook.parse_spec(str(spec))["items"]
+    assert [(i["alias"], i["kind"], i["required"]) for i in items] == [("EC-003", "EC", True)]
+
+
+def test_moving_a_format_2_project_to_openspec_keeps_every_row_and_its_verdict(kit2, capsys):
+    from alpaca import db, runbook, start
+    from alpaca.checklist import verdict_row
+    from alpaca.gates import verdict
+    _op(capsys)
+    first = _intake(kit2, capsys)
+    ids = {r["key"]: r["row"] for r in first["rows"]["added"]}
+    conn = db.connect(kit2["root"])
+    for key in ("EC-003", "SC-001"):
+        row = _stored(kit2["root"], ids[key])
+        verdict_row.discharge(conn, row["id"], row["content_hash"], "test", verdict.PASS, ["local:out/x"], "L2", "s1")
+    text = start.moved_spec_text(kit2["spec"], "domain/spec.md")
+    specs = os.path.join(kit2["root"], "openspec", "specs")
+    _write(os.path.join(specs, "link-shortener", "spec.md"), text)
+    # the runbook covers the moved spec: covers [EC-003] finds the scenario named EC-003
+    checked = runbook.check(kit2["runbook"], specs)
+    assert checked["verdict"] == "PASS", checked["errors"]
+    assert checked["coverage"]["covered"]["link-shortener/EC-003/EC-003"] == ["fail:load-test/port-busy"]
+    rc, out = _cli(["intake", specs, kit2["runbook"], "--json"], capsys)
+    assert rc == 0, out
+    assert out["format"] == "openspec" and out["changed"] is False
+    kept = {r["key"]: r for r in out["rows"]["kept"]}
+    assert [r["key"] for r in out["rows"]["kept"]] == RUN_ORDER
+    assert {k: r["row"] for k, r in kept.items()} == ids
+    assert kept["EC-003"]["status"] == "discharged" and kept["SC-001"]["status"] == "discharged"
+    assert not out["rows"]["added"] and not out["rows"]["superseded"] and not out["rows"]["withdrawn"]
+    # a later OpenSpec change to the edge case keeps it a required item keyed EC-003: its row is
+    # superseded, not withdrawn
+    change = os.path.join(kit2["root"], "openspec", "changes", "port-in-use")
+    _write(os.path.join(change, "proposal.md"), "## Why\n\nSay what the load test does on a busy port.\n")
+    _write(os.path.join(change, "specs", "link-shortener", "spec.md"),
+           "## MODIFIED Requirements\n\n### Requirement: EC-003\n\nThe system SHALL handle edge case EC-003.\n\n"
+           "#### Scenario: EC-003\n\nWhen the port is already taken, the load test frees it and runs again.\n")
+    rc, out = _cli(["intake", change, kit2["runbook"], "--json"], capsys)
+    assert rc == 0, out
+    assert [(r["key"], r["old"]) for r in out["rows"]["superseded"]] == [("EC-003", ids["EC-003"])]
+    assert not out["rows"]["withdrawn"] and not out["rows"]["added"]
+
+
+def test_the_docs_describe_recovery_tasks_and_the_edge_case_move():
+    def read(rel):
+        with open(os.path.join(REPO, rel), encoding="utf-8") as fh:
+            return " ".join(fh.read().split())
+    intake_doc, format_doc = read("docs/intake.md"), read("docs/runbook-format.md")
+    assert "A recovery stage gets no task" in intake_doc
+    assert "stays a profile stage" in intake_doc
+    assert "### Requirement: EC-001" in intake_doc and "#### Scenario: EC-001" in intake_doc
+    assert "an `SC` or `EC` id is a required item" in intake_doc
+    assert "an `SC` or `EC` id is a required item" in format_doc
