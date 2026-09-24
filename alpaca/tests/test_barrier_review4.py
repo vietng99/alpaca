@@ -395,6 +395,16 @@ def test_n15_a_scan_past_its_time_budget_refuses_with_a_reason(repo):
     assert _remote_sha(bare, "main") == before
 
 
+def test_n15_the_default_budget_is_five_minutes():
+    """A large first push (1500 commits) scans in about 40 s; five minutes leaves room for that and
+    still ends a runaway regex before an owner reaches for --no-verify."""
+    assert barrier._time_budget({}) == (300, None)
+    assert barrier._time_budget({"barrier": {"time_budget_seconds": 60}}) == (60, None)
+    for bad in (0, -5, 1.5, True, "60"):
+        seconds, why = barrier._time_budget({"barrier": {"time_budget_seconds": bad}})
+        assert seconds is None and "time_budget_seconds" in why
+
+
 def test_n15_an_unusable_time_budget_refuses(repo):
     root, _bare = repo
     _cfg(root, time_budget_seconds="soon")
