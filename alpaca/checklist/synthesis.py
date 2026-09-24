@@ -103,9 +103,9 @@ def _statement(step: dict, item: dict, artifact: dict) -> str:
     return _CELL_RE.sub(one, text)
 
 
-def _content_hash(row: dict) -> str:
+def _content_hash(row: dict, tag=None) -> str:
     from alpaca.checklist.obligation_hash import content_hash
-    return content_hash(row)
+    return content_hash(row, tag)
 
 
 def derive(step_model: dict, artifact: dict, *, op=None, session=None, operator=None) -> list:

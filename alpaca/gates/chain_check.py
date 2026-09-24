@@ -41,6 +41,7 @@ R_CHAIN_BREAK = "CHAIN-BREAK"
 R_HASH_DRIFT = "CHAIN-HASH-DRIFT"
 R_GENESIS_WRONG = "CHAIN-GENESIS-MISMATCH"
 R_POPULATION_EMPTY = "CHAIN-POPULATION-EMPTY"
+R_LINEAGE = "CHAIN-LINEAGE-MISMATCH"
 
 SCOPE_NOTE = ("scope: DETECT-ONLY. This proves the events table is internally consistent, so "
               "an edited, inserted, deleted or reordered row is caught. It does NOT catch a "
@@ -48,11 +49,13 @@ SCOPE_NOTE = ("scope: DETECT-ONLY. This proves the events table is internally co
               "it will verify. That needs an external head anchor this substrate does not have.")
 
 
-def _content_hash(row) -> str:
-    """The content hash alpaca.db writes, re-derived from the row's own canonical fields."""
+def _content_hash(row, tag=None) -> str:
+    """The content hash alpaca.db writes, re-derived from the row's own canonical fields. `tag`
+    is the earlier harness's tag for an event a carried record holds (alpaca/lineage.py)."""
+    from alpaca import db
     fields = {"ts": row["ts"], "session": row["session"], "actor": row["actor"],
               "kind": row["kind"], "op": row["op"], "ref": row["ref"], "data": row["data"]}
-    return util.sha256_hex("alpaca-event/v1\n" + util.canonical_json(fields))
+    return util.sha256_hex((tag or db.EVENT_TAG) + "\n" + util.canonical_json(fields))
 
 
 def verify_chain(conn) -> tuple:
@@ -62,7 +65,12 @@ def verify_chain(conn) -> tuple:
     content drift, chain break, hash drift or wrong genesis. PASS when every row chains from
     genesis. The scope note rides every verdict, pass or fail alike.
     """
+    from alpaca import lineage
     facts = {"instrument": INSTRUMENT, "genesis": GENESIS}
+    try:
+        lin = lineage.read(conn)
+    except lineage.LineageError as e:
+        return (vc.FAIL, ["%s: %s" % (R_LINEAGE, e), SCOPE_NOTE], facts)
     rows = list(conn.execute("SELECT * FROM events ORDER BY id"))
     facts["rows"] = len(rows)
     if not rows:
@@ -72,8 +80,9 @@ def verify_chain(conn) -> tuple:
 
     prev_hash = GENESIS
     breaks = []
+    boundary_seen = False
     for n, row in enumerate(rows, 1):
-        if _content_hash(row) != row["content_hash"]:
+        if _content_hash(row, lineage.event_tag(lin, row["id"])) != row["content_hash"]:
             breaks.append("%s: row %d (id=%s) content re-derives to a different hash; a field "
                           "was edited in place" % (R_CONTENT_DRIFT, n, row["id"]))
             break
@@ -90,7 +99,16 @@ def verify_chain(conn) -> tuple:
             breaks.append("%s: row %d hash does not fold prev_hash + content_hash" %
                           (R_HASH_DRIFT, n))
             break
+        if lin and row["id"] == lin["through_event"]:
+            if row["hash"] != lin["through_hash"]:
+                breaks.append("%s: event %d is the carried boundary but its hash is not the one "
+                              "the lineage recorded" % (R_LINEAGE, row["id"]))
+                break
+            boundary_seen = True
         prev_hash = row["hash"]
+    if lin and not breaks and not boundary_seen:
+        breaks.append("%s: the lineage names event %d, which the record does not hold"
+                      % (R_LINEAGE, lin["through_event"]))
 
     facts["head"] = prev_hash
     facts["breaks"] = breaks

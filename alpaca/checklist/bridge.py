@@ -127,11 +127,22 @@ def apply(conn, rows, *, session=None, actor="bridge", op=None) -> dict:
 
     # classify against the store BEFORE any write (no partial batch on a drift).
     to_append = []
+    from alpaca import lineage
+    lin = lineage.read(conn)
+    numbers = lineage.row_numbers(conn) if lin else {}
+
+    def _stored_matches(stored_hash, rid, row, expected):
+        # a row carried from an earlier harness keeps the hash that harness froze it with.
+        if stored_hash == expected:
+            return True
+        tag = lineage.obligation_tag(lin, numbers.get(rid))
+        return tag is not None and stored_hash == synthesis._content_hash(row, tag)
+
     for rid, expected, row in incoming:
         existing = db.rows(conn, "rows", "id=?", (rid,))
         if existing:
             stored_hash = existing[0]["content_hash"]
-            if stored_hash != expected:
+            if not _stored_matches(stored_hash, rid, row, expected):
                 findings.append(_finding(
                     "BRIDGE-CONTENT-DRIFT",
                     "store row %s is present but its content differs from this derivation "
@@ -172,7 +183,7 @@ def apply(conn, rows, *, session=None, actor="bridge", op=None) -> dict:
             findings.append(_finding("BRIDGE-STORE-MISSING-DERIVED-ROW",
                                      "the store does not carry derived row %s after the bridge" % rid,
                                      verdict.FAIL))
-        elif existing[0]["content_hash"] != expected:
+        elif not _stored_matches(existing[0]["content_hash"], rid, row, expected):
             findings.append(_finding("BRIDGE-CONTENT-DRIFT",
                                      "store row %s content differs from the derivation after the "
                                      "bridge" % rid, verdict.FAIL))
