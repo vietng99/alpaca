@@ -325,16 +325,13 @@ def test_owner_gate_stage_without_run_may_not_carry_checks(tmp_path, checks):
     assert result["verdict"] == "FAIL"
 
 
-def test_stage_ranges_are_named_once(tmp_path, monkeypatch):
-    """The ranges the checker enforces are module constants that the kit schema reads too."""
+def test_stage_ranges_are_named_once():
+    """The ranges the checker enforces are module constants that the kit schema reads too
+    (test_runbook_kit.py moves them and watches both follow; a moved range here would reach the
+    kit replay of this file's checks)."""
     assert runbook.EXPECT_RANGE == (0, 255)
     assert runbook.PLUGIN_TIMEOUT_RANGE == (1, 24 * 3600)
     assert runbook.STAGE_TIMEOUT_RANGE == (1, 7 * 24 * 3600)
-    monkeypatch.setattr(runbook, "STAGE_TIMEOUT_RANGE", (1, 99))
-    data = minimal()
-    data["stages"][0]["timeout"] = 100
-    got = {(e["code"], e["where"]) for e in runbook.check(write(tmp_path, data))["errors"]}
-    assert got == {("RANGE", "stages[0].timeout")}
 
 
 def test_owner_gate_needs_approve_text(tmp_path):

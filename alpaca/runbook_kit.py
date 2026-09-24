@@ -16,7 +16,8 @@ machine takes:
 * FORMAT.md is docs/runbook-format.md rewritten by the rules in FORMAT_RULES; AGENTS.md is the
   body of the forge skill rewritten by AGENT_RULES, between kit-only parts. A rule that no longer
   matches stops the build and names itself, so a changed document never ships half rewritten.
-* example/ is templates/runbook-example/ byte for byte; LICENSE is the product license.
+* example/ is templates/runbook-example/ byte for byte, refused when it names a product-only
+  path outside EXAMPLE_ALLOW; LICENSE is the product license.
 * the parts written for the partner only live in templates/runbook-kit/ (see its ABOUT.md).
 
 The build is deterministic: the same sources give the same files and the same zip bytes. It
@@ -76,6 +77,13 @@ ALLOWED_IMPORTS = {"__future__", "argparse", "difflib", "json", "math", "os", "r
 
 EXECUTABLE = {"check_runbook.py", "example/checks/status_codes.py"}
 ZIP_TIME = (1980, 1, 1, 0, 0, 0)
+
+#: the example is the product's own, byte for byte; these phrases in it name the product side and
+#: sit next to the kit's own equivalent, so they may stay (the build checks that they are there)
+EXAMPLE_ALLOW = {
+    "example/runbook.yaml": ("alpaca runbook check runbook.yaml", "docs/runbook-format.md"),
+    "example/checks/status_codes.py": ("docs/runbook-format.md",),
+}
 
 #: words that name a product-only path or verb; no kit document may carry one
 PRODUCT_ONLY = ("alpaca runbook", "alpaca intake", "alpaca/", "docs/", "contracts/", "bin/alpaca",
@@ -246,6 +254,14 @@ def main(argv=None):
     parser = make_parser(prog="check_runbook.py", name="check_runbook",
                          description="Check a runbook against the Alpaca runbook format (FORMAT.md) "
                                      "and, with a spec, its coverage of the spec. Reads files only.")
+    band_error = parser.error
+
+    def error(message):
+        # the usage line first, for the person; the HARNESS-ERROR line stays last
+        sys.stderr.write(parser.format_usage())
+        band_error(message)
+
+    parser.error = error
     add_check_arguments(parser)
     args = parser.parse_args(argv)
     return run_check(args.file, args.spec, args.no_files, args.json)
@@ -349,8 +365,12 @@ def schema():
     check_base = dict(runbook.CHECK_KEYS)
     common = {"id": slug, "type": None, "description": ref("text"), "covers": ref("texts")}
     number_ops = [op for op in runbook.OPS if op not in ("==", "!=")]
+
+    def whole(bounds):
+        return {"type": "integer", "minimum": bounds[0], "maximum": bounds[1]}
+
     type_props = {
-        "exit-code": {"expect": {"type": "integer", "minimum": 0, "maximum": 255}},
+        "exit-code": {"expect": whole(runbook.EXPECT_RANGE)},
         "file-exists": {"path": ref("path"), "non_empty": {"type": "boolean"}},
         "regex-in-file": {"path": ref("path"), "pattern": ref("text"), "absent": {"type": "boolean"},
                           "ignore_case": {"type": "boolean"}},
@@ -358,7 +378,7 @@ def schema():
                        "value": {"type": ["string", "number", "boolean"]}},
         "plugin": {"script": {"allOf": [ref("path"), {"not": {"pattern": runbook.VAR.pattern}}]},
                    "args": {"type": "array", "items": {"type": ["string", "number"]}},
-                   "timeout": {"type": "integer", "minimum": 1, "maximum": 24 * 3600}},
+                   "timeout": whole(runbook.PLUGIN_TIMEOUT_RANGE)},
     }
     defs = {"text": text, "texts": texts,
             "path": {"type": "string", "pattern": "\\S", "not": {"pattern": "^(?:/|\\.\\.(?:/|$))"},
@@ -396,14 +416,15 @@ def schema():
     defs["stage"] = block(runbook.STAGE_KEYS, {
         "id": slug, "title": ref("text"), "description": ref("text"), "needs": ref("texts"),
         "run": ref("text"), "workdir": ref("path"),
-        "timeout": {"type": "integer", "minimum": 1, "maximum": 7 * 24 * 3600},
+        "timeout": whole(runbook.STAGE_TIMEOUT_RANGE),
         "env": {"type": "object", "additionalProperties": {"type": ["string", "number"]}},
         "inputs": ref("texts"), "outputs": {"type": "array", "items": ref("output")},
         "checks": {"type": "array", "items": ref("check")}, "retry": ref("retry"),
         "fails": {"type": "array", "items": ref("fail")}, "owner_gate": ref("owner_gate")},
         {"anyOf": [{"required": ["run"]}, {"required": ["owner_gate"]}],
          "if": {"required": ["run"]},
-         "then": {"required": ["checks"], "properties": {"checks": {"minItems": 1}}}})
+         "then": {"required": ["checks"], "properties": {"checks": {"minItems": 1}}},
+         "else": {"not": {"required": ["checks"]}}})
     top = block(runbook.TOP_KEYS, {
         "runbook": {"const": runbook.FORMAT}, "id": slug, "title": ref("text"),
         "description": ref("text"), "spec": ref("path"), "owner": ref("text"),
@@ -504,8 +525,14 @@ def _apply(text, rules, source):
     return text
 
 
-def _guard(text, name, source):
-    found = [w for w in PRODUCT_ONLY if w in text]
+def _guard(text, name, source, allow=()):
+    scan = text
+    for phrase in allow:
+        if phrase not in scan:
+            raise KitError("%s no longer holds %r, which EXAMPLE_ALLOW in alpaca/runbook_kit.py lets "
+                           "it keep; update the list" % (source, phrase))
+        scan = scan.replace(phrase, "")
+    found = [w for w in PRODUCT_ONLY if w in scan]
     if found:
         raise KitError("%s would carry product-only text %s (from %s); add a rule in "
                        "alpaca/runbook_kit.py" % (name, ", ".join(repr(w) for w in found), source))
@@ -632,7 +659,8 @@ def compose(root):
         files["templates/" + rel] = _part(root, "templates/" + rel, "templates/" + rel)
     for rel in _source_files(root):
         if rel.startswith(EXAMPLE + "/"):
-            files["example/" + rel[len(EXAMPLE) + 1:]] = _read(root, rel)
+            name = "example/" + rel[len(EXAMPLE) + 1:]
+            files[name] = _guard(_read(root, rel), name, rel, EXAMPLE_ALLOW.get(name, ()))
     files["LICENSE"] = _read(root, "LICENSE")
     files["VERSION"] = _guard("format: %d\nkit: %s\nproduct_commit: %s\nsources_sha256: %s\n" % (
         runbook.FORMAT, KIT_NAME, _commit(root), _sources_digest(root)), "VERSION", "the build")

@@ -54,7 +54,9 @@ For each row, take every answer you can find before asking anyone:
 
 - **Thresholds.** A number in the criterion ("under 50 ms", "95% of days", "zero lost") is the
   threshold. Put it in an `owner_only` knob and compare against `${KNOB}`, with a comment naming
-  the item it comes from.
+  the item it comes from. A value comes from the spec first, then the person's answers. Never
+  choose a threshold yourself: when neither gives one, ask; with no one to ask, cover the item
+  with an owner gate whose `approve` says what must be decided.
 - **Commands.** Look for the build, test and run commands in the repository: `Makefile`,
   `package.json` scripts, `pyproject.toml`, `README`, CI files, existing scripts. A command found
   there is used as is.
@@ -99,13 +101,19 @@ I read spec.md (4 success criteria) and the repo. Five things are not in either:
 
 Write `runbook.yaml` next to the spec (or in the domain folder), following the format:
 
-- stages in run order, each with `needs`, `run`, `inputs`, `outputs` and at least one check;
+- stages in run order; a stage that runs a command has `needs`, `run`, `inputs`, `outputs` and
+  at least one check; a stage that is only an owner gate has `owner_gate` and no `run` and no
+  `checks` (it runs nothing, so the checker refuses checks there with `CHECKS-WITHOUT-RUN`; a
+  check that must follow the approval goes in the stage whose `run` produces what it reads);
 - every check that shows a spec item lists it in `covers`;
 - thresholds from the spec as `owner_only` knobs, and the knobs a retry may move with a range;
 - a `retry` block only where the person agreed to retries, with `on_fail`, `stop_on` and `move`;
 - `fails` for the known failure modes the person or the repo mentioned;
 - `owner_gate` on every irreversible step, with `approve` in plain words and the `evidence` the
-  owner reads.
+  owner reads;
+- a comment on every value you choose that neither the spec nor the person gave, only for a
+  setting that is not a pass bar (a timeout, a port, an attempt count, a knob range):
+  `# default chosen by the agent: <why>`.
 
 Set `spec:` to the spec path so a later check needs no flag.
 
@@ -133,7 +141,8 @@ Tell the person, in a few lines:
 
 ## Never
 
-- Never invent a threshold the spec does not give; ask, with a default.
+- Never invent a threshold the spec does not give; ask, with a default the person may accept,
+  and with no one to ask leave it to an owner gate.
 - Never let a retry move an `owner_only` knob or loosen a threshold.
 - Never mark an item covered by a check that does not show it.
 - Never put a secret in a runbook; name the variable or the file that holds it.

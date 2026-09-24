@@ -39,6 +39,10 @@ OPS = ("==", "!=", "<", "<=", ">", ">=")
 BUILTIN_VARS = ("RUNBOOK_DIR", "STAGE", "ATTEMPT", "EVIDENCE_DIR")
 MAX_ATTEMPTS = 20
 PLUGIN_TIMEOUT = 60
+#: the allowed (lowest, highest) of a number field; the kit schema reads these too
+EXPECT_RANGE = (0, 255)
+PLUGIN_TIMEOUT_RANGE = (1, 24 * 3600)
+STAGE_TIMEOUT_RANGE = (1, 7 * 24 * 3600)
 
 # Every field, per block, and whether it is required. docs/runbook-format.md names each one and
 # test_runbook.py fails when the two drift apart.
@@ -67,7 +71,7 @@ ERROR_CODES = (
     "FILE-UNREADABLE", "YAML-SYNTAX", "NOT-MAPPING", "KEY-DUPLICATE", "FIELD-MISSING",
     "FIELD-UNKNOWN", "FIELD-EMPTY", "FIELD-TYPE", "FIELD-NOT-LIST", "VERSION-UNSUPPORTED",
     "ID-INVALID", "ID-DUPLICATE", "NEEDS-UNKNOWN", "RUN-MISSING", "CHECKS-EMPTY",
-    "CHECK-TYPE-UNKNOWN", "REGEX-INVALID", "OP-UNKNOWN", "VALUE-NOT-NUMBER", "RANGE",
+    "CHECKS-WITHOUT-RUN", "CHECK-TYPE-UNKNOWN", "REGEX-INVALID", "OP-UNKNOWN", "VALUE-NOT-NUMBER", "RANGE",
     "PATH-ESCAPES", "PLUGIN-MISSING", "PLUGIN-NOT-EXECUTABLE", "PLUGIN-SCRIPT-VARIABLE",
     "KNOB-TYPE-UNKNOWN",
     "KNOB-DEFAULT-TYPE", "KNOB-DEFAULT-RANGE", "KNOB-UNKNOWN", "KNOB-OWNER-ONLY",
@@ -418,7 +422,7 @@ class _Checker:
         workdir = self.text(stage, "workdir", where)
         if workdir and self.local_path(workdir, where + ".workdir", "workdir"):
             self.variables(workdir, where + ".workdir")
-        self.whole(stage, "timeout", where, 1, 7 * 24 * 3600)
+        self.whole(stage, "timeout", where, *STAGE_TIMEOUT_RANGE)
         env = stage.get("env")
         if env is not None:
             if not isinstance(env, dict) or not all(
@@ -435,6 +439,11 @@ class _Checker:
         if run and (listed is None or listed == []):
             self.r.error("CHECKS-EMPTY", where + ".checks", "a stage that runs a command needs at least "
                          "one check; an empty check list would pass anything")
+        if gate is not None and "run" not in stage and listed is not None:
+            # nothing runs in a gate-only stage, so its checks would never be judged
+            self.r.error("CHECKS-WITHOUT-RUN", where + ".checks", "this stage is only an owner gate and "
+                         "has no `run`, so nothing would judge its checks; move them to a stage that "
+                         "has a `run`, or give this stage the `run` they check")
         if gate is not None:
             self.owner_gate(gate, where + ".owner_gate")
         if "retry" in stage:
@@ -509,7 +518,7 @@ class _Checker:
         self.text(chk, "description", at)
         self.items(chk, "covers", at)
         if kind == "exit-code":
-            self.whole(chk, "expect", at, 0, 255)
+            self.whole(chk, "expect", at, *EXPECT_RANGE)
         elif kind in ("file-exists", "regex-in-file", "json-field"):
             path = self.text(chk, "path", at)
             if path and self.local_path(path, at + ".path", "path"):
@@ -560,7 +569,7 @@ class _Checker:
             if not isinstance(arg, (str, int, float)) or isinstance(arg, bool):
                 self.r.error("FIELD-TYPE", "%s.args[%d]" % (at, n), "each argument is text or a number")
         self.variables([a for a in args if isinstance(a, str)], at + ".args")
-        self.whole(chk, "timeout", at, 1, 24 * 3600)
+        self.whole(chk, "timeout", at, *PLUGIN_TIMEOUT_RANGE)
         if script and VAR.search(script):
             # evaluate runs the script path as written; only args get ${NAME} replaced
             self.r.error("PLUGIN-SCRIPT-VARIABLE", at + ".script", "a plugin `script` is a fixed path; "

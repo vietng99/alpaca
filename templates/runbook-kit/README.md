@@ -62,16 +62,21 @@ and the checker then reports `PLUGIN-NOT-EXECUTABLE` on the example: run
 
 ## Check it yourself
 
-From the folder that holds `runbook.yaml` and the spec:
+From the folder that holds `runbook.yaml` and the spec, where `<kit>` is the path to this kit
+folder from there:
 
 ```
-python3 {{KIT}}/check_runbook.py runbook.yaml --spec spec.md
+python3 <kit>/check_runbook.py runbook.yaml --spec spec.md
 ```
+
+With the runbook at the repository root, `<kit>` is `{{KIT}}`; with the runbook one folder down,
+it is `../{{KIT}}` (`python3 ../{{KIT}}/check_runbook.py runbook.yaml --spec spec.md`).
 
 The last line `GATE alpaca-runbook-check: PASS` means our machine will take the file. Any
 `ERROR` line names the field and the problem; `FORMAT.md` explains every code. The exit status
 is 0 PASS, 1 FAIL, 2 BLOCKED (the file cannot be read), 64 for a wrong command line and 65 when
-PyYAML is not installed. `--json` prints the result as JSON, with the checks that cover each spec
+PyYAML is not installed. `--help` prints the options and also exits 64, so that 0 always means
+PASS; the line `HARNESS-ERROR check_runbook [USAGE]` after it is expected. `--json` prints the result as JSON, with the checks that cover each spec
 item.
 
 The checker only reads files. It never runs the commands in your runbook or your plugin check
@@ -80,7 +85,8 @@ scripts; our machine runs those later, on our side.
 A runbook may also be written as JSON (`runbook.json`): JSON is YAML, so the same checker and the
 same rules apply. `runbook.schema.json` gives editors completion and early warnings; with the
 YAML language server, make the first line of the runbook
-`# yaml-language-server: $schema={{KIT}}/runbook.schema.json`. The checker has the last word:
+`# yaml-language-server: $schema=<kit>/runbook.schema.json`, with `<kit>` the path from the
+runbook's folder as above. The checker has the last word:
 some rules (unique ids, spec coverage) are beyond a schema.
 
 ## What to send back
@@ -91,7 +97,7 @@ the runbook's folder):
 1. `runbook.yaml`;
 2. the spec it covers (`spec.md`, or the OpenSpec folder);
 3. every plugin check script the runbook names, still executable (`chmod +x`);
-4. optional: the output of `python3 {{KIT}}/check_runbook.py runbook.yaml --spec spec.md --json`.
+4. optional: the output of `python3 <kit>/check_runbook.py runbook.yaml --spec spec.md --json`.
 
 Do not send the kit itself back.
 

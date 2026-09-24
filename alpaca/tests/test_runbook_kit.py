@@ -1005,6 +1005,21 @@ def test_schema_ranges_come_from_the_checker(monkeypatch):
     assert got == [(0, 7), (2, 8), (3, 9)]
 
 
+def test_checker_ranges_come_from_the_same_constants(tmp_path, monkeypatch):
+    monkeypatch.setattr(runbook, "STAGE_TIMEOUT_RANGE", (1, 99))
+    monkeypatch.setattr(runbook, "EXPECT_RANGE", (0, 7))
+    monkeypatch.setattr(runbook, "PLUGIN_TIMEOUT_RANGE", (2, 8))
+    data = {"runbook": 1, "id": "r", "title": "R", "stages": [
+        {"id": "s", "run": "make", "timeout": 100, "checks": [
+            {"id": "c", "type": "exit-code", "expect": 8},
+            {"id": "p", "type": "plugin", "script": "x.sh", "timeout": 9}]}]}
+    path = tmp_path / "runbook.yaml"
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    got = {(e["code"], e["where"]) for e in runbook.check(str(path), check_files=False)["errors"]}
+    assert got == {("RANGE", "stages[0].timeout"), ("RANGE", "stages[0].checks[0].expect"),
+                   ("RANGE", "stages[0].checks[1].timeout")}
+
+
 def test_build_stops_when_carried_code_needs_a_name_it_does_not_carry(tmp_path):
     kit = _kit_module()
     root = _copy_sources(tmp_path)
