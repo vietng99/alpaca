@@ -3,8 +3,12 @@
 This page covers the last two links of the path Alpaca follows from an idea to checked work:
 
 ```
-raw notes -> spec (spec-kit or OpenSpec) -> runbook -> intake (rows, task contracts, profile) -> runs with sealed proof
+raw notes -> input/notes/ (inbox) -> interview (signed brief) -> spec (spec-kit or OpenSpec)
+  -> runbook -> intake (rows, task contracts, profile) -> runs with sealed proof
 ```
+
+The inbox and the interview (`alpaca note`, `alpaca interview` and the skill `/alpaca-interview`)
+are described in `docs/interview.md`.
 
 - `alpaca start` and the skill `/alpaca-from-notes` (`.claude/skills/alpaca-from-notes/SKILL.md`) are the one entry point: they
   take raw notes to a spec, the spec to a runbook, and the runbook to intake.
@@ -27,8 +31,14 @@ alpaca start notes/link-shortener.md --prepare
 and prints the reason and the steps. It writes nothing. `--prepare` installs the kit from the
 vendored copies, moves a spec-kit project to OpenSpec when that is the pick (below), and records
 one `start` event with the pick, the reason and the sha256 of the notes. `--kit spec-kit` or
-`--kit openspec` overrides the pick; `--json` prints `verdict`, `kit`, `mode`, `reason`, `steps`
-and `prepared`.
+`--kit openspec` overrides the pick; `--json` prints `verdict`, `kit`, `mode`, `reason`,
+`interview`, `steps` and `prepared`.
+
+Raw notes come first to the inbox and the interview. While `input/interview/` holds no signed
+interview (`interview: needed`), or the log changed after the last sign-off (`interview: stale`),
+the steps start with `alpaca note add` and `/alpaca-interview`, which ends with
+`alpaca interview signoff`. With a signed interview (`interview: signed`) the steps start at the
+spec, and the spec step takes the signed file as its brief. See `docs/interview.md`.
 
 The pick:
 
@@ -38,11 +48,11 @@ The pick:
 | has `specs/*/spec.md` (spec-kit) | OpenSpec | change: the project moves to OpenSpec |
 | records OpenSpec, or has `openspec/specs/` | OpenSpec | change (or a new capability as an OpenSpec change) |
 
-The steps it prints, for a new thing: `/speckit-specify <notes>`, `/speckit-clarify`,
+The steps it prints after the interview, for a new thing: `/speckit-specify <the signed brief>`, `/speckit-clarify`,
 the runbook forge skill (`/alpaca-runbook-forge`), `alpaca runbook check`,
 `alpaca op new` when no op is open, then
 `alpaca intake <spec> <runbook> --dry-run` and the same without `--dry-run`. For a change:
-`/opsx:propose <notes>`, `bin/openspec validate <id> --strict`, the runbook forge skill to update
+`/opsx:propose <the signed brief>`, `bin/openspec validate <id> --strict`, the runbook forge skill to update
 the runbook, intake of the change folder, and after the work is proven `/opsx:archive <id>`
 followed by `alpaca intake openspec/specs <runbook>`, which then has nothing to change.
 
