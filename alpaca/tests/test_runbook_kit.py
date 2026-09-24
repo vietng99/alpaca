@@ -1101,3 +1101,19 @@ def test_format_md_carries_format_2(built):
     for must in ("## Format 1 and format 2", "## Edge cases", "## Known failures", "## Provenance",
                  "Our runner applies it."):
         assert must in text, must
+
+
+def test_the_forge_steps_carry_the_format_2_fields(built):
+    """The forge skill body (the steps of AGENTS.md) names the format 2 fields and rules as the
+    checker reads them, not only the intro does."""
+    skill = os.path.join(REPO, ".claude", "skills", "alpaca-runbook-forge", "SKILL.md")
+    with open(skill, encoding="utf-8") as fh:
+        body = " ".join(fh.read().split())
+    agents = " ".join(_read(built, "AGENTS.md").split())
+    for text in (body, agents):
+        for must in ("`runbook: 2` at the top", "`recovery: true`, a `run` and at least one check, no `needs`, "
+                     "no `owner_gate`", "`retry.max_attempts` of 2 or more", "without `id`, `covers` or `source`",
+                     "`note:input/notes/<file>`", "`owner:<decision ref>`", "`EC-UNNUMBERED` error",
+                     "an `SC`, `EC` or `FR` id", "the fail case that detects and answers it",
+                     "`fail:<stage>/<id>`", "`SOURCE-SHAPE`"):
+            assert must in text, must
