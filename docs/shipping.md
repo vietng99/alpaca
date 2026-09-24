@@ -114,7 +114,9 @@ object leaves, for every remote and from every worktree, and the hook runs the p
 code. So checking out an older commit, or a `project.yaml` without the barrier block, does not
 change what is checked; the report notes when the checkout differs from the pinned copy. Run the
 install again after you change the barrier settings or update Alpaca. A pinned copy that was
-edited after the install refuses the push.
+edited after the install refuses the push. A hook written before the barrier was pinned (it runs
+`python -m alpaca.barrier`) refuses every push and says `the hook predates the pinned barrier; run
+bin/alpaca barrier install`, so a stale hook is never silent.
 
 The barrier reads every object the push would send (`git rev-list --objects <local> --not
 <remote>`), not the working tree, and refuses the push when it finds:
@@ -125,7 +127,8 @@ The barrier reads every object the push would send (`git rev-list --objects <loc
   (`sub/.env`), and `*` or `?` match within one path part. `.env.example` is not protected;
 - a sealed term, case-insensitive, in any file, in a member of a compressed file, in any path name
   (files, links, folders and submodule entries), in an author, committer or tagger, in a commit or
-  tag message (every tag of a tag chain), or in a pushed ref name;
+  tag message (every tag of a tag chain), or in a pushed ref name (a ref the push deletes
+  included: its name reaches the server too);
 - a shape the term list cannot enumerate (an e-mail address, a `/home/<user>` path) in a file or a
   path name, unless an allow rule clears that exact value; an author, committer or tagger e-mail
   that has the shape of a real address, unless an allow rule names it;
@@ -134,11 +137,26 @@ The barrier reads every object the push would send (`git rev-list --objects <loc
   `barrier.allow_blobs` names the file's blob digest with a reason.
 
 Compressed files are recognised by their first bytes, not their names, and opened with the Python
-standard library: gzip, tar, zip, xz, bzip2, zstd and WOFF fonts, nested up to four levels, at most
-64 MB per member and 256 MB per file. Inside them only the sealed terms are checked, not the shape
-rules (vendored packages carry their authors' addresses). A WOFF2 font needs the `brotli` module;
-without it the three fonts under `alpaca/web/vendor/` are passed by their `barrier.allow_blobs`
-entries, which name each file's digest and why.
+standard library: gzip, tar, zip, xz, bzip2, zstd, zlib streams and WOFF fonts, nested up to four
+levels, at most 64 MB per member and 256 MB per file. A zip is also recognised by its end record,
+so a zip behind a prefix (a Python zipapp `.pyz`, a self-extracting file) is opened. The caps are
+charged before a member is read and while a stream is read, and one member is held at a time, so
+an archive that would open to gigabytes is refused without using that memory. Inside them only the
+sealed terms are checked, not the shape rules (vendored packages carry their authors' addresses).
+
+These are recognised but not opened, so they refuse unless allowed: 7z, rar, ar (a `.deb`), lzip,
+lz4, compress (`.Z`), lzop, rpm, cab, xar, squashfs, cpio and ISO images; a zip with a local entry
+its central directory does not list (a zip reader would never show that entry); a WOFF table that
+opens to more or less than its declared length; an encrypted zip member; a member over 64 MB. When
+one member of an archive cannot be read, its siblings are still read, and a `barrier.allow_blobs`
+entry waives only the parts that were not read: the report lists them by digest, with the reason,
+even when the entry lets the file pass. A WOFF2 font needs the `brotli` module (1.1 or later, which
+can cap its output); without it the three fonts under `alpaca/web/vendor/` are passed by their
+`barrier.allow_blobs` entries, which name each file's digest and why.
+
+The scan has a time budget: 900 seconds, or `barrier.time_budget_seconds`. A scan that runs past
+it refuses the push and says so (`SCAN-TIME-BUDGET-REFUSES`); the usual cause is a `re:` line with
+nested repeats, such as `(a+)+`, that backtracks without end on some text.
 
 Git runs the barrier with replace refs switched off (`GIT_NO_REPLACE_OBJECTS`), since a push sends
 the real objects, not a local replacement. A grafts file (`.git/info/grafts`) or a shallow clone
@@ -157,9 +175,10 @@ the barrier only stops what must not leave.
 path, so the list is never committed: listing the names inside the published tree would publish
 them. Each clone supplies its own list there, in the main worktree (a linked worktree reads the
 main worktree's list). When the configured list is absent, or a link that points nowhere, the
-push is refused (`TERM-LIST-MISSING-REFUSES`). To push without a list, set
-`barrier.terms_optional: true`: the push then passes with protected paths and shape rules checked,
-and the report and the gate line say the sealed terms were NOT checked.
+push is refused (`TERM-LIST-MISSING-REFUSES`). A public project (`tier: public`, the default) with
+no list configured at all (`barrier.terms` empty or missing) is refused the same way. To push
+without a list, set `barrier.terms_optional: true`: the push then passes with protected paths and
+shape rules checked, and the report and the gate line say the sealed terms were NOT checked.
 
 The list format, one entry per line:
 
@@ -173,7 +192,9 @@ The list format, one entry per line:
 A line the barrier cannot use refuses the push: a term shorter than four characters, a regex that
 does not compile or matches an empty string, an include that is absent or loops, a line that looks
 like a directive the barrier does not know (`#word:` or `!word:`). The refusal names the line
-number only.
+number only. A byte order mark at the start of the file is dropped, so a list saved with one keeps
+its first line. A regex that can never match (`(?!)x`) is not detected: check a new `re:` line
+against a sample that must hit it.
 
 The maintainers keep the lists of this project outside the repository, in the workspace that
 holds it: `tools/forge/forbidden.txt` (the forbidden names) and `tools/forge/host-terms.txt` (the
@@ -222,11 +243,16 @@ The barrier is a pre-push hook, so it stops `git push` and nothing else:
 - Other ways out are not pushes: a bundle, `git format-patch`, `git archive`, an upload through a
   hosting site's web page or API, a release file. Run the leak audit on what those carry.
 - Push options (`git push -o`) go to the server and are never shown to the hook.
+- Submodules: the hook sees a submodule only as its entry (a path and a commit id). `git push
+  --recurse-submodules=on-demand` (or `push.recurseSubmodules`) also pushes the submodule's own
+  commits to the submodule's remote, and no barrier runs there unless that submodule has its own
+  hook: its files, messages and names are not checked. Install the barrier inside each submodule
+  you push from, or push submodules on their own.
 - A term the text cannot show as a string: split by code (`"na" + "me"`), split across comment
   markers, written as an HTML entity, percent-encoded or in base64, or inside a compressed stream
-  with no magic bytes (raw deflate, raw brotli, PNG image data, PDF streams). The look-alike folding
-  covers Cyrillic and Greek letters and the invisible characters, not the whole Unicode confusable
-  table.
+  with no magic bytes at its start (raw deflate, raw brotli, raw LZMA, PNG image data, PDF streams,
+  an archive inside a disk image). The look-alike folding covers Cyrillic and Greek letters and the
+  invisible characters, not the whole Unicode confusable table.
 
 For the first publish, run the full leak audit over the tree and the history as well; the barrier
 is the last guard, not the only one.

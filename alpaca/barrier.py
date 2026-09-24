@@ -11,7 +11,9 @@ What it does, and why each clause is here:
     settings in the git directory. Git runs pre-push before any object transfer, with the
     candidate refs on stdin, so it is the one seam where "about to leave" is still catchable. The
     hook runs the pinned copy, never the checked-out code, so a checkout of an older commit or a
-    project.yaml without the barrier block cannot switch the barrier off (review 3, B8).
+    project.yaml without the barrier block cannot switch the barrier off (review 3, B8). A hook
+    written before the pin existed (`python -m alpaca.barrier`) refuses and says to install again
+    (review 4, N30).
   * the scan reads EVERY OBJECT a push would send (`git rev-list --objects <local> --not
     <remote>`), not the working tree: each commit with its full tree, each annotated tag at every
     level of a tag chain, and any tree or blob a tag points at (B2). A secret deleted from the tip
@@ -19,20 +21,25 @@ What it does, and why each clause is here:
   * every tree entry's path name is read, whatever its mode, so a gitlink named with a term is
     caught (B3); a protected PREFIX, NAME or PATH (project.yaml `barrier.protected_paths`, compared
     without case) blocks the push (B13).
-  * compressed files (gzip, tar, zip, xz, bzip2, zstd, WOFF fonts) are opened and their members
-    and member names scanned (alpaca/gates/containers.py, B4). A recognised container that cannot
-    be opened, or a blob too large for the text lane, refuses unless `barrier.allow_blobs` names
-    its digest with a reason.
+  * compressed files (gzip, tar, zip, xz, bzip2, zstd, zlib, WOFF fonts) are opened and their
+    members and member names scanned (alpaca/gates/containers.py, B4). A recognised container that
+    cannot be opened, or a blob too large for the text lane, refuses unless `barrier.allow_blobs`
+    names its digest with a reason; the members that can be read are read either way, and the
+    report names the parts the entry waived (review 4, N12).
   * git runs with replace refs off (GIT_NO_REPLACE_OBJECTS), since pack-objects sends the real
     objects; a grafts file or a shallow repository refuses (B6).
   * the sealed-term list (`barrier.terms`) is resolved from the MAIN worktree, so a linked worktree
     shares it. A configured list that is absent REFUSES unless `barrier.terms_optional: true`
-    says to push with the terms unchecked, and then the report and the gate line say so. Shape
-    rules and protected paths run either way (B5). The list may carry `re:` lines and
-    `!include:` lines (B1, B7); a line the barrier cannot use refuses.
-  * metadata (commit and tag messages, ref names) is matched against the sealed terms; author,
-    committer and tagger e-mails are also matched against the mailbox shape rule, so a real
-    address cannot leave as an identity unless an allow rule names it (B7).
+    says to push with the terms unchecked, and then the report and the gate line say so; a public
+    project with no list configured at all refuses the same way (review 4, N25d). Shape rules and
+    protected paths run either way (B5). The list may carry `re:` lines and `!include:` lines
+    (B1, B7); a line the barrier cannot use refuses.
+  * the hook scan has a wall-clock budget (`barrier.time_budget_seconds`, default 900): a scan past
+    it refuses with its own reason, so a `re:` line that backtracks without end cannot hang the
+    push (review 4, N15).
+  * metadata (commit and tag messages, ref names, deleted ref names too) is matched against the
+    sealed terms; author, committer and tagger e-mails are also matched against the mailbox shape
+    rule, so a real address cannot leave as an identity unless an allow rule names it (B7).
   * a shape false positive is cleared only by a narrow allow rule (project.yaml `barrier.allow`,
     `<regex>  # <reason>`), matched against the WHOLE value and never against a sealed term.
   * the report names DIGESTS and line numbers, never paths, refs or terms: a leak report that
@@ -73,6 +80,12 @@ R_TERMS_UNCHECKED = "TERMS-NOT-CHECKED"
 R_UNOPENED = "BLOB-NOT-FULLY-SCANNED-REFUSES"
 R_HISTORY = "HISTORY-REWRITTEN-LOCALLY-REFUSES"
 R_PIN = "PINNED-BARRIER-UNUSABLE-REFUSES"
+R_TIME = "SCAN-TIME-BUDGET-REFUSES"
+R_STALE = "HOOK-PREDATES-PIN-REFUSES"
+
+#: the scan's wall-clock budget in seconds (project.yaml `barrier.time_budget_seconds`, pinned).
+TIME_BUDGET = 900
+STALE_HOOK = "the hook predates the pinned barrier; run bin/alpaca barrier install"
 
 HOOK_NAME = "pre-push"
 PIN_NAME = "alpaca-barrier"
@@ -335,9 +348,10 @@ def _terms(root, cfg, base=None):
     """(TermList | None, reasons, detail, refusal_code | None).
 
     A configured list that is absent (or a link that points nowhere) refuses, unless
-    `barrier.terms_optional: true`; then, as with no list configured, an empty TermList carries the
-    shape allow rules so the shape rules still run, and the report says the terms were NOT
-    checked. A list that is present but unusable, or a malformed allow rule, refuses."""
+    `barrier.terms_optional: true`; so does a public project with no list configured at all. With
+    the opt-out, or on a project that is not public with no list configured, an empty TermList
+    carries the shape allow rules so the shape rules still run, and the report says the terms were
+    NOT checked. A list that is present but unusable, or a malformed allow rule, refuses."""
     block = cfg.get("barrier") or {}
     configured = block.get("terms")
     inline = block.get("sealed_terms")
@@ -365,6 +379,11 @@ def _terms(root, cfg, base=None):
                 "barrier.terms_optional: true to push with the terms unchecked" % (configured, how)], \
                 vc.BLOCKED
     elif not (isinstance(inline, list) and inline):
+        if str(cfg.get("tier") or "public") == "public" and not optional:
+            return None, [R_TERMS_MISSING], [
+                "sealed terms were NOT checked, so the push is refused: this public project "
+                "configures no term list (barrier.terms is empty or absent). Name the list, or set "
+                "barrier.terms_optional: true to push with the terms unchecked"], vc.BLOCKED
         return empty, [R_TERMS_UNCHECKED], [
             "sealed terms were NOT checked: no term list is configured (barrier.terms); protected "
             "paths and shape rules were checked"], None
@@ -448,7 +467,10 @@ def _member_hits(term_list, name, data):
     if th:
         return True
     if len(data) > leak_audit.TEXT_SCAN_MAX_BYTES:
-        raise containers.Unopenable("a member over the text-scan cap")
+        if leak_audit.byte_hits(term_list, [data]):
+            return True
+        raise containers.Unopenable("a member over the text-scan cap, so only its raw bytes were "
+                                    "read")
     return bool(_blob_hits(term_list, data, name, shape_on=False))
 
 
@@ -523,20 +545,40 @@ class _Scan(object):
         if _blob_hits(self.tl, raw, name):
             self.leak(dict(entry, where="content"))
             return
+        # Every member that can be read is read, even when one cannot (review 4, N12): an
+        # allow_blobs entry then waives only the parts listed as not read, never their siblings.
+        skipped = []
         try:
-            for mname, data in containers.members(raw):
-                if _member_hits(self.tl, mname, data):
-                    self.leak(dict(entry, where="inside-container"))
-                    return
+            for mname, data in containers.members(raw, skipped=skipped):
+                try:
+                    if _member_hits(self.tl, mname, data):
+                        self.leak(dict(entry, where="inside-container"))
+                        return
+                except containers.Unopenable as e:
+                    skipped.append((mname, str(e)))
         except containers.Unopenable as e:
-            self._unopened(sha, entry, "a compressed file the barrier cannot open (%s)" % e)
+            skipped.append(("", str(e)))
+        if skipped:
+            self._unopened(sha, entry, "a compressed file the barrier cannot open in full", skipped)
 
-    def _unopened(self, sha, entry, why):
+    def _unopened(self, sha, entry, why, parts=()):
+        """Refuse a blob the barrier could not read in full, unless barrier.allow_blobs names it.
+        `parts` are the (member name, why) it could not read; the report names each by digest (a
+        member name may carry what the barrier guards), and says so even when the blob is allowed."""
+        what = ""
+        if parts:
+            listed = ["%s: %s" % ("member " + _digest(n) if n else "the file itself", w)
+                      for n, w in parts[:5]]
+            more = " and %d more" % (len(parts) - 5) if len(parts) > 5 else ""
+            what = " (%d part%s not read: %s%s)" % (len(parts), "" if len(parts) == 1 else "s",
+                                                    "; ".join(listed), more)
         if sha.lower() in self.allow_blobs:
+            self.detail.append("blob %s: passed by its barrier.allow_blobs entry although it was not "
+                               "read in full%s; every other part was read" % (sha[:12], what))
             return
         self._block(dict(entry, where="not-fully-read"), R_UNOPENED, vc.BLOCKED)
-        self.detail.append("blob %s: %s; if it is known to be clean, name its digest in "
-                           "barrier.allow_blobs with a reason" % (sha[:12], why))
+        self.detail.append("blob %s: %s%s; if it is known to be clean, name its digest in "
+                           "barrier.allow_blobs with a reason" % (sha[:12], why, what))
 
     def tag(self, sha, ref=None):
         """Scan one annotated tag object; return (target sha, target type)."""
@@ -841,6 +883,39 @@ def _refuse_now(why):
     return vc.emit_verdict(INSTRUMENT, vc.BLOCKED, why)
 
 
+class _OutOfTime(BaseException):
+    """Raised by the alarm when the scan passes its time budget. A BaseException, so no `except
+    Exception` in the scan can mistake it for an ordinary error and carry on."""
+
+
+def _time_budget(cfg):
+    """(seconds, None) from `barrier.time_budget_seconds` (default TIME_BUDGET), or (None, why)
+    when the value is not a whole number of seconds above zero."""
+    value = (cfg.get("barrier") or {}).get("time_budget_seconds", TIME_BUDGET)
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None, ("%s: barrier.time_budget_seconds must be a whole number of seconds above "
+                      "zero; the push is refused" % R_TIME)
+    return value, None
+
+
+def _within(seconds, fn):
+    """Run fn() under a wall-clock alarm of `seconds` (review 4, N15): a `re:` line that backtracks
+    without end must refuse the push, not hang it. Without SIGALRM (not POSIX) fn runs unbounded."""
+    import signal
+    if not hasattr(signal, "SIGALRM"):
+        return fn()
+
+    def ring(_signum, _frame):
+        raise _OutOfTime()
+    old = signal.signal(signal.SIGALRM, ring)
+    signal.alarm(seconds)
+    try:
+        return fn()
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old)
+
+
 def pinned_main(pin, argv):
     """The entry of the pinned copy (run.py). It checks that the pinned code and settings are the
     ones the install wrote, notes where the checkout differs from them, and runs the hook scan with
@@ -888,10 +963,27 @@ def pinned_main(pin, argv):
 def prepush(argv=None, root=None, cfg=None, notices=()):
     """The pre-push hook body. Reads the candidate refs from stdin, walks every object that would
     enter the remote, scans it with the pinned settings `cfg`, and returns an exit code: 0 lets
-    git proceed, non-zero refuses the push."""
+    git proceed, non-zero refuses the push. Only the pinned copy passes `cfg`: called without it
+    (a hook written before the pin existed runs `python -m alpaca.barrier`), it refuses and says
+    to install again (review 4, N30), so a stale hook never runs the checkout's code silently."""
     import sys
-    root = root or paths.root()
     data = sys.stdin.read() if not sys.stdin.isatty() else ""
+    if cfg is None:
+        return _refuse_now("%s: %s" % (R_STALE, STALE_HOOK))
+    root = root or paths.root()
+    seconds, bad = _time_budget(cfg)
+    if bad:
+        return _refuse_now(bad)
+    try:
+        return _within(seconds, lambda: _prepush_scan(root, data, cfg, notices))
+    except _OutOfTime:
+        return _refuse_now("%s: the scan did not finish within its time budget of %d seconds "
+                           "(barrier.time_budget_seconds), so the push is refused. A `re:` line with "
+                           "nested repeats, such as (a+)+, can run this long on some text; rewrite "
+                           "it, or raise the budget and install again" % (R_TIME, seconds))
+
+
+def _prepush_scan(root, data, cfg, notices):
     objects, seen, refs = [], set(), []
     for line in data.splitlines():
         cols = line.split()
@@ -899,7 +991,9 @@ def prepush(argv=None, root=None, cfg=None, notices=()):
             continue
         local_ref, local_sha, remote_ref, remote_sha = cols[:4]
         if set(local_sha) == {"0"}:
-            continue  # a delete pushes no objects
+            # a delete pushes no objects, but its ref name still reaches the server (N23c)
+            refs.append((remote_ref, None))
+            continue
         refs.append((local_ref, local_sha))
         if remote_ref != local_ref:
             refs.append((remote_ref, None))
@@ -972,11 +1066,14 @@ _register()
 
 
 def main(argv=None):
+    """`python -m alpaca.barrier`: the entry hooks written before the pinned barrier call. It runs
+    no scan with the checkout's code; it refuses and says to install again (review 4, N30)."""
     import sys
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] == "prepush":
         return prepush(argv[1:])
-    ap = vc.make_parser(name=INSTRUMENT, description="outbound push barrier")
+    ap = vc.make_parser(name=INSTRUMENT, description="outbound push barrier (the hook entry of "
+                                                     "an old hook; it refuses)")
     ap.add_argument("verb", nargs="?", choices=["prepush"], help="hook entry")
     ap.parse_args(argv)
     return prepush([])

@@ -289,6 +289,10 @@ def _terms_from_lines(lines, source, base_dir=None, _depth=0, _stack=(), _state=
         tl.path = source
     label = "list line" if _depth == 0 else "included list %d, line" % state["lists"]
     for lineno, line in enumerate(lines, start=1):
+        if lineno == 1:
+            # a list saved with a byte order mark: the mark is not part of the first line, which
+            # may be a `re:` or `!include:` line (review 4, N19)
+            line = line.lstrip("\ufeff")
         s = line.strip()
         where = "%s %d" % (label, lineno)
         if not s:
