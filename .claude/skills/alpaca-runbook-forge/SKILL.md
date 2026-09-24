@@ -5,23 +5,24 @@ description: >-
   OpenSpec spec (### Requirement / #### Scenario) exists and the work needs its executable plan:
   stages, commands, pass checks, knobs, retry rules and owner gates. Reads the spec and the repo,
   asks the person only for what they leave out, writes runbook.yaml, and runs
-  `alpaca runbook check` until every success criterion or scenario is covered. Triggers on
+  `alpaca runbook check` until every success criterion, edge case or scenario is covered. Triggers on
   "/alpaca-runbook-forge", "forge a runbook", "write the runbook for this spec", "turn this spec
   into a runbook".
 ---
 
 # alpaca-runbook-forge
 
-The runbook forge. It turns a spec into a runbook in the format of `docs/runbook-format.md`,
-with every success criterion (spec-kit `SC-nnn`) or scenario (OpenSpec
-`<requirement>/<scenario>`) linked to a check or an owner gate. It asks the person as little as
-possible: the spec and the repository answer most questions, and a question is only asked when
-neither does.
+The runbook forge. It turns a spec into a runbook in the format of `docs/runbook-format.md`
+(`runbook: 2`), with every success criterion (spec-kit `SC-nnn`), edge case (spec-kit `EC-nnn`)
+or scenario (OpenSpec `<requirement>/<scenario>`) linked to a check, a fail case or an owner
+gate. It asks the person as little as possible: the spec and the repository answer most
+questions, and a question is only asked when neither does.
 
 ## Two modes
 
 - **Quiet mode**: the spec is complete and no interview exists, for example a spec a partner
-  sends. Follow the steps below as they are.
+  sends. Follow the steps below as they are. The runbook is still `runbook: 2`, with `source`
+  where you know it (`spec:<item id>`, or `default` for a default you chose).
 - **Interview mode**: the operator was interviewed and signed the result off, so
   `input/interview/` holds a signed file (`signed-<stamp>-<sha12>.md`) and
   `alpaca interview status` (it only reads) shows the sign-off as signed, not stale. A stale
@@ -32,15 +33,14 @@ neither does.
   - Step 3: ask only for what the signed slots still lack (a waived slot is not asked again), in
     rounds of up to 4 questions through the interactive question tool, each with 2 to 4 options
     and the recommended default first; build the next round from the answers.
-  - Step 4: write `runbook: 2`. Put `source: interview:<slot>` on each knob, check, fail case and
-    owner gate whose value came from a slot (`source: spec:<item id>` when it came from the spec,
-    `source: default` for a default you chose). Each failure becomes a fail case with `detect` (a
-    check of a generic type that passes when the failure has happened) and `then` (`retry`,
-    `stop`, `ask-owner`, or `{run: <stage id>}` for a stage marked `recovery: true` that fixes
-    the cause before the stage runs again). Each "never" becomes a check listed in the retry
-    block's `stop_on`, or a `regex-in-file` check with `absent: true`.
-  - Step 5: every edge case (`EC-nnn`) needs cover like a success criterion: the check or the
-    fail case that shows it lists it in `covers`.
+  - Step 4: put `source: interview:<slot>` on each knob, check, fail case and owner gate whose
+    value came from a slot (`source: spec:<item id>` when it came from the spec,
+    `note:input/notes/<file>` when a raw note states it, `owner:<decision ref>` when the owner
+    decided it, `source: default` for a default you chose). Each failure in the signed slots
+    becomes a fail case with `detect` and `then` (step 4 says how). Each "never" becomes a check
+    listed in the retry block's `stop_on`, or a `regex-in-file` check with `absent: true`.
+  - Step 5: the edge-cases slot became `EC-nnn` items of the spec; each needs cover like a
+    success criterion.
 
 ## Before you start
 
@@ -69,9 +69,14 @@ row per item:
 |---|---|---|---|---|
 
 `FR-UNCOVERED` warnings are functional requirements: cover them where a check already shows
-them, but they do not block. A `SPEC-UNPARSED` warning is an `SC` or `FR` id written in a shape
-the checker does not know; it still counts, and the line it names is worth rewriting as
+them, but they do not block. A `SPEC-UNPARSED` warning is an `SC`, `EC` or `FR` id written in a
+shape the checker does not know; it still counts, and the line it names is worth rewriting as
 `- **SC-001**: ...` in the spec.
+
+Edge cases are items too: every `EC-nnn` under the spec's Edge Cases heading is a row of the
+table. An edge case bullet with no id is an `EC-UNNUMBERED` error: number it in the spec
+(`- **EC-004**: ...`, the next free number) and never renumber an edge case that has an id,
+because the id keys its checklist row.
 
 ## Step 2: fill the table from the spec and the repo
 
@@ -126,14 +131,30 @@ I read spec.md (4 success criteria) and the repo. Five things are not in either:
 
 Write `runbook.yaml` next to the spec (or in the domain folder), following the format:
 
+- `runbook: 2` at the top;
 - stages in run order; a stage that runs a command has `needs`, `run`, `inputs`, `outputs` and
   at least one check; a stage that is only an owner gate has `owner_gate` and no `run` and no
   `checks` (it runs nothing, so the checker refuses checks there with `CHECKS-WITHOUT-RUN`; a
   check that must follow the approval goes in the stage whose `run` produces what it reads);
-- every check that shows a spec item lists it in `covers`;
+- every check that shows a spec item (a success criterion, an edge case) lists it in `covers`;
 - thresholds from the spec as `owner_only` knobs, and the knobs a retry may move with a range;
 - a `retry` block only where the person agreed to retries, with `on_fail`, `stop_on` and `move`;
-- `fails` for the known failure modes the person or the repo mentioned;
+- `fails` for the known failure modes the person or the repo mentioned: each has `id` and
+  `when`, and, when you know how the failure shows, a `detect` (a check of type `exit-code`,
+  `file-exists`, `regex-in-file`, `json-field` or `plugin`, without `id`, `covers` or `source`,
+  that passes when the failure happened) with a `then`: `retry` (another attempt within the
+  stage's `retry` limits), `stop` (the stage fails at once), `ask-owner` (the stage pauses for a
+  person), or `{run: <stage id>}`. A fail case that detects and answers an edge case lists it in
+  its own `covers` (for example "the port is already taken" is covered by the fail case that
+  recognizes a busy port);
+- a recovery stage for each `{run: <stage id>}`: a stage with `recovery: true`, a `run` and at
+  least one check, no `needs`, no `owner_gate`, and no other stage lists it in `needs`. It runs
+  only when a fail case sends to it; after it passes the failed stage runs again, and that run
+  counts as an attempt, so the failed stage needs `retry.max_attempts` of 2 or more. A fail case
+  of a recovery stage never sends to that same stage;
+- `source` on a knob, a check, a fail case and an owner gate when you know where the value comes
+  from: `spec:<item id>`, `note:input/notes/<file>`, `interview:<slot id>`, `owner:<decision
+  ref>`, or `default` for a default you chose (any other text is a `SOURCE-SHAPE` warning);
 - `owner_gate` on every irreversible step, with `approve` in plain words and the `evidence` the
   owner reads;
 - a comment on every value you choose that neither the spec nor the person gave, only for a
@@ -151,7 +172,8 @@ alpaca runbook check runbook.yaml --spec spec.md
 ```
 
 Fix every `ERROR` line and run it again. For a `SPEC-UNCOVERED` item: add the check that shows
-it, or, when only a person can judge it, add it to an owner gate's `covers`. Never add an item to
+it or the fail case that detects and answers it, or, when only a person can judge it, add it to
+an owner gate's `covers`. Never add an item to
 a `covers` list of a check that does not show it just to make the check pass. Stop when the last
 line is `GATE alpaca-runbook-check: PASS`.
 
@@ -160,9 +182,11 @@ line is `GATE alpaca-runbook-check: PASS`.
 Tell the person, in a few lines:
 
 - the runbook path and the check result (the `GATE` line);
-- the coverage: each item and the checks or gates that cover it (`--json` prints it);
+- the coverage: each item and the checks, fail cases (`fail:<stage>/<id>`) or gates
+  (`gate:<stage>`) that cover it (`--json` prints it);
 - the questions you asked, their answers, and the defaults you used;
-- the warnings left (`FR-UNCOVERED`, `SPEC-CLARIFY`) and what would clear them.
+- the warnings left (`FR-UNCOVERED`, `SPEC-CLARIFY`, `SOURCE-SHAPE`, `SOURCE-MISSING`) and what
+  would clear them.
 
 ## Never
 

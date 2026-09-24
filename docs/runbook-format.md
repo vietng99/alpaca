@@ -15,8 +15,8 @@ every success criterion, edge case or scenario of the spec to at least one check
 and turns it into checklist rows and task contracts.
 
 `alpaca runbook check <file> [--spec <path>]` reads a runbook, refuses a malformed one with a
-message that names the field, and, with a spec, fails when any success criterion or scenario has
-no check. The skill `/alpaca-runbook-forge` (`.claude/skills/alpaca-runbook-forge/SKILL.md`) writes a runbook from a spec and asks
+message that names the field, and, with a spec, fails when any success criterion, edge case
+(format 2) or scenario has no check. The skill `/alpaca-runbook-forge` (`.claude/skills/alpaca-runbook-forge/SKILL.md`) writes a runbook from a spec and asks
 the person only for what the spec leaves out.
 
 A worked example lives in `templates/runbook-example/`: a spec-kit spec for a small link
