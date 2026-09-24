@@ -17,7 +17,7 @@ ENV_SESSION_VARS = ("ALPACA_SESSION_ID", "CLAUDE_CODE_SESSION_ID")
 VERB_MODULES = ("ops", "onboard", "doctor", "analytics_cli", "serve", "questions", "board",
                 "messages", "decisions", "sort", "export", "review", "upgrade", "barrier", "operator",
                 "proof", "observability.cli", "artifacts", "backup", "workspace", "spec_kits",
-                "runbook", "intake", "start", "hub_publish")
+                "runbook", "intake", "start", "note", "hub_publish")
 
 
 def _profile_verb_modules():
