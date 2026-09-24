@@ -1,0 +1,169 @@
+{
+  "schema_version": 1,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "Task state machine",
+    "subtitle": "No proof, no done",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    {
+      "id": "main",
+      "label": "Main path"
+    },
+    {
+      "id": "held",
+      "label": "Held"
+    },
+    {
+      "id": "terminal",
+      "label": "Op"
+    }
+  ],
+  "states": [
+    {
+      "id": "added",
+      "type": "start",
+      "label": "Added",
+      "sublabel": "task add",
+      "lane": "main",
+      "col": 0,
+      "step": "01",
+      "height": 64
+    },
+    {
+      "id": "open",
+      "type": "active",
+      "label": "Open",
+      "sublabel": "on the board",
+      "lane": "main",
+      "col": 1,
+      "step": "02",
+      "height": 64
+    },
+    {
+      "id": "doing",
+      "type": "active",
+      "label": "Doing",
+      "sublabel": "leased",
+      "lane": "main",
+      "col": 2,
+      "step": "03",
+      "height": 64
+    },
+    {
+      "id": "gate",
+      "type": "decision",
+      "label": "Proof gate",
+      "sublabel": "sealed?",
+      "lane": "main",
+      "col": 3,
+      "step": "04",
+      "height": 64
+    },
+    {
+      "id": "done",
+      "type": "success",
+      "label": "Done",
+      "sublabel": "proof on record",
+      "lane": "main",
+      "col": 4,
+      "step": "05",
+      "height": 64
+    },
+    {
+      "id": "blocked",
+      "type": "waiting",
+      "label": "Blocked",
+      "sublabel": "needs input",
+      "lane": "held",
+      "col": 0
+    },
+    {
+      "id": "opclosed",
+      "type": "neutral",
+      "label": "Op closed",
+      "sublabel": "every task done",
+      "lane": "terminal",
+      "col": 2
+    }
+  ],
+  "transitions": [
+    {
+      "id": "t-add",
+      "from": "added",
+      "to": "open"
+    },
+    {
+      "id": "t-claim",
+      "from": "open",
+      "to": "doing",
+      "label": "claim",
+      "variant": "emphasis"
+    },
+    {
+      "id": "t-move-done",
+      "from": "doing",
+      "to": "gate",
+      "label": "done?"
+    },
+    {
+      "id": "t-pass",
+      "from": "gate",
+      "to": "done",
+      "label": "PASS",
+      "variant": "emphasis"
+    },
+    {
+      "id": "t-fail",
+      "from": "gate",
+      "to": "doing",
+      "label": "FAIL",
+      "variant": "security",
+      "route": "top-channel",
+      "fromSide": "top",
+      "toSide": "top"
+    },
+    {
+      "id": "t-lease",
+      "from": "doing",
+      "to": "open",
+      "label": "lease ends",
+      "variant": "dashed",
+      "route": "top-channel",
+      "fromSide": "top",
+      "toSide": "top"
+    },
+    {
+      "id": "t-block",
+      "from": "doing",
+      "to": "blocked",
+      "label": "block",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "straight",
+      "labelDy": 24
+    },
+    {
+      "id": "t-unblock",
+      "from": "blocked",
+      "to": "open",
+      "label": "reopen",
+      "variant": "dashed",
+      "fromSide": "left",
+      "toSide": "bottom"
+    },
+    {
+      "id": "t-opclose",
+      "from": "done",
+      "to": "opclosed",
+      "label": "op close",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "straight",
+      "labelDy": 24
+    }
+  ]
+}

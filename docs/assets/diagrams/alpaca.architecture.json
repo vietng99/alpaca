@@ -1,0 +1,273 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Alpaca at a glance",
+    "subtitle": "Two agents, one writer, one record",
+    "quality_profile": "showcase"
+  },
+  "components": [
+    {
+      "id": "claude",
+      "type": "external",
+      "label": "Claude Code",
+      "sublabel": "native hooks",
+      "pos": [
+        40,
+        150
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "codex",
+      "type": "external",
+      "label": "Codex",
+      "sublabel": "AGENTS.md",
+      "pos": [
+        40,
+        330
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "cli",
+      "type": "backend",
+      "label": "alpaca CLI",
+      "sublabel": "the only writer",
+      "pos": [
+        270,
+        240
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "gates",
+      "type": "security",
+      "label": "Gates",
+      "sublabel": "seal, done, deploy",
+      "pos": [
+        500,
+        240
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "owner",
+      "type": "external",
+      "label": "Owner",
+      "sublabel": "human decisions",
+      "pos": [
+        500,
+        70
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "profile",
+      "type": "external",
+      "label": "Domain profile",
+      "sublabel": "optional",
+      "pos": [
+        270,
+        420
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "record",
+      "type": "database",
+      "label": "Record",
+      "sublabel": ".alpaca/alpaca.db",
+      "pos": [
+        730,
+        240
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "tag": "append-only"
+    },
+    {
+      "id": "backup",
+      "type": "database",
+      "label": "Backups",
+      "sublabel": "verified snapshots",
+      "pos": [
+        730,
+        420
+      ],
+      "size": [
+        160,
+        64
+      ]
+    },
+    {
+      "id": "resume",
+      "type": "frontend",
+      "label": "RESUME.md",
+      "sublabel": "landing pad",
+      "pos": [
+        990,
+        110
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "cockpit",
+      "type": "frontend",
+      "label": "Cockpit",
+      "sublabel": "alpaca serve",
+      "pos": [
+        990,
+        240
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "analytics",
+      "type": "frontend",
+      "label": "Analytics",
+      "sublabel": "one HTML file",
+      "pos": [
+        990,
+        370
+      ],
+      "size": [
+        150,
+        64
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Rebuilt from the record",
+      "wraps": [
+        "resume",
+        "cockpit",
+        "analytics"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "claude-hooks",
+      "from": "claude",
+      "to": "cli",
+      "label": "hooks"
+    },
+    {
+      "id": "codex-commands",
+      "from": "codex",
+      "to": "cli",
+      "label": "commands"
+    },
+    {
+      "id": "cli-gates",
+      "from": "cli",
+      "to": "gates",
+      "variant": "emphasis"
+    },
+    {
+      "id": "gates-record",
+      "from": "gates",
+      "to": "record",
+      "label": "append",
+      "variant": "emphasis"
+    },
+    {
+      "id": "owner-decides",
+      "from": "owner",
+      "to": "gates",
+      "label": "decide",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 24
+    },
+    {
+      "id": "profile-stages",
+      "from": "profile",
+      "to": "cli",
+      "label": "stages",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "record-backup",
+      "from": "record",
+      "to": "backup",
+      "label": "snapshot",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 24
+    },
+    {
+      "id": "record-resume",
+      "from": "record",
+      "to": "resume"
+    },
+    {
+      "id": "record-cockpit",
+      "from": "record",
+      "to": "cockpit"
+    },
+    {
+      "id": "record-analytics",
+      "from": "record",
+      "to": "analytics"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "One writer",
+      "items": [
+        "Every change goes through the CLI",
+        "The record only grows"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Gates",
+      "items": [
+        "No proof, no done",
+        "Deploy waits for a human"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Views",
+      "items": [
+        "Rebuilt, never hand-edited"
+      ]
+    }
+  ]
+}

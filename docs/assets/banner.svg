@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 360" width="1280" height="360" role="img" aria-label="Alpaca: a local record for coding agents. Every task closes with a sealed proof.">
+  <style>
+    .bg { fill: #FBF6EE; }
+    .grid { stroke: #EFE6D6; }
+    .wool { fill: #FFFFFF; stroke: #2A2833; }
+    .wool2 { fill: #F3E7D3; stroke: #2A2833; }
+    .face { fill: #E9D3B0; stroke: #2A2833; }
+    .ink { fill: #2A2833; }
+    .title { fill: #2A2833; font: 800 104px ui-sans-serif, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; letter-spacing: -3px; }
+    .tag { fill: #3E3B48; font: 500 30px ui-sans-serif, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+    .sub { fill: #7A7385; font: 400 22px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .seal { fill: #2F9E6B; }
+    .sealtxt { fill: #FFFFFF; font: 700 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: 1px; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #17161D; }
+      .grid { stroke: #221F2A; }
+      .wool { fill: #F4EEE4; stroke: #0E0D12; }
+      .wool2 { fill: #E4D6BF; stroke: #0E0D12; }
+      .face { fill: #D8BE95; stroke: #0E0D12; }
+      .ink { fill: #0E0D12; }
+      .title { fill: #F6F1E8; }
+      .tag { fill: #D9D3E0; }
+      .sub { fill: #9A93A6; }
+      .seal { fill: #3FBF84; }
+      .sealtxt { fill: #0E1A14; }
+    }
+  </style>
+  <rect class="bg" width="1280" height="360" rx="24"/>
+  <g class="grid" stroke-width="1">
+    <path d="M0 60H1280M0 120H1280M0 180H1280M0 240H1280M0 300H1280"/>
+    <path d="M80 0V360M160 0V360M240 0V360M320 0V360M400 0V360"/>
+  </g>
+
+  <!-- the alpaca -->
+  <g transform="translate(92 36)" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+    <!-- back legs -->
+    <rect class="wool2" x="52" y="208" width="22" height="64" rx="10"/>
+    <rect class="wool2" x="150" y="208" width="22" height="64" rx="10"/>
+    <!-- tail -->
+    <circle class="wool" cx="26" cy="178" r="16"/>
+    <!-- body fluff -->
+    <circle class="wool" cx="58" cy="190" r="36"/>
+    <circle class="wool" cx="96" cy="170" r="40"/>
+    <circle class="wool" cx="138" cy="172" r="38"/>
+    <circle class="wool" cx="176" cy="192" r="30"/>
+    <circle class="wool" cx="112" cy="208" r="36"/>
+    <circle class="wool" cx="72" cy="214" r="26"/>
+    <circle class="wool" cx="158" cy="214" r="26"/>
+    <!-- front legs -->
+    <rect class="wool2" x="82" y="226" width="22" height="50" rx="10"/>
+    <rect class="wool2" x="178" y="222" width="22" height="54" rx="10"/>
+    <!-- neck -->
+    <rect class="wool" x="158" y="72" width="44" height="124" rx="22"/>
+    <circle class="wool" cx="186" cy="192" r="26"/>
+    <!-- ears -->
+    <path class="face" d="M170 50 L172 16 L188 44 Z"/>
+    <path class="face" d="M192 44 L204 12 L212 46 Z"/>
+    <!-- head -->
+    <ellipse class="wool" cx="196" cy="66" rx="32" ry="26"/>
+    <ellipse class="face" cx="222" cy="78" rx="20" ry="15"/>
+    <circle class="wool" cx="182" cy="44" r="12"/>
+    <circle class="wool" cx="200" cy="40" r="12"/>
+    <!-- face -->
+    <circle class="ink" cx="206" cy="62" r="4.5" stroke="none"/>
+    <path d="M228 84 q6 4 12 0" fill="none" class="ink" stroke-width="3"/>
+    <circle class="ink" cx="236" cy="74" r="2.5" stroke="none"/>
+  </g>
+
+  <!-- the proof seal -->
+  <g transform="translate(378 250) rotate(-12)">
+    <circle class="seal" r="42"/>
+    <circle r="35" fill="none" stroke="#FFFFFF" stroke-opacity="0.55" stroke-width="2" stroke-dasharray="4 5"/>
+    <path d="M-17 -6 L-5 7 L18 -17" fill="none" stroke="#FFFFFF" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+    <text class="sealtxt" x="0" y="26" text-anchor="middle">SEALED</text>
+  </g>
+
+  <!-- words -->
+  <text class="title" x="478" y="164">Alpaca</text>
+  <text class="tag" x="482" y="218">A local record for coding agents.</text>
+  <text class="tag" x="482" y="258">Every task closes with a sealed proof.</text>
+  <text class="sub" x="482" y="310">Claude Code + Codex / one append-only record / MIT</text>
+</svg>

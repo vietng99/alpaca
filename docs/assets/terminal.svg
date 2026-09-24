@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 593" width="1100" height="593" role="img" aria-label="Terminal session: a task cannot be closed without a sealed proof report; the seal gate fails until every section is written, then passes.">
+  <style>
+    .win { fill: #15141B; stroke: #2B2935; stroke-width: 1.5; }
+    .bar { fill: #1E1C26; }
+    .t { font: 400 15px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #D9D3E0; white-space: pre; }
+    .ttl { font: 500 13px ui-sans-serif, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #8C8497; }
+    .ps { fill: #7FD1A8; }
+    .cmd { fill: #F4EEE4; }
+    .out { fill: #A79FB2; }
+    .com { fill: #6E6879; font-style: italic; }
+    .fail { fill: #FF8A7A; font-weight: 700; }
+    .pass { fill: #5FD39B; font-weight: 700; }
+    .dim { fill: #A79FB2; }
+    .done { fill: #5FD39B; }
+  </style>
+  <rect class="win" x="1" y="1" width="1098" height="591" rx="14"/>
+  <path class="bar" d="M1 15 a14 14 0 0 1 14 -14 H1085 a14 14 0 0 1 14 14 V40 H1 Z"/>
+  <circle cx="24" cy="21" r="6.5" fill="#FF5F57"/><circle cx="46" cy="21" r="6.5" fill="#FEBC2E"/><circle cx="68" cy="21" r="6.5" fill="#28C840"/>
+  <text class="ttl" x="550" y="26" text-anchor="middle">my-project: the proof gate in action</text>
+  <text class="t" x="24" y="72"><tspan class="ps">$ </tspan><tspan class="cmd">bin/alpaca op new "Ship the hello verb" --done-when "hello prints Hello, world"</tspan></text>
+  <text class="t out" x="24" y="97">op-001 opened: Ship the hello verb</text>
+  <text class="t" x="24" y="122"><tspan class="ps">$ </tspan><tspan class="cmd">bin/alpaca task add op-001 "add the hello verb" --title "add hello verb"</tspan></text>
+  <text class="t out" x="24" y="147">t-001 added</text>
+  <text class="t" x="24" y="172"><tspan class="ps">$ </tspan><tspan class="cmd">bin/alpaca task claim t-001 --by claude</tspan></text>
+  <text class="t out" x="24" y="197">t-001 claimed by claude until 2026-09-24T16:19:36+07:00</text>
+  <text class="t com" x="24" y="234"># try to close it without a proof</text>
+  <text class="t" x="24" y="259"><tspan class="ps">$ </tspan><tspan class="cmd">bin/alpaca task move t-001 done</tspan></text>
+  <text class="t" x="24" y="284"><tspan class="fail">GATE alpaca-task-move: FAIL</tspan><tspan class="dim"> (done needs --proof local:&lt;report&gt;, the sealed proof report for t-001)</tspan></text>
+  <text class="t" x="24" y="309"><tspan class="ps">$ </tspan><tspan class="cmd">bin/alpaca proof new t-001</tspan></text>
+  <text class="t out" x="24" y="334">wrote .alpaca/proofs/op-001/t-001.md</text>
+  <text class="t" x="24" y="359"><tspan class="ps">$ </tspan><tspan class="cmd">bin/alpaca proof seal t-001</tspan></text>
+  <text class="t" x="24" y="384"><tspan class="fail">GATE alpaca-proof-seal: FAIL</tspan><tspan class="dim"> (8 problem(s))</tspan></text>
+  <text class="t out" x="24" y="409">  - section 'What I did' still holds its TODO(agent): line</text>
+  <text class="t com" x="24" y="446"># the agent writes the report: what, how, where, result, how to reproduce, evidence</text>
+  <text class="t" x="24" y="471"><tspan class="ps">$ </tspan><tspan class="cmd">bin/alpaca proof seal t-001</tspan></text>
+  <text class="t" x="24" y="496"><tspan class="pass">GATE alpaca-proof-seal: PASS</tspan><tspan class="dim"> (.alpaca/proofs/op-001/t-001.md sealed, 1 evidence pointer(s))</tspan></text>
+  <text class="t" x="24" y="521"><tspan class="ps">$ </tspan><tspan class="cmd">bin/alpaca task move t-001 done --proof local:.alpaca/proofs/op-001/t-001.md</tspan></text>
+  <text class="t done" x="24" y="546">t-001 -&gt; done</text>
+</svg>
