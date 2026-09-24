@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="790" viewBox="0 0 1200 790" role="img" aria-labelledby="title desc">
+<title id="title">From raw idea to spec, runbook, checklist, agent work and proof report.</title>
+<desc id="desc">Illustrative link-shortener workflow. Follow SC-002 through a failed latency check, a bounded retry, passing evidence and a sealed proof. Release remains an owner decision.</desc>
+<rect width="1200" height="790" rx="22" fill="#15271f"/>
+<text x="40" y="45" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="700" fill="#acc59f">ONE REQUIREMENT. EVERY STEP ACCOUNTED FOR.</text>
+<text x="40" y="96" font-family="Arial, Helvetica, sans-serif" font-size="39" font-weight="700" fill="#e7ece1">From a rough idea to a sealed result.</text>
+<text x="40" y="127" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#9bad9c">A link-shortener walkthrough / illustrative artifacts and results</text>
+<rect x="40" y="161" width="170" height="53" rx="9" fill="#223d2d"/>
+<text x="53" y="194" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="700" fill="#b4d7a4" xml:space="preserve">01</text>
+<text x="81" y="194" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#b4d7a4">Raw idea</text>
+<text x="217" y="193" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="400" fill="#78966b">&gt;</text>
+<rect x="230" y="161" width="170" height="53" rx="9" fill="#223d2d"/>
+<text x="243" y="194" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="700" fill="#b4d7a4" xml:space="preserve">02</text>
+<text x="271" y="194" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#b4d7a4">Spec</text>
+<text x="407" y="193" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="400" fill="#78966b">&gt;</text>
+<rect x="420" y="161" width="170" height="53" rx="9" fill="#223d2d"/>
+<text x="433" y="194" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="700" fill="#b4d7a4" xml:space="preserve">03</text>
+<text x="461" y="194" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#b4d7a4">Runbook</text>
+<text x="597" y="193" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="400" fill="#78966b">&gt;</text>
+<rect x="610" y="161" width="170" height="53" rx="9" fill="#223d2d"/>
+<text x="623" y="194" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="700" fill="#b4d7a4" xml:space="preserve">04</text>
+<text x="651" y="194" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#b4d7a4">Checklist</text>
+<text x="787" y="193" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="400" fill="#78966b">&gt;</text>
+<rect x="800" y="161" width="170" height="53" rx="9" fill="#223d2d"/>
+<text x="813" y="194" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="700" fill="#b4d7a4" xml:space="preserve">05</text>
+<text x="841" y="194" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#b4d7a4">Agent work</text>
+<text x="977" y="193" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="400" fill="#78966b">&gt;</text>
+<rect x="990" y="161" width="170" height="53" rx="9" fill="#dce8cf"/>
+<text x="1003" y="194" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="700" fill="#213e32" xml:space="preserve">06</text>
+<text x="1031" y="194" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" fill="#213e32">Proof report</text>
+<rect x="40" y="239" width="730" height="413" rx="12" fill="#102017" stroke="#35523c"/>
+<text x="62" y="270" font-family="DejaVu Sans Mono, monospace" font-size="14" font-weight="400" fill="#acbca7" xml:space="preserve">.alpaca/proofs/&lt;op&gt;/&lt;id&gt;.md</text>
+<path d="M40 286H770" stroke="#35523c"/>
+<text x="62" y="324" font-family="Arial, Helvetica, sans-serif" font-size="23" font-weight="700" fill="#e7ece1">Finish with something you can inspect.</text>
+<text x="62" y="358" font-family="DejaVu Sans Mono, monospace" font-size="16" font-weight="400" fill="#e7ece1" xml:space="preserve">What       Met the redirect latency criterion.</text>
+<text x="62" y="384" font-family="DejaVu Sans Mono, monospace" font-size="16" font-weight="400" fill="#e7ece1" xml:space="preserve">How        Two load-test attempts; 2 -&gt; 4 workers.</text>
+<text x="62" y="410" font-family="DejaVu Sans Mono, monospace" font-size="16" font-weight="400" fill="#e7ece1" xml:space="preserve">Where      load-test stage; out/load.json.</text>
+<text x="62" y="436" font-family="DejaVu Sans Mono, monospace" font-size="16" font-weight="400" fill="#b4d7a4" xml:space="preserve">Result     41.2 ms p95 at 200 req/s. PASS.</text>
+<text x="62" y="462" font-family="DejaVu Sans Mono, monospace" font-size="16" font-weight="400" fill="#e7ece1" xml:space="preserve">Issues     First attempt: 68.4 ms. Kept on record.</text>
+<text x="62" y="488" font-family="DejaVu Sans Mono, monospace" font-size="16" font-weight="400" fill="#e7ece1" xml:space="preserve">Reproduce  Run the recorded command and settings.</text>
+<text x="62" y="514" font-family="DejaVu Sans Mono, monospace" font-size="16" font-weight="400" fill="#e4c584" xml:space="preserve">Evidence   local:out/load.json + captured logs</text>
+<text x="62" y="540" font-family="DejaVu Sans Mono, monospace" font-size="16" font-weight="400" fill="#9bad9c" xml:space="preserve"></text>
+<text x="62" y="566" font-family="DejaVu Sans Mono, monospace" font-size="16" font-weight="400" fill="#b4d7a4" xml:space="preserve">SEAL       Report and evidence hashes recorded.</text>
+<text x="62" y="592" font-family="DejaVu Sans Mono, monospace" font-size="16" font-weight="400" fill="#b4d7a4" xml:space="preserve">CLOSE      Use the report sealed for that ID.</text>
+<rect x="790" y="239" width="370" height="413" rx="12" fill="#f1f1e5"/>
+<text x="814" y="272" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="700" fill="#60755c">THE AGENT&#x27;S NEXT MOVE</text>
+<text x="814" y="310" font-family="Arial, Helvetica, sans-serif" font-size="25" font-weight="700" fill="#213e32">Prove it. Then resume.</text>
+<text x="814" y="366" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="400" fill="#4e644b">Close the task with its sealed</text>
+<text x="814" y="391" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="400" fill="#4e644b">report. Checklist rows track check</text>
+<text x="814" y="416" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="400" fill="#4e644b">results or owner decisions; manual</text>
+<text x="814" y="441" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="400" fill="#4e644b">closure needs a seal.</text>
+<text x="814" y="507" font-family="DejaVu Sans Mono, monospace" font-size="14" font-weight="400" fill="#355944" xml:space="preserve">DONE / backed by proof</text>
+<text x="814" y="537" font-family="DejaVu Sans Mono, monospace" font-size="14" font-weight="400" fill="#355944" xml:space="preserve">RESUME / durable state</text>
+<text x="814" y="567" font-family="DejaVu Sans Mono, monospace" font-size="14" font-weight="400" fill="#355944" xml:space="preserve">RELEASE / owner decision</text>
+<rect x="814" y="600" width="322" height="30" rx="5" fill="#e3e8d8"/>
+<text x="830" y="621" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="700" fill="#355944" xml:space="preserve">SEALED</text>
+<rect x="40" y="673" width="1120" height="54" rx="8" fill="#263e2d"/>
+<text x="60" y="707" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="400" fill="#d1dfbf">Idea -&gt; SC-002 -&gt; check -&gt; result -&gt; sealed report -&gt; recorded completion.</text>
+<text x="40" y="761" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="400" fill="#a9b9a2">The proof travels with the work. Shipping still waits for the owner.</text>
+</svg>

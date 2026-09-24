@@ -1,0 +1,454 @@
+{
+  "title": "From a rough idea to a sealed result.",
+  "subtitle": "ONE REQUIREMENT. EVERY STEP ACCOUNTED FOR.",
+  "steps": [
+    "Raw idea",
+    "Spec",
+    "Runbook",
+    "Checklist",
+    "Agent work",
+    "Proof report"
+  ],
+  "scenes": [
+    {
+      "step": 0,
+      "duration": 3600,
+      "file": "notes/link-shortener.md",
+      "status": "CAPTURED",
+      "heading": "Start with the messy version.",
+      "lines": [
+        [
+          "muted",
+          "# The owner's idea"
+        ],
+        [
+          "text",
+          "Build a small link shortener."
+        ],
+        [
+          "text",
+          "Keep links across restarts."
+        ],
+        [
+          "text",
+          "Make redirects fast."
+        ],
+        [
+          "text",
+          "Count how often each link is used."
+        ],
+        [
+          "text",
+          "Let a teammate set it up easily."
+        ],
+        [
+          "muted",
+          ""
+        ],
+        [
+          "accent",
+          "Question: how fast is fast enough?"
+        ]
+      ],
+      "action": "Capture the intent",
+      "body": "The agent keeps the raw notes and asks for the missing constraints.",
+      "facts": [
+        "INPUT / rough notes",
+        "AGENT / clarify the gaps",
+        "OWNER / scope + success"
+      ],
+      "trace": "The idea becomes a requirement that can be checked.",
+      "footer": "Example: a small link shortener. The same flow fits your project."
+    },
+    {
+      "step": 1,
+      "duration": 3800,
+      "file": "specs/001-links/spec.md",
+      "status": "SPECIFIED",
+      "heading": "Give the goal a measurable bar.",
+      "lines": [
+        [
+          "muted",
+          "# Success criteria"
+        ],
+        [
+          "text",
+          "SC-001  Correct endpoint status codes"
+        ],
+        [
+          "accent",
+          "SC-002  Redirect p95 <= 50 ms at 200 req/s"
+        ],
+        [
+          "text",
+          "SC-003  No links lost after a restart"
+        ],
+        [
+          "text",
+          "SC-004  Local setup in under 10 minutes"
+        ],
+        [
+          "muted",
+          ""
+        ],
+        [
+          "muted",
+          "Also: user stories, requirements, edge cases."
+        ],
+        [
+          "good",
+          "We will follow SC-002 through the whole flow."
+        ]
+      ],
+      "action": "Write the spec",
+      "body": "The agent turns intent into user stories and measurable success criteria.",
+      "facts": [
+        "NEW / spec-kit",
+        "CHANGE / OpenSpec",
+        "OUTPUT / a checked spec"
+      ],
+      "trace": "SC-002: p95 <= 50 ms at 200 requests per second.",
+      "footer": "Clarify the target before writing the execution plan."
+    },
+    {
+      "step": 2,
+      "duration": 4600,
+      "file": "runbook.yaml / load-test",
+      "status": "COVERED",
+      "heading": "Define how the agent proves it.",
+      "lines": [
+        [
+          "text",
+          "id: load-test"
+        ],
+        [
+          "text",
+          "needs: [unit-test]"
+        ],
+        [
+          "text",
+          "checks:"
+        ],
+        [
+          "text",
+          "  - id: redirect-p95"
+        ],
+        [
+          "accent",
+          "    covers: [SC-002]"
+        ],
+        [
+          "text",
+          "    type: json-field"
+        ],
+        [
+          "text",
+          "    path: out/load.json"
+        ],
+        [
+          "text",
+          "    field: redirect.p95_ms"
+        ],
+        [
+          "text",
+          "    op: \"<=\""
+        ],
+        [
+          "accent",
+          "    value: ${P95_LIMIT_MS}"
+        ],
+        [
+          "muted",
+          "Retry: up to 3 attempts; WORKERS +2."
+        ],
+        [
+          "good",
+          "Owner-only: latency limit and request rate."
+        ]
+      ],
+      "action": "Forge the runbook",
+      "body": "Stages name commands, dependencies, outputs, checks, retry limits and owner gates.",
+      "facts": [
+        "CHECK / spec coverage",
+        "RETRY / declared bounds",
+        "OUTPUT / runbook.yaml"
+      ],
+      "trace": "SC-002 -> load-test -> redirect-p95 -> out/load.json",
+      "footer": "Illustrative excerpt. Full syntax lives in the bundled worked example."
+    },
+    {
+      "step": 3,
+      "duration": 3800,
+      "file": "alpaca intake / board",
+      "status": "PLANNED",
+      "heading": "Turn the plan into tracked work.",
+      "lines": [
+        [
+          "muted",
+          "CRITERION   CHECKLIST ROW"
+        ],
+        [
+          "text",
+          "SC-001      Endpoint behavior         OPEN"
+        ],
+        [
+          "accent",
+          "SC-002      Redirect latency          OPEN"
+        ],
+        [
+          "text",
+          "SC-003      Restart persistence       OPEN"
+        ],
+        [
+          "text",
+          "SC-004      Teammate setup            OPEN"
+        ],
+        [
+          "muted",
+          ""
+        ],
+        [
+          "good",
+          "+ stage tasks with inputs and a done bar"
+        ],
+        [
+          "good",
+          "+ explicit owner-gate tasks"
+        ],
+        [
+          "good",
+          "+ profile stages for the run order"
+        ]
+      ],
+      "action": "Generate the board",
+      "body": "Intake maps the spec and runbook into checklist rows, task contracts and profile stages.",
+      "facts": [
+        "PREVIEW / --dry-run",
+        "RECORD / rows + tasks",
+        "OUTPUT / a work queue"
+      ],
+      "trace": "SC-002 now has a row, covering checks and a stage task.",
+      "footer": "When the spec changes, intake updates the affected rows."
+    },
+    {
+      "step": 4,
+      "duration": 3800,
+      "file": "load-test / attempt 1",
+      "status": "FAIL",
+      "heading": "The agent works. The checks decide.",
+      "lines": [
+        [
+          "good",
+          "CLAIM   load-test task"
+        ],
+        [
+          "text",
+          "READ    contract, dependencies, done bar"
+        ],
+        [
+          "text",
+          "RUN     load test with WORKERS=2"
+        ],
+        [
+          "text",
+          "WRITE   out/load.json"
+        ],
+        [
+          "muted",
+          ""
+        ],
+        [
+          "warn",
+          "FAIL    redirect.p95_ms = 68.4"
+        ],
+        [
+          "accent",
+          "BAR     <= 50 ms at 200 req/s"
+        ],
+        [
+          "muted",
+          ""
+        ],
+        [
+          "warn",
+          "Still DOING. Failure is recorded."
+        ]
+      ],
+      "action": "Act within scope",
+      "body": "At the authorized level, the agent claims work, implements, runs checks and captures evidence.",
+      "facts": [
+        "RESULT / 68.4 ms",
+        "VERDICT / FAIL",
+        "PROGRESS / still doing"
+      ],
+      "trace": "SC-002 -> attempt 1 -> FAIL. A failed check is not completion.",
+      "footer": "Illustrative results. These numbers are a walkthrough, not a benchmark."
+    },
+    {
+      "step": 4,
+      "duration": 3400,
+      "file": "load-test / permitted retry",
+      "status": "RETRY",
+      "heading": "Retry the work. Keep the same bar.",
+      "lines": [
+        [
+          "text",
+          "RULE    retry on redirect-p95"
+        ],
+        [
+          "text",
+          "LIMIT   3 total attempts"
+        ],
+        [
+          "accent",
+          "MOVE    WORKERS: 2 -> 4"
+        ],
+        [
+          "muted",
+          ""
+        ],
+        [
+          "text",
+          "KEEP    p95 limit: 50 ms"
+        ],
+        [
+          "text",
+          "KEEP    request rate: 200 req/s"
+        ],
+        [
+          "muted",
+          ""
+        ],
+        [
+          "warn",
+          "STOP    on redirect-codes failure"
+        ],
+        [
+          "good",
+          "RUN     attempt 2 within the declared limits"
+        ]
+      ],
+      "action": "Recover with limits",
+      "body": "A permitted retry can change a declared knob. The owner controls the acceptance threshold.",
+      "facts": [
+        "CHANGE / worker count",
+        "KEEP / success criteria",
+        "STOP / hard failure"
+      ],
+      "trace": "SC-002 stays unchanged while the permitted retry changes WORKERS.",
+      "footer": "Missing inputs, exhausted retries and owner decisions are surfaced."
+    },
+    {
+      "step": 4,
+      "duration": 3400,
+      "file": "load-test / attempt 2",
+      "status": "PASS",
+      "heading": "A passing check earns evidence.",
+      "lines": [
+        [
+          "text",
+          "RUN     load test with WORKERS=4"
+        ],
+        [
+          "good",
+          "PASS    redirect.p95_ms = 41.2"
+        ],
+        [
+          "good",
+          "PASS    response codes = 301"
+        ],
+        [
+          "text",
+          "WRITE   out/load.json + command output"
+        ],
+        [
+          "muted",
+          ""
+        ],
+        [
+          "accent",
+          "NEXT    write the report for the completed work"
+        ],
+        [
+          "muted",
+          ""
+        ],
+        [
+          "text",
+          "A passing test is evidence."
+        ],
+        [
+          "good",
+          "A sealed report lets the task close."
+        ]
+      ],
+      "action": "Make progress visible",
+      "body": "Keep the result and failed attempt. The next session can read what happened and what is owed.",
+      "facts": [
+        "RESULT / 41.2 ms",
+        "VERDICT / PASS",
+        "NEXT / report + seal"
+      ],
+      "trace": "SC-002 -> attempt 2 -> PASS -> evidence ready for the report.",
+      "footer": "Illustrative results. The agent still needs to document and seal the work."
+    },
+    {
+      "step": 5,
+      "duration": 5800,
+      "file": ".alpaca/proofs/<op>/<id>.md",
+      "status": "SEALED",
+      "heading": "Finish with something you can inspect.",
+      "lines": [
+        [
+          "text",
+          "What       Met the redirect latency criterion."
+        ],
+        [
+          "text",
+          "How        Two load-test attempts; 2 -> 4 workers."
+        ],
+        [
+          "text",
+          "Where      load-test stage; out/load.json."
+        ],
+        [
+          "good",
+          "Result     41.2 ms p95 at 200 req/s. PASS."
+        ],
+        [
+          "text",
+          "Issues     First attempt: 68.4 ms. Kept on record."
+        ],
+        [
+          "text",
+          "Reproduce  Run the recorded command and settings."
+        ],
+        [
+          "accent",
+          "Evidence   local:out/load.json + captured logs"
+        ],
+        [
+          "muted",
+          ""
+        ],
+        [
+          "good",
+          "SEAL       Report and evidence hashes recorded."
+        ],
+        [
+          "good",
+          "CLOSE      Use the report sealed for that ID."
+        ]
+      ],
+      "action": "Prove it. Then resume.",
+      "body": "Close the task with its sealed report. Checklist rows track check results or owner decisions; manual closure needs a seal.",
+      "facts": [
+        "DONE / backed by proof",
+        "RESUME / durable state",
+        "RELEASE / owner decision"
+      ],
+      "trace": "Idea -> SC-002 -> check -> result -> sealed report -> recorded completion.",
+      "footer": "The proof travels with the work. Shipping still waits for the owner."
+    }
+  ]
+}

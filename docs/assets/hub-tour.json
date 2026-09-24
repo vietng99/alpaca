@@ -1,0 +1,68 @@
+{
+  "title": "The work. The evidence. The whole story.",
+  "scenes": [
+    {
+      "id": "sessions",
+      "label": "Parallel sessions",
+      "hint": "See who is doing what",
+      "heading": "Parallel work, in one view.",
+      "subtitle": "Active project sessions with their claims and latest recorded activity.",
+      "takeaway": "Inspect captured sessions and child agents. Missing capture stays visible.",
+      "duration": 6500
+    },
+    {
+      "id": "work",
+      "label": "Work & evidence",
+      "hint": "From task to proof",
+      "heading": "Every task has a trail.",
+      "subtitle": "Purpose, method, result and proof stay with the work.",
+      "takeaway": "Open a completion to inspect what changed, who finished it and the linked proof.",
+      "duration": 6000
+    },
+    {
+      "id": "runs",
+      "label": "Runs & logs",
+      "hint": "Follow the current run",
+      "heading": "See what is running.",
+      "subtitle": "Profile stages connect recorded attempts to their logs.",
+      "takeaway": "Follow live output or revisit a past attempt. Current acceptance is checked separately.",
+      "duration": 6000
+    },
+    {
+      "id": "live",
+      "label": "Live job monitor",
+      "hint": "Every running job in tiles",
+      "heading": "Follow jobs side by side.",
+      "subtitle": "Profile-enabled log tiles follow each job as its stage changes.",
+      "takeaway": "Focus a tile, pause following, or pin finished jobs to compare their output.",
+      "duration": 6000
+    },
+    {
+      "id": "logs",
+      "label": "Log analysis",
+      "hint": "Find the useful lines",
+      "heading": "Read the signal in the log.",
+      "subtitle": "Flagged lines, filters and findings tied to exact quotes.",
+      "takeaway": "Built-in log scanning; profiles can add agent reviews with confirmed or disputed findings.",
+      "duration": 6500
+    },
+    {
+      "id": "wiki",
+      "label": "Project wiki",
+      "hint": "Keep project memory",
+      "heading": "Keep the context of the work.",
+      "subtitle": "Passive capture feeds a project-local wiki for your agents.",
+      "takeaway": "Capture keeps the source. Raw notes do not become trusted lessons automatically.",
+      "duration": 7000
+    },
+    {
+      "id": "analytics",
+      "label": "Session analytics",
+      "hint": "Understand the effort",
+      "heading": "Look inside a working session.",
+      "subtitle": "Usage, context growth, tools and the visible conversation.",
+      "takeaway": "Trace measurements to source records. Missing usage or pricing stays unavailable.",
+      "duration": 6500
+    }
+  ]
+}

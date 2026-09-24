@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="740" viewBox="0 0 1200 740" role="img" aria-labelledby="title desc">
+<title id="title">Alpaca hub tour: Log analysis</title>
+<desc id="desc">Simplified feature illustration with invented sample data. Flagged lines, filters and findings tied to exact quotes. Built-in log scanning; profiles can add agent reviews with confirmed or disputed findings.</desc>
+<rect x="0" y="0" width="1200" height="740" rx="20" fill="#f7f8f3"/>
+<text x="32" y="39" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="700" fill="#217451">ALPACA / HUB + PROJECT MEMORY</text>
+<text x="32" y="88" font-family="Arial, Helvetica, sans-serif" font-size="36" font-weight="700" fill="#243e33">The work. The evidence. The whole story.</text>
+<text x="32" y="120" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#65766d">Follow autonomous progress, then inspect the record behind it.</text>
+<path d="M32 143L1168 143" stroke="#dce4dc" fill="none"/>
+<text x="32" y="181" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="700" fill="#65766d">FEATURE TOUR</text>
+<text x="49" y="220.0" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="700" fill="#65766d">01</text>
+<text x="82" y="220.0" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="400" fill="#243e33">Parallel sessions</text>
+<text x="82" y="240.0" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#65766d">See who is doing what</text>
+<text x="49" y="280.0" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="700" fill="#65766d">02</text>
+<text x="82" y="280.0" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="400" fill="#243e33">Work &amp; evidence</text>
+<text x="82" y="300.0" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#65766d">From task to proof</text>
+<text x="49" y="340.0" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="700" fill="#65766d">03</text>
+<text x="82" y="340.0" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="400" fill="#243e33">Runs &amp; logs</text>
+<text x="82" y="360.0" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#65766d">Follow the current run</text>
+<text x="49" y="400.0" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="700" fill="#65766d">04</text>
+<text x="82" y="400.0" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="400" fill="#243e33">Live job monitor</text>
+<text x="82" y="420.0" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#65766d">Every running job in tiles</text>
+<rect x="32" y="436.0" width="240" height="51.0" rx="10" fill="#e5ede0"/>
+<rect x="32" y="444.0" width="4" height="35.0" rx="2" fill="#217451"/>
+<text x="49" y="460.0" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="700" fill="#217451">05</text>
+<text x="82" y="460.0" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="700" fill="#243e33">Log analysis</text>
+<text x="82" y="480.0" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#65766d">Find the useful lines</text>
+<text x="49" y="520.0" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="700" fill="#65766d">06</text>
+<text x="82" y="520.0" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="400" fill="#243e33">Project wiki</text>
+<text x="82" y="540.0" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#65766d">Keep project memory</text>
+<text x="49" y="580.0" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="700" fill="#65766d">07</text>
+<text x="82" y="580.0" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="400" fill="#243e33">Session analytics</text>
+<text x="82" y="600.0" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#65766d">Understand the effort</text>
+<text x="48" y="624" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="700" fill="#65766d">ONE SHARED RECORD</text>
+<rect x="296" y="169" width="872" height="469" rx="14" fill="#ffffff" stroke="#dce4dc"/>
+<text x="324" y="211" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700" fill="#243e33">Read the signal in the log.</text>
+<text x="324" y="242" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="400" fill="#65766d">Flagged lines, filters and findings tied to exact quotes.</text>
+<rect x="324" y="271" width="816" height="153" rx="10" fill="#172b22"/>
+<text x="344" y="303" font-family="DejaVu Sans Mono, monospace" font-size="19" font-weight="400" fill="#b8cbb7">042  INFO   Running latency checks</text>
+<text x="344" y="333" font-family="DejaVu Sans Mono, monospace" font-size="19" font-weight="400" fill="#e9c989">043  WARN   Slow response detected</text>
+<text x="344" y="363" font-family="DejaVu Sans Mono, monospace" font-size="19" font-weight="400" fill="#f1b2a5">044  ERROR  Expected p95 &lt; 100 ms</text>
+<text x="344" y="393" font-family="DejaVu Sans Mono, monospace" font-size="19" font-weight="400" fill="#f1b2a5">045  ERROR  Observed p95 = 127 ms</text>
+<text x="324" y="452" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="700" fill="#65766d">PROFILE-PROVIDED AGENT REVIEW</text>
+<rect x="324" y="467" width="816" height="143" rx="10" fill="#faf4e6"/>
+<text x="344" y="496" font-family="Arial, Helvetica, sans-serif" font-size="21" font-weight="600" fill="#243e33">The quoted result exceeds the latency limit.</text>
+<text x="344" y="526" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="400" fill="#65766d">Lines 044-045 / quotes matched to the recorded log</text>
+<text x="344" y="555" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="400" fill="#243e33">Check the slow path before the next attempt.</text>
+<rect x="344" y="570" width="178" height="26" rx="5" fill="#f0e2c5"/>
+<text x="354" y="588" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#866322">Not checked by engineer</text>
+<rect x="32" y="661" width="1136" height="43" rx="8" fill="#eaf0e4"/>
+<text x="49" y="688" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="400" fill="#456047">Built-in log scanning; profiles can add agent reviews with confirmed or disputed findings.</text>
+<text x="32" y="726" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="400" fill="#65766d">Simplified feature illustrations / invented sample data / not a live feed or exact UI reproduction</text>
+</svg>

@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="740" viewBox="0 0 1200 740" role="img" aria-labelledby="title desc">
+<title id="title">Alpaca hub tour: Parallel sessions</title>
+<desc id="desc">Simplified feature illustration with invented sample data. Active project sessions with their claims and latest recorded activity. Inspect captured sessions and child agents. Missing capture stays visible.</desc>
+<rect x="0" y="0" width="1200" height="740" rx="20" fill="#f7f8f3"/>
+<text x="32" y="39" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="700" fill="#217451">ALPACA / HUB + PROJECT MEMORY</text>
+<text x="32" y="88" font-family="Arial, Helvetica, sans-serif" font-size="36" font-weight="700" fill="#243e33">The work. The evidence. The whole story.</text>
+<text x="32" y="120" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#65766d">Follow autonomous progress, then inspect the record behind it.</text>
+<path d="M32 143L1168 143" stroke="#dce4dc" fill="none"/>
+<text x="32" y="181" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="700" fill="#65766d">FEATURE TOUR</text>
+<rect x="32" y="196.0" width="240" height="51.0" rx="10" fill="#e5ede0"/>
+<rect x="32" y="204.0" width="4" height="35.0" rx="2" fill="#217451"/>
+<text x="49" y="220.0" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="700" fill="#217451">01</text>
+<text x="82" y="220.0" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="700" fill="#243e33">Parallel sessions</text>
+<text x="82" y="240.0" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#65766d">See who is doing what</text>
+<text x="49" y="280.0" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="700" fill="#65766d">02</text>
+<text x="82" y="280.0" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="400" fill="#243e33">Work &amp; evidence</text>
+<text x="82" y="300.0" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#65766d">From task to proof</text>
+<text x="49" y="340.0" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="700" fill="#65766d">03</text>
+<text x="82" y="340.0" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="400" fill="#243e33">Runs &amp; logs</text>
+<text x="82" y="360.0" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#65766d">Follow the current run</text>
+<text x="49" y="400.0" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="700" fill="#65766d">04</text>
+<text x="82" y="400.0" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="400" fill="#243e33">Live job monitor</text>
+<text x="82" y="420.0" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#65766d">Every running job in tiles</text>
+<text x="49" y="460.0" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="700" fill="#65766d">05</text>
+<text x="82" y="460.0" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="400" fill="#243e33">Log analysis</text>
+<text x="82" y="480.0" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#65766d">Find the useful lines</text>
+<text x="49" y="520.0" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="700" fill="#65766d">06</text>
+<text x="82" y="520.0" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="400" fill="#243e33">Project wiki</text>
+<text x="82" y="540.0" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#65766d">Keep project memory</text>
+<text x="49" y="580.0" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="700" fill="#65766d">07</text>
+<text x="82" y="580.0" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="400" fill="#243e33">Session analytics</text>
+<text x="82" y="600.0" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#65766d">Understand the effort</text>
+<text x="48" y="624" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="700" fill="#65766d">ONE SHARED RECORD</text>
+<rect x="296" y="169" width="872" height="469" rx="14" fill="#ffffff" stroke="#dce4dc"/>
+<text x="324" y="211" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700" fill="#243e33">Parallel work, in one view.</text>
+<text x="324" y="242" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="400" fill="#65766d">Active project sessions with their claims and latest recorded activity.</text>
+<circle cx="330" cy="282" r="5" fill="#217451"/>
+<text x="345" y="288" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="600" fill="#217451">2 active project sessions</text>
+<text x="900" y="288" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#65766d">1 idle in recent window</text>
+<rect x="324" y="310" width="398" height="242" rx="10" fill="#f7f9f4" stroke="#dce4dc"/>
+<circle cx="344" cy="336" r="5" fill="#217451"/>
+<text x="359" y="343" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="600" fill="#243e33">Implementer</text>
+<text x="342" y="372" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="400" fill="#65766d">Heartbeat 3s ago / Edit</text>
+<path d="M342 386L704 386" stroke="#dce4dc" fill="none"/>
+<text x="342" y="412" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="700" fill="#4b58cc">TASK 03 / DOING</text>
+<text x="342" y="441" font-family="Arial, Helvetica, sans-serif" font-size="21" font-weight="600" fill="#243e33">Build redirect handler</text>
+<text x="342" y="477" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="700" fill="#65766d">LATEST CAPTURED ASK</text>
+<text x="342" y="502" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="400" fill="#243e33">Keep redirects below 100 ms.</text>
+<text x="342" y="527" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="400" fill="#243e33">Implement the agreed contract.</text>
+<rect x="742" y="310" width="398" height="242" rx="10" fill="#f7f9f4" stroke="#dce4dc"/>
+<circle cx="762" cy="336" r="5" fill="#217451"/>
+<text x="777" y="343" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="600" fill="#243e33">Reviewer</text>
+<text x="760" y="372" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="400" fill="#65766d">Heartbeat 9s ago / Shell</text>
+<path d="M760 386L1122 386" stroke="#dce4dc" fill="none"/>
+<text x="760" y="412" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="700" fill="#4b58cc">TASK 04 / DOING</text>
+<text x="760" y="441" font-family="Arial, Helvetica, sans-serif" font-size="21" font-weight="600" fill="#243e33">Check edge cases</text>
+<text x="760" y="477" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="700" fill="#65766d">LATEST CAPTURED ASK</text>
+<text x="760" y="502" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="400" fill="#243e33">Check timeout and retry cases.</text>
+<text x="760" y="527" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="400" fill="#243e33">Record the failures and proof.</text>
+<text x="324" y="584" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="400" fill="#65766d">Unclaimed work is flagged. Open a session to inspect its conversation.</text>
+<text x="324" y="614" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#217451">Agent crew: captured parent + child conversations, each with its own scope.</text>
+<rect x="32" y="661" width="1136" height="43" rx="8" fill="#eaf0e4"/>
+<text x="49" y="688" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="400" fill="#456047">Inspect captured sessions and child agents. Missing capture stays visible.</text>
+<text x="32" y="726" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="400" fill="#65766d">Simplified feature illustrations / invented sample data / not a live feed or exact UI reproduction</text>
+</svg>

@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620" role="img" aria-labelledby="title desc">
+<title id="title">Watch the work move through the hub.</title>
+<desc id="desc">Simplified illustrative hub: five connected stages and their task cards. Blue is live, green is passing work, red is a failed attempt and amber is an owner check-in. Release runs only after an explicit owner approval.</desc>
+<rect width="1200" height="620" rx="20" fill="#f7f8f3"/>
+<text x="40" y="39" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="700" fill="#52745e">ALPACA / OPERATIONS HUB</text>
+<text x="40" y="84" font-family="Arial, Helvetica, sans-serif" font-size="36" font-weight="700" fill="#273e35">Watch the work move.</text>
+<text x="40" y="115" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="400" fill="#657568">Stages above. Tasks and their proof below. One shared record.</text>
+<text x="943" y="46" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="600" fill="#217451">4 / 5 stages passed</text>
+<text x="943" y="74" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#7f693c">Waiting for owner</text>
+<text x="47" y="151" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="700" fill="#657568">PLAN</text>
+<path d="M40 169v-9h436v9" fill="none" stroke="#d2ddd2" stroke-width="1.5"/>
+<text x="503" y="151" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="700" fill="#657568">EXECUTE</text>
+<path d="M496 169v-9h436v9" fill="none" stroke="#d2ddd2" stroke-width="1.5"/>
+<text x="959" y="151" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="700" fill="#657568">OWNER GATE</text>
+<path d="M952 169v-9h208v9" fill="none" stroke="#d2ddd2" stroke-width="1.5"/>
+<rect x="40" y="180" width="208" height="92" rx="8" fill="#e8f3eb" stroke="#217451" stroke-width="1.5"/>
+<rect x="40" y="181" width="4" height="90" rx="2" fill="#217451"/>
+<text x="54" y="211" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="600" fill="#273e35">Spec</text>
+<text x="54" y="252" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="400" fill="#217451">PASS</text>
+<path d="M249 226h15m-5-4 5 4-5 4" fill="none" stroke="#8d9c91" stroke-width="1.5"/>
+<path d="M144 281v41m-4-5 4 5 4-5" fill="none" stroke="#b3c1b6" stroke-width="1.3" stroke-dasharray="3 4"/>
+<rect x="40" y="333" width="208" height="92" rx="8" fill="#e8f3eb" stroke="#217451" stroke-width="1.5"/>
+<rect x="40" y="334" width="4" height="90" rx="2" fill="#217451"/>
+<text x="54" y="364" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="600" fill="#273e35">Define success</text>
+<text x="54" y="405" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="400" fill="#217451">PROOF SEALED</text>
+<rect x="268" y="180" width="208" height="92" rx="8" fill="#e8f3eb" stroke="#217451" stroke-width="1.5"/>
+<rect x="268" y="181" width="4" height="90" rx="2" fill="#217451"/>
+<text x="282" y="211" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="600" fill="#273e35">Runbook</text>
+<text x="282" y="252" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="400" fill="#217451">PASS</text>
+<path d="M477 226h15m-5-4 5 4-5 4" fill="none" stroke="#8d9c91" stroke-width="1.5"/>
+<path d="M372 281v41m-4-5 4 5 4-5" fill="none" stroke="#b3c1b6" stroke-width="1.3" stroke-dasharray="3 4"/>
+<rect x="268" y="333" width="208" height="92" rx="8" fill="#e8f3eb" stroke="#217451" stroke-width="1.5"/>
+<rect x="268" y="334" width="4" height="90" rx="2" fill="#217451"/>
+<text x="282" y="364" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="600" fill="#273e35">Map the checks</text>
+<text x="282" y="405" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="400" fill="#217451">PROOF SEALED</text>
+<rect x="496" y="180" width="208" height="92" rx="8" fill="#e8f3eb" stroke="#217451" stroke-width="1.5"/>
+<rect x="496" y="181" width="4" height="90" rx="2" fill="#217451"/>
+<text x="510" y="211" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="600" fill="#273e35">Build</text>
+<text x="510" y="252" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="400" fill="#217451">PASS</text>
+<path d="M705 226h15m-5-4 5 4-5 4" fill="none" stroke="#8d9c91" stroke-width="1.5"/>
+<path d="M600 281v41m-4-5 4 5 4-5" fill="none" stroke="#b3c1b6" stroke-width="1.3" stroke-dasharray="3 4"/>
+<rect x="496" y="333" width="208" height="92" rx="8" fill="#e8f3eb" stroke="#217451" stroke-width="1.5"/>
+<rect x="496" y="334" width="4" height="90" rx="2" fill="#217451"/>
+<text x="510" y="364" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="600" fill="#273e35">Implement</text>
+<text x="510" y="405" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="400" fill="#217451">PROOF SEALED</text>
+<rect x="724" y="180" width="208" height="92" rx="8" fill="#e8f3eb" stroke="#217451" stroke-width="1.5"/>
+<rect x="724" y="181" width="4" height="90" rx="2" fill="#217451"/>
+<text x="738" y="211" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="600" fill="#273e35">Verify</text>
+<text x="738" y="252" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="400" fill="#217451">PASS</text>
+<path d="M933 226h15m-5-4 5 4-5 4" fill="none" stroke="#8d9c91" stroke-width="1.5"/>
+<path d="M828 281v41m-4-5 4 5 4-5" fill="none" stroke="#b3c1b6" stroke-width="1.3" stroke-dasharray="3 4"/>
+<rect x="724" y="333" width="208" height="92" rx="8" fill="#e8f3eb" stroke="#217451" stroke-width="1.5"/>
+<rect x="724" y="334" width="4" height="90" rx="2" fill="#217451"/>
+<text x="738" y="364" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="600" fill="#273e35">Run the checks</text>
+<text x="738" y="405" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="400" fill="#217451">PROOF SEALED</text>
+<rect x="952" y="180" width="208" height="92" rx="8" fill="#fcf1dd" stroke="#956c25" stroke-width="1.5"/>
+<rect x="952" y="181" width="4" height="90" rx="2" fill="#956c25"/>
+<text x="966" y="211" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="600" fill="#273e35">Release</text>
+<text x="966" y="252" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="400" fill="#956c25">PAUSED</text>
+<path d="M1056 281v41m-4-5 4 5 4-5" fill="none" stroke="#b3c1b6" stroke-width="1.3" stroke-dasharray="3 4"/>
+<rect x="952" y="333" width="208" height="92" rx="8" fill="#fcf1dd" stroke="#956c25" stroke-width="1.5"/>
+<rect x="952" y="334" width="4" height="90" rx="2" fill="#956c25"/>
+<text x="966" y="364" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="600" fill="#273e35">Release + health</text>
+<text x="966" y="405" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="400" fill="#956c25">OWNER CHECK-IN</text>
+<rect x="40" y="447" width="1120" height="82" rx="8" fill="#edf1e8"/>
+<text x="58" y="478" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="600" fill="#355441">Verification passed. The agent sealed the work report. Release awaits the owner.</text>
+<text x="58" y="507" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="400" fill="#667365">RECORDED ATTEMPTS / Attempt 1 failed; attempt 2 passed. Both remain inspectable.</text>
+<circle cx="45" cy="564" r="5" fill="#217451"/>
+<text x="59" y="568" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="400" fill="#617164">PASS / SEALED</text>
+<circle cx="271" cy="564" r="5" fill="#4b58cc"/>
+<text x="285" y="568" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="400" fill="#617164">LIVE</text>
+<circle cx="420" cy="564" r="5" fill="#b4483b"/>
+<text x="434" y="568" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="400" fill="#617164">FAILED</text>
+<circle cx="595" cy="564" r="5" fill="#956c25"/>
+<text x="609" y="568" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="400" fill="#617164">CHECK-IN</text>
+<circle cx="796" cy="564" r="5" fill="#bdc9c0"/>
+<text x="810" y="568" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="400" fill="#617164">NOT STARTED</text>
+<text x="40" y="603" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="400" fill="#788273">Simplified illustrative hub view. Stage layouts come from the project&#x27;s profile; this README animation uses sample states.</text>
+</svg>

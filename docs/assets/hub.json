@@ -1,0 +1,14 @@
+{
+  "stages": ["Spec", "Runbook", "Build", "Verify", "Release"],
+  "tasks": ["Define success", "Map the checks", "Implement", "Run the checks", "Release + health"],
+  "scenes": [
+    {"states": ["pass", "live", "waiting", "waiting", "waiting"], "duration": 2200, "event": "The spec is recorded. The agent is mapping requirements to runbook checks.", "history": "Each card keeps its task, result and evidence together.", "owner": "Owner check-in ahead"},
+    {"states": ["pass", "pass", "live", "waiting", "waiting"], "duration": 2200, "event": "The runbook is ready. The agent claims the implementation task.", "history": "Completed cards stay green as the next piece of work goes live.", "owner": "Owner check-in ahead"},
+    {"states": ["pass", "pass", "pass", "live", "waiting"], "duration": 2200, "event": "Implementation is recorded. The verification run is live.", "history": "Blue marks active execution; it does not count as a passing result.", "owner": "Owner check-in ahead"},
+    {"states": ["pass", "pass", "pass", "fail", "waiting"], "duration": 2400, "event": "A check failed. The stage stays red while the agent inspects the result.", "history": "RECORDED ATTEMPT / 1 failed. Its report and evidence stay in the history.", "owner": "Owner check-in ahead"},
+    {"states": ["pass", "pass", "pass", "live", "waiting"], "duration": 2200, "event": "A permitted retry is running. The acceptance criteria stay the same.", "history": "RECORDED ATTEMPT / 1 failed. Attempt 2 is now running.", "owner": "Owner check-in ahead"},
+    {"states": ["pass", "pass", "pass", "pass", "paused"], "duration": 3200, "event": "Verification passed. The agent sealed the work report. Release awaits the owner.", "history": "RECORDED ATTEMPTS / Attempt 1 failed; attempt 2 passed. Both remain inspectable.", "owner": "Waiting for owner"},
+    {"states": ["pass", "pass", "pass", "pass", "live"], "duration": 2200, "event": "The owner approved release. The release command and health checks are live.", "history": "RECORDED DECISION / Owner approval received before release started.", "owner": "Owner approved"},
+    {"states": ["pass", "pass", "pass", "pass", "pass"], "duration": 4200, "event": "All five stages passed. The completed tasks have linked, sealed proof reports.", "history": "The hub keeps results, failed attempts, owner decisions and proof in one view.", "owner": "Owner approved"}
+  ]
+}

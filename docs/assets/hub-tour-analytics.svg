@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="740" viewBox="0 0 1200 740" role="img" aria-labelledby="title desc">
+<title id="title">Alpaca hub tour: Session analytics</title>
+<desc id="desc">Simplified feature illustration with invented sample data. Usage, context growth, tools and the visible conversation. Trace measurements to source records. Missing usage or pricing stays unavailable.</desc>
+<rect x="0" y="0" width="1200" height="740" rx="20" fill="#f7f8f3"/>
+<text x="32" y="39" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="700" fill="#217451">ALPACA / HUB + PROJECT MEMORY</text>
+<text x="32" y="88" font-family="Arial, Helvetica, sans-serif" font-size="36" font-weight="700" fill="#243e33">The work. The evidence. The whole story.</text>
+<text x="32" y="120" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="400" fill="#65766d">Follow autonomous progress, then inspect the record behind it.</text>
+<path d="M32 143L1168 143" stroke="#dce4dc" fill="none"/>
+<text x="32" y="181" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="700" fill="#65766d">FEATURE TOUR</text>
+<text x="49" y="220.0" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="700" fill="#65766d">01</text>
+<text x="82" y="220.0" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="400" fill="#243e33">Parallel sessions</text>
+<text x="82" y="240.0" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#65766d">See who is doing what</text>
+<text x="49" y="280.0" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="700" fill="#65766d">02</text>
+<text x="82" y="280.0" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="400" fill="#243e33">Work &amp; evidence</text>
+<text x="82" y="300.0" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#65766d">From task to proof</text>
+<text x="49" y="340.0" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="700" fill="#65766d">03</text>
+<text x="82" y="340.0" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="400" fill="#243e33">Runs &amp; logs</text>
+<text x="82" y="360.0" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#65766d">Follow the current run</text>
+<text x="49" y="400.0" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="700" fill="#65766d">04</text>
+<text x="82" y="400.0" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="400" fill="#243e33">Live job monitor</text>
+<text x="82" y="420.0" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#65766d">Every running job in tiles</text>
+<text x="49" y="460.0" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="700" fill="#65766d">05</text>
+<text x="82" y="460.0" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="400" fill="#243e33">Log analysis</text>
+<text x="82" y="480.0" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#65766d">Find the useful lines</text>
+<text x="49" y="520.0" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="700" fill="#65766d">06</text>
+<text x="82" y="520.0" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="400" fill="#243e33">Project wiki</text>
+<text x="82" y="540.0" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#65766d">Keep project memory</text>
+<rect x="32" y="556.0" width="240" height="51.0" rx="10" fill="#e5ede0"/>
+<rect x="32" y="564.0" width="4" height="35.0" rx="2" fill="#217451"/>
+<text x="49" y="580.0" font-family="DejaVu Sans Mono, monospace" font-size="13" font-weight="700" fill="#217451">07</text>
+<text x="82" y="580.0" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="700" fill="#243e33">Session analytics</text>
+<text x="82" y="600.0" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#65766d">Understand the effort</text>
+<text x="48" y="624" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="700" fill="#65766d">ONE SHARED RECORD</text>
+<rect x="296" y="169" width="872" height="469" rx="14" fill="#ffffff" stroke="#dce4dc"/>
+<text x="324" y="211" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700" fill="#243e33">Look inside a working session.</text>
+<text x="324" y="242" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="400" fill="#65766d">Usage, context growth, tools and the visible conversation.</text>
+<rect x="324" y="270" width="256" height="96" rx="10" fill="#f3f5f0"/>
+<text x="340" y="294" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="700" fill="#65766d">RESPONSES</text>
+<text x="340" y="326" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="600" fill="#243e33">48</text>
+<text x="340" y="349" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#65766d">sample session</text>
+<rect x="604" y="270" width="256" height="96" rx="10" fill="#f3f5f0"/>
+<text x="620" y="294" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="700" fill="#65766d">LATEST INPUT</text>
+<text x="620" y="326" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="600" fill="#4b58cc">64K</text>
+<text x="620" y="349" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#65766d">observed context</text>
+<rect x="884" y="270" width="256" height="96" rx="10" fill="#f3f5f0"/>
+<text x="900" y="294" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="700" fill="#65766d">EST. API COST</text>
+<text x="900" y="326" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="600" fill="#243e33">$0.84</text>
+<text x="900" y="349" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="400" fill="#65766d">illustrative estimate</text>
+<text x="324" y="401" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="600" fill="#243e33">Context over time</text>
+<text x="1013" y="401" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="400" fill="#65766d">64K input</text>
+<path d="M324 490L1140 490" stroke="#dce4dc" fill="none"/>
+<path d="M324 420L1140 420" stroke="#dce4dc" fill="none"/>
+<polygon points="324,490 324,484 370,472 430,468 495,468 554,451 627,451 691,447 752,447 818,435 879,431 948,431 1013,422 1076,416 1140,411 1140,490" fill="#edf0ff"/>
+<polyline points="324,484 370,472 430,468 495,468 554,451 627,451 691,447 752,447 818,435 879,431 948,431 1013,422 1076,416 1140,411" fill="none" stroke="#4b58cc" stroke-width="3"/>
+<circle cx="324" cy="484" r="4" fill="#4b58cc"/>
+<circle cx="370" cy="472" r="4" fill="#4b58cc"/>
+<circle cx="430" cy="468" r="4" fill="#4b58cc"/>
+<circle cx="495" cy="468" r="4" fill="#4b58cc"/>
+<circle cx="554" cy="451" r="4" fill="#4b58cc"/>
+<circle cx="627" cy="451" r="4" fill="#4b58cc"/>
+<circle cx="691" cy="447" r="4" fill="#4b58cc"/>
+<circle cx="752" cy="447" r="4" fill="#4b58cc"/>
+<circle cx="818" cy="435" r="4" fill="#4b58cc"/>
+<circle cx="879" cy="431" r="4" fill="#4b58cc"/>
+<circle cx="948" cy="431" r="4" fill="#4b58cc"/>
+<circle cx="1013" cy="422" r="4" fill="#4b58cc"/>
+<circle cx="1076" cy="416" r="4" fill="#4b58cc"/>
+<circle cx="1140" cy="411" r="4" fill="#4b58cc"/>
+<text x="324" y="518" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="400" fill="#65766d">Each point leads back to its captured conversation.</text>
+<text x="324" y="557" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="600" fill="#243e33">Tools used</text>
+<text x="324" y="582" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="400" fill="#65766d">Shell</text>
+<rect x="425" y="571" width="715" height="9" rx="4" fill="#e8ede5"/>
+<rect x="425" y="571" width="524" height="9" rx="4" fill="#4b58cc"/>
+<text x="324" y="608" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="400" fill="#65766d">Read</text>
+<rect x="425" y="597" width="715" height="9" rx="4" fill="#e8ede5"/>
+<rect x="425" y="597" width="238" height="9" rx="4" fill="#4b58cc"/>
+<rect x="32" y="661" width="1136" height="43" rx="8" fill="#eaf0e4"/>
+<text x="49" y="688" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="400" fill="#456047">Trace measurements to source records. Missing usage or pricing stays unavailable.</text>
+<text x="32" y="726" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="400" fill="#65766d">Simplified feature illustrations / invented sample data / not a live feed or exact UI reproduction</text>
+</svg>
