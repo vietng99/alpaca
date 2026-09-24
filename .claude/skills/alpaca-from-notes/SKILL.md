@@ -51,7 +51,8 @@ Tell the person the pick and the reason in one line. If they want the other kit,
 `--kit spec-kit` or `--kit openspec`. Do not ask when they have not objected.
 
 `alpaca start --json` also says `interview`: `needed` (no signed interview in
-`input/interview/`), `signed`, or `stale` (the interview log changed after the last sign-off).
+`input/interview/`), `signed`, or `stale` (the log, the slot map or the inbox changed after the
+last sign-off, or the notes given to `start` are not in the inbox yet).
 
 ## Step 0b: the interview
 

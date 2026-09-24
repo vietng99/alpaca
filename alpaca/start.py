@@ -4,8 +4,9 @@ It picks the spec tool, prepares the project for it, and prints the steps that t
 spec, the spec to a runbook, and the runbook to intake. Raw notes go to the inbox first
 (`alpaca note add`), then through the interview (`/alpaca-interview`, alpaca/interview.py) until
 it is signed; only a signed interview goes to the spec step. `--json` says which case it is:
-`interview: needed` (no signed interview in `input/interview/`), `signed`, or `stale` (the log
-changed after the last sign-off). The skill `.claude/skills/alpaca-from-notes/`
+`interview: needed` (no signed interview in `input/interview/`), `signed`, or `stale` (the log,
+the slot map or the inbox changed after the last sign-off, or the notes given here are not in
+the inbox yet: new raw input goes through the interview again). The skill `.claude/skills/alpaca-from-notes/`
 walks a person through those steps in Claude Code; this verb is its small helper and works the
 same from a shell.
 
@@ -14,7 +15,9 @@ The pick (the person can override it with --kit):
   * a new thing, in a project with no spec yet: spec-kit (a raw idea to a first spec, with the
     clarify questions);
   * a change to something that already has specs: OpenSpec (living specs and change deltas);
-  * a project that already records OpenSpec keeps OpenSpec.
+  * a project that already records OpenSpec keeps OpenSpec;
+  * the same notes (or the same signed interview) that an earlier `--prepare` started keep that
+    pick, so a rerun after the spec was written from them does not turn into a change.
 
 A project uses one kit at a time. The first change to a spec-kit project moves it to OpenSpec:
 `--prepare` installs OpenSpec and writes each spec-kit spec as a living OpenSpec spec, one
@@ -81,8 +84,9 @@ def state(root):
             "speckit_specs": speckit_specs(root), "openspec_specs": openspec_specs(root)}
 
 
-def choose(root, override=None):
-    """(kit, mode, reason). mode is "new" (no spec yet) or "change" (specs exist)."""
+def choose(root, override=None, earlier=None):
+    """(kit, mode, reason). mode is "new" (no spec yet) or "change" (specs exist). `earlier` is
+    the data of the `start` event that prepared these same notes (earlier_pick): its pick holds."""
     st = state(root)
     has_specs = bool(st["speckit_specs"] or st["openspec_specs"])
     mode = "change" if has_specs else "new"
@@ -90,6 +94,13 @@ def choose(root, override=None):
         if override not in KITS:
             raise StartError("unknown kit %r; use spec-kit or openspec" % override, code=USAGE)
         return override, mode, "chosen with --kit"
+    if earlier and earlier["data"].get("kit") in KITS and not (
+            earlier["data"]["kit"] == "spec-kit" and (st["recorded"] == "openspec" or st["openspec_specs"])):
+        specs = ", ".join(st["speckit_specs"] + st["openspec_specs"]) or "no spec yet"
+        return earlier["data"]["kit"], earlier["data"].get("mode") or mode, (
+            "these notes were started before (%s, %s, %s), so a rerun keeps that pick; the spec step "
+            "may be done already (%s): go on with the step after it, or pass --kit to pick again"
+            % (earlier.get("ts") or "an earlier start", earlier["data"]["kit"], earlier["data"].get("mode"), specs))
     if st["recorded"] == "openspec" or st["openspec_specs"]:
         return "openspec", mode, ("the project uses OpenSpec; a %s goes in as an OpenSpec change"
                                   % ("change" if has_specs else "new capability"))
@@ -244,17 +255,46 @@ def _note_command(notes_label):
     return "alpaca note add --file %s" % notes_label
 
 
-def steps(kit, mode, notes_label, has_op, interview=None):
+def notes_kind(root, text, label):
+    """What the notes given to start are: ("signed", file) for a signed interview file, ("note",
+    file) for notes already kept in the inbox (a note file, or the same bytes as a kept note), or
+    ("new", None) for raw notes the inbox does not hold yet."""
+    from alpaca import interview, note
+    data = text.encode("utf-8")
+    if label not in ("stdin", "inline"):
+        rel = _rel(root, os.path.abspath(label))
+        if rel.startswith(interview.DIR + "/signed-") and rel.endswith(".md"):
+            return "signed", rel
+        with open(label, "rb") as fh:
+            data = fh.read()
+        parts = note.split(data)
+        if parts and parts[0].get("sha256") == util.sha256_hex(parts[1]):
+            kept = note.find(root, parts[0]["sha256"])
+            if kept:
+                return "note", kept
+    kept = note.find(root, util.sha256_hex(data))
+    return ("note", kept) if kept else ("new", None)
+
+
+def steps(kit, mode, notes_label, has_op, interview=None, kind=("new", None)):
     """The steps from the notes to intake. `interview` is alpaca.interview.signoff_state; unless
-    it says signed, the notes go to the inbox and through the interview before the spec."""
+    it says signed, the notes go to the inbox and through the interview before the spec. `kind`
+    is notes_kind: notes already in the inbox, or the signed brief itself, are not added again."""
     interview = interview or {"state": "needed", "file": None}
     out = []
     if interview["state"] != "signed":
-        out.append({"step": "note", "do": "keep the raw notes in the inbox as they are, one piece per note",
-                    "command": _note_command(notes_label)})
+        if kind[0] == "note":
+            out.append({"step": "note", "do": "the notes are already in the inbox as %s; nothing to add"
+                        % kind[1], "command": "alpaca note list"})
+        elif kind[0] == "signed":
+            out.append({"step": "note", "do": "the notes given are the signed interview %s; keep any new "
+                        "raw piece with alpaca note add" % kind[1], "command": "alpaca note list"})
+        else:
+            out.append({"step": "note", "do": "keep the raw notes in the inbox as they are, one piece per note",
+                        "command": _note_command(notes_label)})
         if interview["state"] == "stale":
-            do = ("the sign-off is stale: the interview log changed after %s was signed; settle the "
-                  "change, read it back and sign off again" % interview["file"])
+            do = ("the sign-off of %s is stale: %s; settle what changed, read it back and sign off "
+                  "again" % (interview["file"], interview.get("why") or "the interview log changed after it"))
         else:
             do = ("settle every slot a runbook needs from the notes and the operator's answers, read "
                   "it back and sign it off")
@@ -299,27 +339,45 @@ def steps(kit, mode, notes_label, has_op, interview=None):
     return out
 
 
+def earlier_pick(conn, notes_sha256, signed_file=None):
+    """The latest `start` event that prepared these same notes (same sha256) or, with a signed
+    interview, the same signed file; None when there is none."""
+    if conn is None:
+        return None
+    for e in reversed(db.events(conn, kind=EVENT, limit=100000)):
+        data = e["data"] if isinstance(e.get("data"), dict) else {}
+        if data.get("notes_sha256") == notes_sha256 or (signed_file and data.get("interview_file") == signed_file):
+            return e
+    return None
+
+
 def run(root, notes_arg, *, kit=None, do_prepare=False, session="cli"):
     text, label = _notes(notes_arg)
     if not text.strip():
         raise StartError("the notes are empty; pass a file or the text itself", code=USAGE)
-    chosen, mode, reason = choose(root, kit)
-    from alpaca import paths
-    has_op = False
+    from alpaca import interview, paths
+    signed = interview.signoff_state(root)
+    kind = notes_kind(root, text, label)
+    if signed["state"] == "signed" and kind[0] == "new":
+        # raw notes the inbox does not hold yet are new input: the interview has not seen them
+        signed = dict(signed, state="stale", why="new notes given here are not in the inbox yet")
+    sha = util.sha256_hex(text)
+    has_op, conn = False, None
     if os.path.isfile(paths.db_path(root)) or do_prepare:
         conn = db.connect(root)
         has_op = conn.execute("SELECT COUNT(*) FROM ops WHERE status='open' AND id != 'op-0'").fetchone()[0] > 0
-    from alpaca import interview
-    signed = interview.signoff_state(root)
+    earlier = earlier_pick(conn, sha, signed["file"] if signed["state"] == "signed" else None)
+    chosen, mode, reason = choose(root, kit, earlier)
     result = {"kit": chosen, "mode": mode, "reason": reason, "notes": label,
-              "notes_sha256": util.sha256_hex(text), "state": state(root),
+              "notes_sha256": sha, "state": state(root),
               "interview": signed["state"],
-              "steps": steps(chosen, mode, label, has_op, signed), "prepared": []}
+              "steps": steps(chosen, mode, label, has_op, signed, kind), "prepared": []}
     if do_prepare:
         result["prepared"] = prepare(root, chosen, mode)
         db.append_event(conn, session=session, actor=INSTRUMENT, kind=EVENT,
                         data={"kit": chosen, "mode": mode, "reason": reason, "notes": label,
                               "notes_sha256": result["notes_sha256"], "interview": result["interview"],
+                              "interview_file": signed["file"] if signed["state"] == "signed" else None,
                               "prepared": result["prepared"]})
         result["state"] = state(root)
     return result

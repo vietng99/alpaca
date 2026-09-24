@@ -130,6 +130,12 @@ def add(root, body, origin, *, by="cli", session="cli"):
     have = find(root, sha)
     if have:
         return {"file": have, "sha256": sha, "bytes": len(body), "new": False}
+    # a kept note given again, front matter and all (`--file input/notes/<note>.md`), is that note
+    parts = split(body)
+    if parts and parts[0].get("sha256") == hashlib.sha256(parts[1]).hexdigest():
+        have = find(root, parts[0]["sha256"])
+        if have:
+            return {"file": have, "sha256": parts[0]["sha256"], "bytes": len(parts[1]), "new": False}
     now = util.now_iso()
     rel = "%s/%s-%s.md" % (NOTES, utc_stamp(now), sha[:12])
     head = "---\ntime: %s\nby: %s\nfrom: %s\nsha256: %s\n---\n" % (

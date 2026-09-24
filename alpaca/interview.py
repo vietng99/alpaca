@@ -18,9 +18,10 @@ A slot with no line is open. `source` is a note path, a round and question (`rou
     alpaca interview signoff --by <name> [--json]
 
 `status` exits 0 only when no slot is open, so a script can gate on it. `signoff` refuses while a
-slot is open, writes `input/interview/signed-<UTC stamp>-<sha12>.md` (the readback and the sha256
-of the log at signing; sha12 is the start of that sha256) and records one `interview-signoff`
-event. A later change to the log makes the sign-off stale. docs/interview.md is the reference.
+slot is open, writes `input/interview/signed-<UTC stamp>-<sha12>.md` (the readback, the sha256 of
+the log at signing, the slot list and the notes it saw; sha12 is the start of that sha256) and
+records one `interview-signoff` event. A later change to the log, a slot the map gains or loses,
+an open slot, or a note kept after it makes the sign-off stale. docs/interview.md is the reference.
 """
 from __future__ import annotations
 
@@ -180,8 +181,22 @@ def append(root, slot, state, value, source, reason=None):
 
 
 # ------------------------------------------------------------------------------ the views
+def _open_slots(root, ids):
+    latest = {}
+    for e in read_log(root):
+        latest[e["slot"]] = e["state"]
+    return [i for i in ids if latest.get(i, "open") == "open"]
+
+
+def _words(value):
+    return [w for w in str(value or "").split() if w != "-"]
+
+
 def signoff_state(root):
-    """{state: needed|signed|stale, file, log_sha256}: the latest signed file against the log."""
+    """{state: needed|signed|stale, file, log_sha256, why}: the latest signed file against the
+    project now. It is stale when the log changed after it, when the slot map gained or lost a
+    slot since (a project slots.yaml, a product upgrade), when a slot is open, or when a note was
+    kept after it (new raw input the interview has not seen); `why` says which."""
     now = hashlib.sha256(log_bytes(root)).hexdigest()
     found = []
     for path in glob.glob(os.path.join(_path(root, DIR), "signed-*.md")):
@@ -193,12 +208,36 @@ def signoff_state(root):
         except ValueError:
             lines = 0
         # the name starts with the UTC stamp; within one second the longer log is the later one
-        found.append((os.path.basename(path)[:23], lines, os.path.basename(path), meta.get("log_sha256", "")))
+        found.append((os.path.basename(path)[:23], lines, os.path.basename(path), meta))
     if not found:
-        return {"state": "needed", "file": None, "log_sha256": None, "log_sha256_now": now}
-    _stamp, _lines, name, signed = max(found)
-    return {"state": "signed" if signed == now else "stale", "file": "%s/%s" % (DIR, name),
-            "log_sha256": signed, "log_sha256_now": now}
+        return {"state": "needed", "file": None, "log_sha256": None, "log_sha256_now": now, "why": ""}
+    _stamp, _lines, name, meta = max(found)
+    signed = meta.get("log_sha256", "")
+    why = []
+    if signed != now:
+        why.append("the log changed after it")
+    try:
+        ids = slot_ids(root)
+        if "slots" in meta:
+            had = _words(meta["slots"])
+            new = [i for i in ids if i not in had]
+            gone = [i for i in had if i not in ids]
+            if new:
+                why.append("the slot map gained %s" % ", ".join(new))
+            if gone:
+                why.append("the slot map lost %s" % ", ".join(gone))
+        still = [i for i in _open_slots(root, ids) if not ("slots" in meta and i not in _words(meta["slots"]))]
+        if still:
+            why.append("open: %s" % ", ".join(still))
+    except InterviewError as exc:
+        why.append("the interview cannot be read: %s" % exc)
+    if "notes" in meta:
+        seen = set(_words(meta["notes"]))
+        later = [n["file"] for n in note.notes(root) if os.path.basename(n["file"]) not in seen]
+        if later:
+            why.append("new notes came after it: %s" % ", ".join(later))
+    return {"state": "stale" if why else "signed", "file": "%s/%s" % (DIR, name),
+            "log_sha256": signed, "log_sha256_now": now, "why": "; ".join(why)}
 
 
 def state(root):
@@ -313,8 +352,10 @@ def signoff(root, by, *, session="cli"):
     sha = rb["log_sha256"]
     now = util.now_iso()
     rel = "%s/signed-%s-%s.md" % (DIR, note.utc_stamp(now), sha[:12])
-    head = "---\nsigned_by: %s\ntime: %s\nlog: %s\nlog_sha256: %s\nlog_lines: %d\n---\n" % (
-        by, now, LOG, sha, rb["log_lines"])
+    ids = [r["slot"] for r in v["slots"]]
+    seen = [os.path.basename(n["file"]) for n in note.notes(root)]
+    head = ("---\nsigned_by: %s\ntime: %s\nlog: %s\nlog_sha256: %s\nlog_lines: %d\nslots: %s\nnotes: %s\n---\n"
+            % (by, now, LOG, sha, rb["log_lines"], " ".join(ids), " ".join(seen) or "-"))
     try:
         note._write_new(_path(root, rel), (head + render_readback(rb)).encode("utf-8"))
     except note.NoteError as exc:
@@ -322,7 +363,7 @@ def signoff(root, by, *, session="cli"):
     conn = db.connect(root)
     db.append_event(conn, session=session, actor=INSTRUMENT, kind=EVENT,
                     data={"file": rel, "by": by, "log_sha256": sha, "log_lines": rb["log_lines"],
-                          "settled": v["settled"], "total": v["total"]})
+                          "settled": v["settled"], "total": v["total"], "slots": ids, "notes": seen})
     return {"file": rel, "log_sha256": sha, "new": True}
 
 
@@ -347,7 +388,7 @@ def _print_status(v):
     elif st["state"] == "signed":
         print("sign-off: signed (%s)" % st["file"])
     else:
-        print("sign-off: stale (%s was signed; the log changed after it, so sign off again)" % st["file"])
+        print("sign-off: stale (%s was signed; %s, so read back and sign off again)" % (st["file"], st["why"]))
 
 
 def _fail(args, code, message):

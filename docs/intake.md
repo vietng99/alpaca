@@ -35,9 +35,13 @@ one `start` event with the pick, the reason and the sha256 of the notes. `--kit 
 `interview`, `steps` and `prepared`.
 
 Raw notes come first to the inbox and the interview. While `input/interview/` holds no signed
-interview (`interview: needed`), or the log changed after the last sign-off (`interview: stale`),
-the steps start with `alpaca note add` and `/alpaca-interview`, which ends with
-`alpaca interview signoff`. With a signed interview (`interview: signed`) the steps start at the
+interview (`interview: needed`), or the sign-off no longer holds (`interview: stale`: the log,
+the slot map or the inbox changed after it, or the notes given to `start` are not in the inbox
+yet), the steps start with `alpaca note add` and `/alpaca-interview`, which ends with
+`alpaca interview signoff`. Notes already in the inbox (a note file, or the same bytes) are not
+added again, and the signed file itself counts as the brief, not as new notes. A rerun with the
+same notes (or the same signed interview) that an earlier `--prepare` started keeps that pick,
+so after the spec was written from them `start` does not call them a change. With a signed interview (`interview: signed`) the steps start at the
 spec, and the spec step takes the signed file as its brief. See `docs/interview.md`.
 
 The pick:

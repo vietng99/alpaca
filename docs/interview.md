@@ -110,11 +110,14 @@ alpaca interview signoff --by <name> [--json]
   - waived, with the reasons;
   - drifted: a slot whose value changed after it was first settled, with both values.
 - `signoff --by <name>` refuses while a slot is open. It writes
-  `input/interview/signed-<UTC stamp>-<sha12>.md`: a front matter with who signed, when, and the
-  sha256 of the log at signing (sha12 is its start), then the readback. It records one
-  `interview-signoff` event. Signing an unchanged log again writes nothing. Any later line in the
-  log makes `status` (and `alpaca start --json`) say the sign-off is `stale`: read back and sign
-  off again.
+  `input/interview/signed-<UTC stamp>-<sha12>.md`: a front matter with who signed, when, the
+  sha256 of the log at signing (sha12 is its start), the slot list and the notes in the inbox,
+  then the readback. It records one `interview-signoff` event. Signing an unchanged log again
+  writes nothing. The sign-off is `stale` (in `status` and in `alpaca start --json`, with the
+  reason) when a later line is in the log, when the slot map gained or lost a slot (a project
+  `slots.yaml`, a product upgrade), when a slot is open, or when a note was kept after it: new raw
+  input the interview has not seen. A note that was there at signing and that no answer cites
+  does not change it. Read back and sign off again.
 
 ## The interview skill: /alpaca-interview
 
