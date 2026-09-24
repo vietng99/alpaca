@@ -54,12 +54,14 @@ plugin/alpaca/
 .claude/skills/alpaca-onboard/
 .claude/skills/alpaca-op/
 .claude/skills/alpaca-from-notes/
+.claude/skills/alpaca-interview/
 .claude/skills/alpaca-runbook-forge/
 docs/manual.html
 docs/projection-ruling.md
 docs/spec-shape.md
 docs/runbook-format.md
 docs/intake.md
+docs/interview.md
 docs/operators.md
 docs/operations-hub.md
 docs/observability-operations.md

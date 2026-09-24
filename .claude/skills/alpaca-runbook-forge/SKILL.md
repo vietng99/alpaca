@@ -18,10 +18,35 @@ with every success criterion (spec-kit `SC-nnn`) or scenario (OpenSpec
 possible: the spec and the repository answer most questions, and a question is only asked when
 neither does.
 
+## Two modes
+
+- **Quiet mode**: the spec is complete and no interview exists, for example a spec a partner
+  sends. Follow the steps below as they are.
+- **Interview mode**: the operator was interviewed and signed the result off, so
+  `input/interview/` holds a signed file (`signed-<stamp>-<sha12>.md`) and
+  `alpaca interview status` (it only reads) shows the sign-off as signed, not stale. A stale
+  sign-off goes back to the interview (`/alpaca-interview`) before any runbook is written. In
+  interview mode the steps below change in four places:
+  - Step 2: take the thresholds, failures, never, owner gates, rollback, knobs and commands from
+    the signed slots first, then from the spec and the repository.
+  - Step 3: ask only for what the signed slots still lack (a waived slot is not asked again), in
+    rounds of up to 4 questions through the interactive question tool, each with 2 to 4 options
+    and the recommended default first; build the next round from the answers.
+  - Step 4: write `runbook: 2`. Put `source: interview:<slot>` on each knob, check, fail case and
+    owner gate whose value came from a slot (`source: spec:<item id>` when it came from the spec,
+    `source: default` for a default you chose). Each failure becomes a fail case with `detect` (a
+    check of a generic type that passes when the failure has happened) and `then` (`retry`,
+    `stop`, `ask-owner`, or `{run: <stage id>}` for a stage marked `recovery: true` that fixes
+    the cause before the stage runs again). Each "never" becomes a check listed in the retry
+    block's `stop_on`, or a `regex-in-file` check with `absent: true`.
+  - Step 5: every edge case (`EC-nnn`) needs cover like a success criterion: the check or the
+    fail case that shows it lists it in `covers`.
+
 ## Before you start
 
 - You need a spec. If the person only has raw notes, write the spec first (spec-kit for a new
-  thing, OpenSpec for a change to something that exists), then come back here.
+  thing, OpenSpec for a change to something that exists; on the Alpaca side, the interview
+  `/alpaca-interview` comes before it), then come back here.
 - Read `docs/runbook-format.md` once. Keep `templates/runbook-example/` open as the model of a
   finished runbook.
 - Forging writes a plan. Do not run the stages, and do not run any `alpaca` verb that writes the
