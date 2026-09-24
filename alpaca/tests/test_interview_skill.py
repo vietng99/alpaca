@@ -72,7 +72,6 @@ def test_the_skill_reads_back_signs_off_and_hands_over():
                  "alpaca interview signoff --by", "/speckit-specify", "/opsx:propose",
                  "EC-001", "SC-", "fail case", "stop_on", "absent"):
         assert must in text, must
-    lower = text.lower()
     assert "done-bar" in text and "thresholds" in text and "edge-cases" in text
 
 
@@ -125,7 +124,7 @@ def test_the_new_texts_ship_as_mechanism_paths():
 def test_the_new_texts_are_plain():
     for path in (SKILL, DOC, os.path.join(REPO, "templates", "interview", "slots.yaml")):
         text = _read(path)
-        assert "—" not in text, path
+        assert chr(0x2014) not in text, path
         assert all(ord(c) < 128 for c in text), path
         low = text.lower()
         for word in BANNED:
