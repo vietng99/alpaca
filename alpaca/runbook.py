@@ -1188,16 +1188,29 @@ def _from_caller(path):
     return util.from_caller(path)
 
 
-def cmd_runbook(args):
-    if getattr(args, "runbook_verb", None) != "check" or not getattr(args, "file", None):
-        print("usage: alpaca runbook check <file> [--spec <path>] [--json]", file=sys.stderr)
-        return verdict.USAGE
-    result = check(_from_caller(args.file), spec_path=_from_caller(args.spec), check_files=not args.no_files)
+def add_check_arguments(parser):
+    """The arguments of `alpaca runbook check`. The partner kit's check_runbook.py carries this
+    function, so both take the same options."""
+    parser.add_argument("file", help="the runbook.yaml to check")
+    parser.add_argument("--spec", default=None, help="a spec-kit spec.md, an OpenSpec spec.md, or an "
+                                                     "OpenSpec folder of <capability>/spec.md (default: "
+                                                     "the runbook's `spec:` field)")
+    parser.add_argument("--no-files", action="store_true", help="skip the plugin script look-ups")
+    parser.add_argument("--json", action="store_true")
+
+
+def run_check(file, spec=None, no_files=False, as_json=False, resolve=None):
+    """Check one runbook, print the result and return its verdict code. This is the body of
+    `alpaca runbook check`, and the partner kit's check_runbook.py carries it unchanged, so both
+    print the same lines and exit with the same code. `resolve` maps a command-line path to the
+    path to read (the verb passes _from_caller; the kit reads paths as given)."""
+    resolve = resolve or (lambda path: path)
+    result = check(resolve(file), spec_path=resolve(spec), check_files=not no_files)
     # show the paths as the person typed them; messages keep the full path that was read
-    result["runbook"] = args.file
-    if args.spec and result.get("spec"):
-        result["spec"]["path"] = args.spec
-    if args.json:
+    result["runbook"] = file
+    if spec and result.get("spec"):
+        result["spec"]["path"] = spec
+    if as_json:
         print(json.dumps({k: result[k] for k in ("verdict", "runbook", "spec", "errors", "warnings",
                                                   "coverage")}, indent=2, sort_keys=True))
     else:
@@ -1205,18 +1218,33 @@ def cmd_runbook(args):
     return result["code"]
 
 
+USAGE_TEXT = ("usage: alpaca runbook check <file> [--spec <path>] [--no-files] [--json]\n"
+              "       alpaca runbook kit [--out <dir>] [--zip]")
+
+
+def cmd_runbook(args):
+    verb = getattr(args, "runbook_verb", None)
+    if verb == "kit":
+        from alpaca import runbook_kit
+        return runbook_kit.cmd_kit(args)
+    if verb != "check" or not getattr(args, "file", None):
+        print(USAGE_TEXT, file=sys.stderr)
+        return verdict.USAGE
+    return run_check(args.file, args.spec, args.no_files, args.json, resolve=_from_caller)
+
+
 def _parser(sub):
     p = sub.add_parser("runbook", help="check a runbook file against the format and its spec "
-                                       "(docs/runbook-format.md); read-only, writes no record")
+                                       "(docs/runbook-format.md); build the partner kit")
     v = p.add_subparsers(dest="runbook_verb")
     c = v.add_parser("check", help="refuse a malformed runbook; with a spec, fail on any uncovered "
-                                   "success criterion or scenario")
-    c.add_argument("file", help="the runbook.yaml to check")
-    c.add_argument("--spec", default=None, help="a spec-kit spec.md, an OpenSpec spec.md, or an OpenSpec "
-                                                "folder of <capability>/spec.md (default: the runbook's "
-                                                "`spec:` field)")
-    c.add_argument("--no-files", action="store_true", help="skip the plugin script look-ups")
-    c.add_argument("--json", action="store_true")
+                                   "success criterion or scenario; read-only, writes no record")
+    add_check_arguments(c)
+    k = v.add_parser("kit", help="build the partner runbook kit (format, checker, schema, agent "
+                                 "instructions, templates, example) from this product's own files")
+    k.add_argument("--out", default=".", help="the folder the kit folder is written into "
+                                              "(default: the current folder)")
+    k.add_argument("--zip", action="store_true", help="also write <kit>.zip next to the kit folder")
 
 
 def _register():

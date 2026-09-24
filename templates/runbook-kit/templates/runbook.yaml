@@ -1,0 +1,64 @@
+# An empty runbook to start from. Copy it next to your spec as runbook.yaml, then replace every
+# placeholder. FORMAT.md in the kit explains each field; example/runbook.yaml is a finished one.
+# Check it with:   python3 <kit>/check_runbook.py runbook.yaml --spec spec.md
+#
+# As shipped it passes against templates/spec.md, which has one success criterion (SC-001).
+
+runbook: 1                      # the format version; keep it
+id: my-service                  # a short name: lower-case letters, digits, '.', '_', '-'
+title: My service               # one line a person reads
+description: >-
+  What this runbook builds, tests and releases, in a sentence or two.
+spec: spec.md                   # the spec this runbook covers, relative to this file
+owner: the service owner        # who approves the owner gates (a role, not a name or a secret)
+
+# Named settings a stage reads as ${NAME}. A threshold from the spec is an owner_only knob, so no
+# retry can loosen it. Delete the list if you need none.
+knobs:
+  - id: WORKERS
+    description: worker processes the tests start
+    type: int                   # int, float, str, bool or enum
+    default: 2
+    min: 1
+    max: 8
+
+# Stages run in the order they are listed; `needs` names earlier stages only.
+stages:
+  - id: build
+    title: Build
+    run: make build             # the command, run by `sh -c` in the runbook folder
+    timeout: 600                # seconds
+    checks:                     # a stage that runs a command needs at least one check
+      - id: build-exit
+        type: exit-code         # exit-code, file-exists, regex-in-file, json-field or plugin
+        expect: 0
+
+  - id: test
+    title: Tests
+    needs: [build]
+    run: make test WORKERS=${WORKERS}
+    outputs:
+      - path: out/test.json
+        what: the test summary
+    checks:
+      - id: tests-pass
+        type: json-field
+        path: out/test.json
+        field: failed
+        op: "=="                # quote the op in YAML
+        value: 0
+        covers: [SC-001]        # the spec items this check shows
+    retry:
+      max_attempts: 2           # total runs, the first one included
+      on_fail: [tests-pass]
+    fails:
+      - id: no-summary
+        when: the test run stops before it writes out/test.json
+
+  # A step only a person may approve: a release, a deploy, anything that spends money.
+  - id: release
+    title: Release
+    needs: [test]
+    owner_gate:
+      approve: the owner reads the test summary and approves the release
+      evidence: [out/test.json]

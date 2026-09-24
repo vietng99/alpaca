@@ -389,6 +389,38 @@ Warnings (`WARN <code> <where>: <message>`) do not change the verdict: `FR-UNCOV
 `SPEC-CLARIFY`, `COVERS-WITHOUT-SPEC` and `SPEC-UNPARSED` (an id found outside the known item
 shapes; it is still counted, see "Linking checks to the spec").
 
+## The partner kit: `alpaca runbook kit`
+
+```
+alpaca runbook kit [--out <dir>] [--zip]
+```
+
+A partner who has none of Alpaca writes a runbook with the partner kit: a folder,
+`alpaca-runbook-kit-v<format>`, that they hand to their own agent (Claude Code, Codex, Cursor,
+any agent that reads `AGENTS.md`, or a chat model). The verb builds it from this product's own
+files, so the kit cannot drift from what `alpaca runbook check` and `alpaca intake` take:
+
+| kit file | what it is |
+|---|---|
+| `check_runbook.py` | this checker in one file: `alpaca/runbook.py` with the verdict contract and the OpenSpec change reader of `alpaca/intake.py` inlined, Python 3.9 or later and PyYAML; the same options, messages, codes and exit status as `alpaca runbook check`, plus 65 when PyYAML is missing. Only the reading side is carried: `evaluate` and `next_attempt`, which run checks, stay out |
+| `runbook.schema.json` | a JSON Schema (draft 2020-12) generated from the field tables of `alpaca/runbook.py`, for editors and other tools; the checker stays the authority |
+| `FORMAT.md` | this document, rewritten for the partner: product paths removed, intake marked as our side |
+| `AGENTS.md`, `CLAUDE.md`, `.claude/skills/runbook-forge/SKILL.md` | the steps of `/alpaca-runbook-forge` for any agent, and as a Claude Code skill |
+| `README.md` | one page for the person: what to hand the agent, how to check, what to send back |
+| `templates/`, `example/` | an empty runbook, a spec template, a note on OpenSpec; the worked example of `templates/runbook-example/` |
+| `VERSION`, `LICENSE`, `SHA256SUMS` | the format version and product commit, the MIT license, a checksum of every file |
+
+`--out` is the folder the kit folder goes in (default: the current folder). A kit folder built
+earlier is replaced; anything else in its place is refused (BLOCKED). `--zip` also writes
+`<kit>.zip`, the same bytes on every build of the same sources. Before it answers PASS the verb
+runs the built `check_runbook.py` on the example and the template, the way a partner runs it.
+
+The kit-only texts live in `templates/runbook-kit/` (its `ABOUT.md` maps every kit file to its
+source). When this document or the forge skill changes so that a rule of the builder
+(`alpaca/runbook_kit.py`) no longer fits, the build stops and names the rule, instead of
+shipping a half rewritten text. Exit status: 0 PASS, 1 FAIL (the kit could not be built from
+these sources), 2 BLOCKED, 64 usage error.
+
 ## What intake takes from a runbook
 
 `alpaca intake <spec> <runbook>` (`docs/intake.md`) builds on pieces Alpaca already has, and the
