@@ -31,7 +31,7 @@ import os
 import re
 import sys
 
-from alpaca import db, util
+from alpaca import db, note, util
 
 INSTRUMENT = "alpaca-interview"
 EVENT = "interview-signoff"
@@ -185,7 +185,6 @@ def signoff_state(root):
     now = hashlib.sha256(log_bytes(root)).hexdigest()
     found = []
     for path in glob.glob(os.path.join(_path(root, DIR), "signed-*.md")):
-        from alpaca import note
         with open(path, "rb") as fh:
             parts = note.split(fh.read())
         meta = parts[0] if parts else {}
@@ -210,7 +209,6 @@ def state(root):
 def view(root):
     """Every slot with its latest state, the open slots, the notes no line cites, the drift and
     the sign-off."""
-    from alpaca import note
     all_slots = slots(root)
     entries = read_log(root)
     latest, first, last_settled = {}, {}, {}
@@ -314,7 +312,6 @@ def signoff(root, by, *, session="cli"):
     rb = readback(root)
     sha = rb["log_sha256"]
     now = util.now_iso()
-    from alpaca import note
     rel = "%s/signed-%s-%s.md" % (DIR, note.utc_stamp(now), sha[:12])
     head = "---\nsigned_by: %s\ntime: %s\nlog: %s\nlog_sha256: %s\nlog_lines: %d\n---\n" % (
         by, now, LOG, sha, rb["log_lines"])
