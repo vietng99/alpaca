@@ -239,8 +239,7 @@ The wiki captures context through the session lifecycle or the enabled collector
 
 [Read the hub guide](docs/operations-hub.md) &middot; [Explore the wiki commands](MANUAL.md#knowledge)
 
-<details>
-<summary><b>Watch the runbook blocks turn green</b></summary>
+### Watch the runbook blocks turn green
 
 With a project profile, the stage map follows the runbook alongside task cards and their evidence. This example moves through a failed check, a retry and an owner check-in before release.
 
@@ -254,8 +253,6 @@ With a project profile, the stage map follows the runbook alongside task cards a
 **Green:** stage passed or task proof sealed. **Blue:** running now. **Red:** failed attempt. **Amber:** owner check-in. Unstarted work stays outlined, and failures remain in the history as the next attempt goes live.
 
 <sub>Simplified illustration with sample states, not a live feed. The stage layout comes from your project profile. [Replay or enlarge](docs/assets/hub.gif) &middot; [Still view](docs/assets/hub.svg) &middot; [Hub guide](docs/operations-hub.md).</sub>
-
-</details>
 
 ## Autonomous progress
 
@@ -288,10 +285,7 @@ A fresh install starts at **L2**. At **L4**, the agent works autonomously inside
 
 Alpaca is domain-neutral. Set a `profile:` in `project.yaml` to bring your own stages and acceptance cards, or use the generic harness as it comes.
 
-### Under the hood
-
-<details>
-<summary><b>Explore the architecture and task lifecycle</b></summary>
+### Architecture
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/architecture-dark.png">
@@ -316,8 +310,6 @@ Alpaca is domain-neutral. Set a `profile:` in `project.yaml` to bring your own s
 | lease ends | The task goes back to `open`. |
 | `done` | Needs a sealed proof report. |
 | `op close` | Blocked while any task is not done. |
-
-</details>
 
 ## Why Alpaca
 
