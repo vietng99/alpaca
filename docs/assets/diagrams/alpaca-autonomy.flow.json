@@ -1,0 +1,422 @@
+{
+  "schema_version": 1,
+  "diagram_type": "flow",
+  "meta": {
+    "title": "Autonomous progress"
+  },
+  "components": [
+    {
+      "id": "read",
+      "label": "Read the next task",
+      "sublabel": "Check scope and dependencies",
+      "pos": [
+        70,
+        95
+      ],
+      "size": [
+        220,
+        76
+      ]
+    },
+    {
+      "id": "claim",
+      "label": "Claim",
+      "sublabel": "Take the task lease",
+      "pos": [
+        350,
+        95
+      ],
+      "size": [
+        220,
+        76
+      ]
+    },
+    {
+      "id": "implement",
+      "label": "Implement",
+      "sublabel": "Work within the agreed scope",
+      "pos": [
+        630,
+        95
+      ],
+      "size": [
+        220,
+        76
+      ]
+    },
+    {
+      "id": "checks",
+      "label": "Run checks",
+      "sublabel": "Save results and evidence",
+      "pos": [
+        910,
+        95
+      ],
+      "size": [
+        220,
+        76
+      ]
+    },
+    {
+      "id": "proof",
+      "label": "Write + seal proof",
+      "sublabel": "Record what changed and why",
+      "pos": [
+        100,
+        285
+      ],
+      "size": [
+        240,
+        76
+      ]
+    },
+    {
+      "id": "close",
+      "label": "Close with proof",
+      "sublabel": "Link the sealed report",
+      "pos": [
+        100,
+        450
+      ],
+      "size": [
+        240,
+        76
+      ]
+    },
+    {
+      "id": "next",
+      "label": "Next authorized task",
+      "sublabel": "Continue within scope",
+      "pos": [
+        100,
+        600
+      ],
+      "size": [
+        240,
+        76
+      ]
+    },
+    {
+      "id": "decision",
+      "label": "Permitted retry?",
+      "sublabel": "Check rules and attempts left",
+      "pos": [
+        460,
+        285
+      ],
+      "size": [
+        350,
+        76
+      ]
+    },
+    {
+      "id": "retry",
+      "label": "Retry",
+      "sublabel": "Allowed settings",
+      "pos": [
+        450,
+        450
+      ],
+      "size": [
+        160,
+        76
+      ]
+    },
+    {
+      "id": "stop",
+      "label": "Stop",
+      "sublabel": "No retry allowed",
+      "pos": [
+        650,
+        450
+      ],
+      "size": [
+        160,
+        76
+      ]
+    },
+    {
+      "id": "blocked",
+      "label": "Report what is needed",
+      "sublabel": "Ask the owner when required",
+      "pos": [
+        900,
+        285
+      ],
+      "size": [
+        240,
+        76
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "read-claim",
+      "from": "read",
+      "to": "claim",
+      "points": [
+        [
+          290,
+          133
+        ],
+        [
+          350,
+          133
+        ]
+      ]
+    },
+    {
+      "id": "claim-implement",
+      "from": "claim",
+      "to": "implement",
+      "points": [
+        [
+          570,
+          133
+        ],
+        [
+          630,
+          133
+        ]
+      ]
+    },
+    {
+      "id": "implement-checks",
+      "from": "implement",
+      "to": "checks",
+      "points": [
+        [
+          850,
+          133
+        ],
+        [
+          910,
+          133
+        ]
+      ]
+    },
+    {
+      "id": "pass",
+      "from": "checks",
+      "to": "proof",
+      "points": [
+        [
+          1020,
+          171
+        ],
+        [
+          1020,
+          230
+        ],
+        [
+          220,
+          230
+        ],
+        [
+          220,
+          285
+        ]
+      ],
+      "label": "PASS",
+      "labelPos": [
+        220,
+        267
+      ]
+    },
+    {
+      "id": "fail",
+      "from": "checks",
+      "to": "decision",
+      "points": [
+        [
+          1020,
+          171
+        ],
+        [
+          1020,
+          230
+        ],
+        [
+          635,
+          230
+        ],
+        [
+          635,
+          285
+        ]
+      ],
+      "label": "FAIL",
+      "labelPos": [
+        635,
+        267
+      ]
+    },
+    {
+      "id": "blocked",
+      "from": "checks",
+      "to": "blocked",
+      "points": [
+        [
+          1020,
+          171
+        ],
+        [
+          1020,
+          285
+        ]
+      ],
+      "label": "BLOCKED / PAUSED",
+      "labelPos": [
+        1020,
+        267
+      ]
+    },
+    {
+      "id": "proof-close",
+      "from": "proof",
+      "to": "close",
+      "points": [
+        [
+          220,
+          361
+        ],
+        [
+          220,
+          450
+        ]
+      ]
+    },
+    {
+      "id": "close-next",
+      "from": "close",
+      "to": "next",
+      "points": [
+        [
+          220,
+          526
+        ],
+        [
+          220,
+          600
+        ]
+      ]
+    },
+    {
+      "id": "next-read",
+      "from": "next",
+      "to": "read",
+      "points": [
+        [
+          100,
+          638
+        ],
+        [
+          35,
+          638
+        ],
+        [
+          35,
+          133
+        ],
+        [
+          70,
+          133
+        ]
+      ],
+      "variant": "dashed"
+    },
+    {
+      "id": "yes",
+      "from": "decision",
+      "to": "retry",
+      "points": [
+        [
+          580,
+          361
+        ],
+        [
+          580,
+          403
+        ],
+        [
+          530,
+          403
+        ],
+        [
+          530,
+          450
+        ]
+      ],
+      "label": "YES",
+      "labelPos": [
+        505,
+        415
+      ]
+    },
+    {
+      "id": "no",
+      "from": "decision",
+      "to": "stop",
+      "points": [
+        [
+          690,
+          361
+        ],
+        [
+          690,
+          403
+        ],
+        [
+          730,
+          403
+        ],
+        [
+          730,
+          450
+        ]
+      ],
+      "label": "NO",
+      "labelPos": [
+        755,
+        415
+      ]
+    },
+    {
+      "id": "retry-implement",
+      "from": "retry",
+      "to": "implement",
+      "points": [
+        [
+          530,
+          526
+        ],
+        [
+          530,
+          700
+        ],
+        [
+          1170,
+          700
+        ],
+        [
+          1170,
+          60
+        ],
+        [
+          740,
+          60
+        ],
+        [
+          740,
+          95
+        ]
+      ],
+      "label": "Retry within limits",
+      "labelPos": [
+        895,
+        690
+      ],
+      "variant": "dashed"
+    }
+  ]
+}

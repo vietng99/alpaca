@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="470" viewBox="0 0 1200 470" text-rendering="geometricPrecision" role="img" aria-labelledby="title">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="470" viewBox="0 0 1200 470" text-rendering="optimizeLegibility" role="img" aria-labelledby="title">
 <title id="title">Task state machine</title>
 <rect width="1200" height="470" fill="#ffffff"/>
 <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8Z" fill="#386cbe"/></marker></defs>

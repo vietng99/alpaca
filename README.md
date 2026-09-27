@@ -198,19 +198,10 @@ Follow stages, task cards and proof through a failure, retry and owner check-in.
 
 Set the scope and autonomy level. The agent takes the next task, runs checks, follows allowed retries and records the result.
 
-```text
-Read the next task -> claim -> implement -> run checks
-                                             |
-                 +---------------------------+--------------------+
-                 |                           |                    |
-                PASS                        FAIL             BLOCKED / PAUSED
-                 |                           |                    |
-          write + seal proof         permitted retry?      report what is needed
-                 |                     yes | no              or ask the owner
-          close with proof         retry <-+  +-> stop
-                 |
-          next authorized task
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/autonomy-dark.png">
+  <img src="docs/assets/autonomy-light.png" alt="Autonomous progress: read the next task, claim, implement and run checks. PASS leads to a sealed proof, closure and the next authorized task. FAIL checks whether a retry is permitted: yes returns to implementation within the limits; no stops. BLOCKED or PAUSED reports what is needed or asks the owner." width="100%">
+</picture>
 
 The next session reads `RESUME.md`, checks for running jobs and existing claims, then resumes from the record.
 
@@ -374,7 +365,7 @@ bin/alpaca-python setup/ship.py --help      # clean, reproducible packaging
 <details>
 <summary><b>Rebuild the README animations</b></summary>
 
-The mascot and terminal artwork live in `docs/assets/banner.svg` and `docs/assets/terminal.svg`. The workflow storyboard lives in `docs/assets/workflow.json`; the renderer produces `workflow.gif` and its static `workflow.svg`. The simplified stage map uses `docs/assets/hub.json`, rendered to `hub.gif` and `hub.svg`. The feature tour uses `docs/assets/hub-tour.json` and the scene layouts in `setup/render_readme_assets.py`, rendered to `hub-tour.gif` and one SVG per feature. The architecture and task-state diagrams use the models in `docs/assets/diagrams/`, rendered to SVG and PNG in both themes. The README uses GIFs for motion, SVGs for reduced motion, and text explanations for every animation.
+The mascot and terminal artwork live in `docs/assets/banner.svg` and `docs/assets/terminal.svg`. The workflow storyboard lives in `docs/assets/workflow.json`; the renderer produces `workflow.gif` and its static `workflow.svg`. The simplified stage map uses `docs/assets/hub.json`, rendered to `hub.gif` and `hub.svg`. The feature tour uses `docs/assets/hub-tour.json` and the scene layouts in `setup/render_readme_assets.py`, rendered to `hub-tour.gif` and one SVG per feature. The architecture, task-state and autonomous-progress diagrams use the models in `docs/assets/diagrams/`, rendered to SVG and PNG in both themes. The README uses GIFs for motion, SVGs for reduced motion, and text explanations for every animation.
 
 Install the optional artwork tools in a separate environment, then render:
 
@@ -386,7 +377,7 @@ python3 -m venv .alpaca/artwork-venv
 .alpaca/artwork-venv/bin/python setup/render_readme_assets.py --only workflow
 # Or the compact hub preview:
 .alpaca/artwork-venv/bin/python setup/render_readme_assets.py --only hub
-# Or the architecture and task diagrams:
+# Or the architecture, task and autonomous-progress diagrams:
 .alpaca/artwork-venv/bin/python setup/render_readme_assets.py --only diagrams
 # Or the seven-part feature tour:
 .alpaca/artwork-venv/bin/python setup/render_readme_assets.py --only hub-tour

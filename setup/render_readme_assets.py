@@ -404,7 +404,7 @@ def hub_tour():
 
 def diagrams():
     """Render the existing diagram models with the README's blue/neutral palette."""
-    for name, model_name in (("architecture", "alpaca.architecture"), ("task-fsm", "alpaca-task.lifecycle")):
+    for name, model_name in (("architecture", "alpaca.architecture"), ("task-fsm", "alpaca-task.lifecycle"), ("autonomy", "alpaca-autonomy.flow")):
         model = json.loads((ASSETS / "diagrams" / (model_name + ".json")).read_text())
         for scheme in ("light", "dark"):
             dark = scheme == "dark"
@@ -412,8 +412,8 @@ def diagrams():
             ink, muted = ("#e6edf3", "#9da7b3") if dark else ("#253041", "#586579")
             blue, tint = ("#79b8ff", "#1b2b44") if dark else ("#386cbe", "#eaf1fc")
             border = "#53667f" if dark else "#b1c1d7"
-            height = 540 if name == "architecture" else 470
-            parts = [f'<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="{height}" viewBox="0 0 1200 {height}" text-rendering="geometricPrecision" role="img" aria-labelledby="title">',
+            height = {"architecture": 540, "task-fsm": 470, "autonomy": 740}[name]
+            parts = [f'<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="{height}" viewBox="0 0 1200 {height}" text-rendering="optimizeLegibility" role="img" aria-labelledby="title">',
                      f'<title id="title">{escape(model["meta"]["title"])}</title>',
                      f'<rect width="1200" height="{height}" fill="{bg}"/>',
                      f'<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8Z" fill="{blue}"/></marker></defs>']
@@ -422,11 +422,12 @@ def diagrams():
                 parts.append(f'<text x="{x}" y="{y}" font-family="Arial, Helvetica, sans-serif" font-size="{size}" font-weight="{700 if bold else 400}" text-anchor="{anchor}" fill="{color}">{escape(value)}</text>')
 
             text(40, 35, model["meta"]["title"], 24, anchor="start", bold=True)
-            if name == "architecture":
+            if name in ("architecture", "autonomy"):
                 nodes = {n["id"]: dict(n, x=n["pos"][0], y=n["pos"][1], w=n["size"][0], h=n["size"][1]) for n in model["components"]}
                 edges = model["connections"]
-                parts.append(f'<rect x="967" y="70" width="199" height="394" rx="12" fill="{tint}" stroke="{border}" stroke-dasharray="5 5"/>')
-                text(1066, 94, "Rebuilt from the record", 13, muted)
+                if name == "architecture":
+                    parts.append(f'<rect x="967" y="70" width="199" height="394" rx="12" fill="{tint}" stroke="{border}" stroke-dasharray="5 5"/>')
+                    text(1066, 94, "Rebuilt from the record", 13, muted)
             else:
                 nodes = {}
                 for n in model["states"]:
@@ -443,7 +444,10 @@ def diagrams():
                 side_a, side_b = edge.get("fromSide", "right"), edge.get("toSide", "left")
                 x1, y1 = port(a, side_a)
                 x2, y2 = port(b, side_b)
-                if edge.get("route") == "top-channel":
+                if "points" in edge:
+                    path = "M" + "L".join(f"{x} {y}" for x, y in edge["points"])
+                    lx, ly = edge.get("labelPos", (0, 0))
+                elif edge.get("route") == "top-channel":
                     channel = 82 if edge["id"] == "t-lease" else 119
                     path = f'M{x1} {y1}V{channel}H{x2}V{y2}'
                     lx, ly = (x1+x2)/2, channel-10
@@ -467,7 +471,7 @@ def diagrams():
                     text(lx, ly, label, 12, muted)
             for node in nodes.values():
                 x, y, w, h = (node[k] for k in ("x", "y", "w", "h"))
-                primary = node["id"] in ("cli", "record", "done", "gate")
+                primary = node["id"] in ("cli", "record", "done", "gate", "checks", "proof", "decision")
                 parts.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="9" fill="{tint if primary else surface}" stroke="{blue if primary else border}" stroke-width="1.5"/>')
                 text(x+w/2, y+h/2-3, node["label"], 16, bold=True)
                 text(x+w/2, y+h/2+19, node["sublabel"], 12, muted)
