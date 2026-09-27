@@ -14,6 +14,7 @@
 
 <p align="center">
   <a href="#quickstart"><b>Quickstart</b></a> &middot;
+  <a href="#see-the-cockpit-in-action"><b>Cockpit demo</b></a> &middot;
   <a href="#from-idea-to-proof"><b>Idea to proof</b></a> &middot;
   <a href="#watch-it-in-the-hub"><b>The hub</b></a> &middot;
   <a href="#autonomous-progress"><b>Autonomous progress</b></a> &middot;
@@ -23,6 +24,30 @@
 # Start with an idea. Finish with proof.
 
 **Alpaca helps Claude Code and Codex plan, run and verify work.** It keeps tasks, decisions and evidence in one local record. Follow progress in the hub and resume across sessions.
+
+## Problems Alpaca solves
+
+| Without a shared work record | With Alpaca |
+| --- | --- |
+| Several agent tabs, no clear owner for each task. | See parallel sessions, task claims and recent activity together. |
+| A new session has to reconstruct what happened. | Resume from recorded work, decisions and the next action. |
+| "Done" has no test results or evidence attached. | Close tasks with sealed reports and linked evidence. |
+| Agents retry without a clear stopping point. | Runbooks define allowed changes, retry limits and owner gates. |
+| Plans, logs and results are scattered. | Trace a requirement through its task, checks and proof. |
+| Switching between Claude Code and Codex splits the context. | Both use the same local project record. |
+
+## See the cockpit in action
+
+Follow two parallel sessions, open the work queue, then inspect a task's contract and proof.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/cockpit-demo.png">
+    <img src="docs/assets/cockpit-demo.gif" alt="Actual Alpaca cockpit with example data: two parallel sessions, current assignment and operation progress, followed by work cards and a task's contract, result and proof link." width="100%">
+  </picture>
+</p>
+
+<sub>Captured from the shipped interface with fictional data and blue presentation colors. [Watch the video](docs/assets/cockpit-demo.webm) &middot; [Full-size screenshot](docs/assets/cockpit-demo.png).</sub>
 
 ## From idea to proof
 
@@ -242,16 +267,6 @@ Alpaca is domain-neutral. Set a `profile:` in `project.yaml` to bring your own s
 | `done` | Needs a sealed proof report. |
 | `op close` | Blocked while any task is not done. |
 
-## Why Alpaca
-
-| When this happens | Alpaca gives you |
-| --- | --- |
-| A task is called done | A sealed report with evidence you can inspect |
-| A new session opens | `RESUME.md` with open work and recent events |
-| You switch between Claude Code and Codex | One shared record in `.alpaca/alpaca.db` |
-| An agent reaches a deployment | A human decision gate at every autodrive level |
-| You prepare a public push | A barrier that checks outgoing objects for protected paths and sealed terms |
-
 ## What's inside
 
 <table>
@@ -382,6 +397,16 @@ python3 -m venv .alpaca/artwork-venv
 # Or the seven-part feature tour:
 .alpaca/artwork-venv/bin/python setup/render_readme_assets.py --only hub-tour
 ```
+
+To recapture the cockpit demo, install Playwright and Pillow in that environment, then run:
+
+```sh
+.alpaca/artwork-venv/bin/pip install playwright Pillow
+.alpaca/artwork-venv/bin/playwright install chromium ffmpeg
+.alpaca/artwork-venv/bin/python setup/capture_readme_cockpit.py
+```
+
+The capture uses the shipped web interface and `setup/readme_cockpit.json` example responses. It reads no live project data and serves every browser request locally.
 
 CairoSVG needs Cairo on the host. The renderer uses system Arial-compatible sans and DejaVu Sans Mono fonts. These tools are only needed to edit the artwork; using Alpaca needs no extra packages.
 
