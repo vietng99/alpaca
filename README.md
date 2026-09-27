@@ -186,11 +186,11 @@ Follow stages, task cards and proof through a failure, retry and owner check-in.
 <p align="center">
   <picture>
     <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/hub.svg">
-    <img src="docs/assets/hub.gif" alt="Simplified hub animation: connected stages turn blue while live and green after passing. Task cards show sealed proof, a failed attempt stays in history, and release pauses for owner approval before it runs." width="100%">
+    <img src="docs/assets/hub.gif" alt="Simplified hub animation: connected stages show bright blue while live and pale blue after passing. Task cards show sealed proof, a failed attempt stays in history, and release pauses for owner approval before it runs." width="100%">
   </picture>
 </p>
 
-**Green:** passed / sealed. **Blue:** running. **Red:** failed. **Amber:** owner check-in. Outlined cards have not started.
+**Pale blue:** passed / sealed. **Bright blue:** running. **Red:** failed. **Amber:** owner check-in. Outlined cards have not started.
 
 <sub>Example data. Stages come from your project profile. [Replay or enlarge](docs/assets/hub.gif) &middot; [Still view](docs/assets/hub.svg) &middot; [Hub guide](docs/operations-hub.md).</sub>
 
@@ -374,7 +374,7 @@ bin/alpaca-python setup/ship.py --help      # clean, reproducible packaging
 <details>
 <summary><b>Rebuild the README animations</b></summary>
 
-The mascot and terminal artwork live in `docs/assets/banner.svg` and `docs/assets/terminal.svg`. The workflow storyboard lives in `docs/assets/workflow.json`; the renderer produces `workflow.gif` and its static `workflow.svg`. The simplified stage map uses `docs/assets/hub.json`, rendered to `hub.gif` and `hub.svg`. The feature tour uses `docs/assets/hub-tour.json` and the scene layouts in `setup/render_readme_assets.py`, rendered to `hub-tour.gif` and one SVG per feature. The README uses GIFs for motion, SVGs for reduced motion, and text explanations for every animation.
+The mascot and terminal artwork live in `docs/assets/banner.svg` and `docs/assets/terminal.svg`. The workflow storyboard lives in `docs/assets/workflow.json`; the renderer produces `workflow.gif` and its static `workflow.svg`. The simplified stage map uses `docs/assets/hub.json`, rendered to `hub.gif` and `hub.svg`. The feature tour uses `docs/assets/hub-tour.json` and the scene layouts in `setup/render_readme_assets.py`, rendered to `hub-tour.gif` and one SVG per feature. The architecture and task-state diagrams use the models in `docs/assets/diagrams/`, rendered to SVG and PNG in both themes. The README uses GIFs for motion, SVGs for reduced motion, and text explanations for every animation.
 
 Install the optional artwork tools in a separate environment, then render:
 
@@ -386,6 +386,8 @@ python3 -m venv .alpaca/artwork-venv
 .alpaca/artwork-venv/bin/python setup/render_readme_assets.py --only workflow
 # Or the compact hub preview:
 .alpaca/artwork-venv/bin/python setup/render_readme_assets.py --only hub
+# Or the architecture and task diagrams:
+.alpaca/artwork-venv/bin/python setup/render_readme_assets.py --only diagrams
 # Or the seven-part feature tour:
 .alpaca/artwork-venv/bin/python setup/render_readme_assets.py --only hub-tour
 ```

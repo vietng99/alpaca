@@ -35,18 +35,18 @@
 <text x="324" y="211" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700" fill="#e6edf3">Keep project context</text>
 <text x="324" y="242" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="400" fill="#9da7b3">Session history with source links.</text>
 <rect x="324" y="274" width="256" height="79" rx="10" fill="#21262d"/>
-<text x="340" y="303" font-family="Arial, Helvetica, sans-serif" font-size="20" font-weight="700" fill="#63c995">Capture</text>
+<text x="340" y="303" font-family="Arial, Helvetica, sans-serif" font-size="20" font-weight="700" fill="#a5c9ff">Capture</text>
 <text x="340" y="330" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#9da7b3">Session events</text>
 <text x="587" y="320" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="400" fill="#9da7b3">&gt;</text>
 <rect x="604" y="274" width="256" height="79" rx="10" fill="#21262d"/>
-<text x="620" y="303" font-family="Arial, Helvetica, sans-serif" font-size="20" font-weight="700" fill="#63c995">Keep</text>
+<text x="620" y="303" font-family="Arial, Helvetica, sans-serif" font-size="20" font-weight="700" fill="#a5c9ff">Keep</text>
 <text x="620" y="330" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#9da7b3">Project-local vault</text>
 <text x="867" y="320" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="400" fill="#9da7b3">&gt;</text>
 <rect x="884" y="274" width="256" height="79" rx="10" fill="#21262d"/>
-<text x="900" y="303" font-family="Arial, Helvetica, sans-serif" font-size="20" font-weight="700" fill="#63c995">Trace</text>
+<text x="900" y="303" font-family="Arial, Helvetica, sans-serif" font-size="20" font-weight="700" fill="#a5c9ff">Trace</text>
 <text x="900" y="330" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="400" fill="#9da7b3">Source pointers</text>
 <rect x="324" y="372" width="816" height="192" rx="10" fill="#161b22" stroke="#30363d"/>
-<text x="344" y="401" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="700" fill="#63c995">OPERATION NOTES / SOURCE-LINKED HISTORY</text>
+<text x="344" y="401" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="700" fill="#a5c9ff">OPERATION NOTES / SOURCE-LINKED HISTORY</text>
 <text x="344" y="438" font-family="Arial, Helvetica, sans-serif" font-size="21" font-weight="600" fill="#e6edf3">Intent: keep redirects below 100 ms</text>
 <text x="344" y="471" font-family="Arial, Helvetica, sans-serif" font-size="20" font-weight="400" fill="#e6edf3">Result: the first latency check failed</text>
 <text x="344" y="503" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="400" fill="#9da7b3">Pointers back to the task and recorded check</text>

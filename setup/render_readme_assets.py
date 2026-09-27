@@ -51,7 +51,7 @@ def banner():
         phase = index / 64 * math.tau
         blink = {27: 0.75, 28: 0.4, 29: 0.1, 30: 0.1, 31: 0.4, 32: 0.75}.get(index, 1)
         frames.append(frame(source, {
-            "eyes": {"transform": f"translate(0 114) scale(1 {blink}) translate(0 -114)"},
+            "eyes": {"transform": f"translate(0 93) scale(1 {blink}) translate(0 -93)"},
             "scarf-tail": {"transform": f"rotate({0.45 * math.sin(phase):.3f} 195 164)"},
         }))
     save("banner", frames, [120, 130] * 32)
@@ -135,7 +135,7 @@ def workflow():
 def hub_svg(story, scene):
     """A small illustrative stage map, using the hub's distinct state colors."""
     states = {
-        "pass": ("#172b26", "#63c995", "PASS", "PROOF SEALED"),
+        "pass": ("#203651", "#a5c9ff", "PASS", "PROOF SEALED"),
         "live": ("#1b2b44", "#79b8ff", "LIVE", "RUNNING NOW"),
         "waiting": ("#161b22", "#6e7681", "NO RUN", "NOT STARTED"),
         "fail": ("#322027", "#ff938a", "FAIL", "FAILED ATTEMPT"),
@@ -143,7 +143,7 @@ def hub_svg(story, scene):
     }
     parts = ['<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620" role="img" aria-labelledby="title desc">',
              '<title id="title">Watch the work move through the hub.</title>',
-             '<desc id="desc">Simplified illustrative hub: five connected stages and their task cards. Blue is live, green is passing work, red is a failed attempt and amber is an owner check-in. Release runs only after an explicit owner approval.</desc>',
+             '<desc id="desc">Simplified illustrative hub: five connected stages and their task cards. Bright blue is live, pale blue is passing work, red is a failed attempt and amber is an owner check-in. Release runs only after an explicit owner approval.</desc>',
              '<rect width="1200" height="620" fill="#0d1117"/>']
 
     def text(x, y, value, size=16, color="#e6edf3", weight="400", mono=False):
@@ -165,7 +165,7 @@ def hub_svg(story, scene):
     text(40, 84, "Watch the work move.", 36, weight="700")
     text(40, 115, "Stages, tasks and proof.", 18, "#9da7b3")
     done = scene["states"].count("pass")
-    text(943, 46, f"{done} / 5 stages passed", 16, "#63c995", "600")
+    text(943, 46, f"{done} / 5 stages passed", 16, "#a5c9ff", "600")
     text(943, 74, scene["owner"], 13, "#e6b768")
     for x, width, label in ((40, 436, "PLAN"), (496, 436, "EXECUTE"), (952, 208, "OWNER GATE")):
         text(x + 7, 151, label, 11, "#9da7b3", "700", True)
@@ -180,7 +180,7 @@ def hub_svg(story, scene):
     parts.append('<rect x="40" y="447" width="1120" height="82" rx="8" fill="#161b22"/>')
     text(58, 478, scene["event"], 17, "#e6edf3", "600")
     text(58, 507, scene["history"], 15, "#9da7b3")
-    for x, color, label in ((40, "#63c995", "PASS / SEALED"), (266, "#79b8ff", "LIVE"), (415, "#ff938a", "FAILED"), (590, "#e6b768", "CHECK-IN"), (791, "#6e7681", "NOT STARTED")):
+    for x, color, label in ((40, "#a5c9ff", "PASS / SEALED"), (266, "#79b8ff", "LIVE"), (415, "#ff938a", "FAILED"), (590, "#e6b768", "CHECK-IN"), (791, "#6e7681", "NOT STARTED")):
         parts.append(f'<circle cx="{x + 5}" cy="564" r="5" fill="{color}"/>')
         text(x + 19, 568, label, 12, "#9da7b3", mono=True)
     text(40, 603, "Example data. Stages come from your project profile.", 12, "#9da7b3")
@@ -202,7 +202,7 @@ def hub():
 
 def hub_tour_svg(story, scene):
     """A feature tour with invented examples, not a reproduction of private hub data."""
-    ink, muted, green, blue = "#e6edf3", "#9da7b3", "#63c995", "#79b8ff"
+    ink, muted, complete, blue = "#e6edf3", "#9da7b3", "#a5c9ff", "#79b8ff"
     parts = ['<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="740" viewBox="0 0 1200 740" role="img" aria-labelledby="title desc">',
              f'<title id="title">Alpaca hub tour: {escape(scene["label"])}</title>',
              f'<desc id="desc">Simplified feature illustration with invented sample data. {escape(scene["subtitle"])} {escape(scene["takeaway"])}</desc>']
@@ -244,14 +244,14 @@ def hub_tour_svg(story, scene):
     text(324, 242, scene["subtitle"], 18, muted)
     key = scene["id"]
     if key == "sessions":
-        dot(330, 282, green)
-        text(345, 288, "2 active project sessions", 17, green, "600")
+        dot(330, 282, complete)
+        text(345, 288, "2 active project sessions", 17, complete, "600")
         text(900, 288, "1 idle in recent window", 16, muted)
         cards = [(324, "Implementer", "3s ago / Edit", "03", "Build redirect handler", "Keep redirects below 100 ms.", "Implement the agreed contract."),
                  (742, "Reviewer", "9s ago / Shell", "04", "Check edge cases", "Check timeout and retry cases.", "Record the failures and proof.")]
         for x, title, beat, number, task, ask1, ask2 in cards:
             rect(x, 310, 398, 242, "#0d1117", "#30363d")
-            dot(x + 20, 336, green)
+            dot(x + 20, 336, complete)
             text(x + 35, 343, title, 22, weight="600")
             text(x + 18, 372, "Heartbeat " + beat, 15, muted)
             line(x + 18, 386, x + 380, 386)
@@ -261,16 +261,16 @@ def hub_tour_svg(story, scene):
             text(x + 18, 502, ask1, 17)
             text(x + 18, 527, ask2, 17)
         text(324, 584, "Open a session to read its conversation.", 17, muted)
-        text(324, 614, "Agent crew: captured parent and child sessions.", 16, green)
+        text(324, 614, "Agent crew: captured parent and child sessions.", 16, complete)
     elif key == "work":
-        text(324, 285, "3 sealed", 16, green, "700")
+        text(324, 285, "3 sealed", 16, complete, "700")
         text(462, 285, "1 running", 16, blue, "700")
         text(613, 285, "1 open", 16, muted)
         text(1030, 285, "5 tasks", 16, muted)
         rect(324, 301, 816, 10, "#30363d", radius=5)
-        rect(324, 301, 490, 10, green, radius=5)
+        rect(324, 301, 490, 10, complete, radius=5)
         rect(819, 301, 158, 10, blue, radius=0)
-        rows = [("03", "Cover edge cases", "Done", "Result recorded / proof linked", green, "#172b26"),
+        rows = [("03", "Cover edge cases", "Done", "Result recorded / proof linked", complete, "#203651"),
                 ("04", "Check redirect latency", "Doing", "Current attempt / method recorded", blue, "#1b2b44"),
                 ("05", "Release + health check", "Open", "Owner gate / not started", muted, "#21262d")]
         for i, (number, title, status, detail, color, fill) in enumerate(rows):
@@ -281,7 +281,7 @@ def hub_tour_svg(story, scene):
             text(384, y + 29, title, 21, weight="600")
             text(384, y + 53, detail, 15, muted)
             text(1047, y + 30, status, 17, color, "700")
-        text(324, 605, "Open the report  >  inspect evidence  >  reproduce the result", 17, green)
+        text(324, 605, "Open the report  >  inspect evidence  >  reproduce the result", 17, complete)
     elif key == "runs":
         for x, label in ((324, "COMPONENT"), (518, "LINT"), (735, "TEST"), (952, "BUILD")):
             text(x, 284, label, 12, muted, "700", True)
@@ -290,7 +290,7 @@ def hub_tour_svg(story, scene):
             text(324, y + 31, name, 19, weight="600")
             for j, state in enumerate(states):
                 x = 500 + j * 217
-                color, fill = (green, "#172b26") if state == "PASS" else (blue, "#1b2b44") if state == "LIVE" else (muted, "#21262d")
+                color, fill = (complete, "#203651") if state == "PASS" else (blue, "#1b2b44") if state == "LIVE" else (muted, "#21262d")
                 rect(x, y, 198, 48, fill, color if state != "NO RUN" else "#30363d", 7)
                 text(x + 18, y + 30, state, 17, color, "600")
         rect(324, 510, 816, 100, "#1b2b44")
@@ -334,12 +334,12 @@ def hub_tour_svg(story, scene):
         for i, (title, detail) in enumerate((("Capture", "Session events"), ("Keep", "Project-local vault"), ("Trace", "Source pointers"))):
             x = 324 + i * 280
             rect(x, 274, 256, 79, "#21262d")
-            text(x + 16, 303, title, 20, green, "700")
+            text(x + 16, 303, title, 20, complete, "700")
             text(x + 16, 330, detail, 16, muted)
             if i < 2:
                 text(x + 263, 320, ">", 18, muted)
         rect(324, 372, 816, 192, "#161b22", "#30363d")
-        text(344, 401, "OPERATION NOTES / SOURCE-LINKED HISTORY", 12, green, "700", True)
+        text(344, 401, "OPERATION NOTES / SOURCE-LINKED HISTORY", 12, complete, "700", True)
         text(344, 438, "Intent: keep redirects below 100 ms", 21, weight="600")
         text(344, 471, "Result: the first latency check failed", 20)
         text(344, 503, "Pointers back to the task and recorded check", 17, muted)
@@ -393,19 +393,96 @@ def hub_tour():
     for i, picture in enumerate(frames):
         palette_source.paste(picture.resize((300, 185)), (i * 300, 0))
     # Panels occupy most pixels. Give small status marks enough palette weight
-    # to retain their green, blue and amber instead of collapsing to gray.
-    accents = ["#63c995", "#79b8ff", "#e6b768", "#ff938a", "#e6b768",
-               "#e6edf3", "#9da7b3", "#0d1117", "#172b26", "#1b2b44"]
+    # to retain their pale blue, bright blue and amber instead of collapsing to gray.
+    accents = ["#a5c9ff", "#79b8ff", "#e6b768", "#ff938a", "#e6b768",
+               "#e6edf3", "#9da7b3", "#0d1117", "#203651", "#1b2b44"]
     width = palette_source.width // len(accents)
     for i, color in enumerate(accents):
         palette_source.paste(color, (i * width, 185, (i + 1) * width, 245))
     save("hub-tour", frames, [s["duration"] for s in story["scenes"]], palette_source)
 
 
+def diagrams():
+    """Render the existing diagram models with the README's blue/neutral palette."""
+    for name, model_name in (("architecture", "alpaca.architecture"), ("task-fsm", "alpaca-task.lifecycle")):
+        model = json.loads((ASSETS / "diagrams" / (model_name + ".json")).read_text())
+        for scheme in ("light", "dark"):
+            dark = scheme == "dark"
+            bg, surface = ("#0d1117", "#161b22") if dark else ("#ffffff", "#f3f5f8")
+            ink, muted = ("#e6edf3", "#9da7b3") if dark else ("#253041", "#586579")
+            blue, tint = ("#79b8ff", "#1b2b44") if dark else ("#386cbe", "#eaf1fc")
+            border = "#53667f" if dark else "#b1c1d7"
+            height = 540 if name == "architecture" else 470
+            parts = [f'<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="{height}" viewBox="0 0 1200 {height}" text-rendering="geometricPrecision" role="img" aria-labelledby="title">',
+                     f'<title id="title">{escape(model["meta"]["title"])}</title>',
+                     f'<rect width="1200" height="{height}" fill="{bg}"/>',
+                     f'<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8Z" fill="{blue}"/></marker></defs>']
+
+            def text(x, y, value, size=14, color=ink, anchor="middle", bold=False):
+                parts.append(f'<text x="{x}" y="{y}" font-family="Arial, Helvetica, sans-serif" font-size="{size}" font-weight="{700 if bold else 400}" text-anchor="{anchor}" fill="{color}">{escape(value)}</text>')
+
+            text(40, 35, model["meta"]["title"], 24, anchor="start", bold=True)
+            if name == "architecture":
+                nodes = {n["id"]: dict(n, x=n["pos"][0], y=n["pos"][1], w=n["size"][0], h=n["size"][1]) for n in model["components"]}
+                edges = model["connections"]
+                parts.append(f'<rect x="967" y="70" width="199" height="394" rx="12" fill="{tint}" stroke="{border}" stroke-dasharray="5 5"/>')
+                text(1066, 94, "Rebuilt from the record", 13, muted)
+            else:
+                nodes = {}
+                for n in model["states"]:
+                    x, y = (40 + n["col"] * 220, 170) if n["lane"] == "main" else (420, 340) if n["id"] == "blocked" else (920, 340)
+                    nodes[n["id"]] = dict(n, x=x, y=y, w=180, h=76)
+                edges = model["transitions"]
+
+            def port(node, side):
+                x, y, w, h = (node[k] for k in ("x", "y", "w", "h"))
+                return {"left": (x, y+h/2), "right": (x+w, y+h/2), "top": (x+w/2, y), "bottom": (x+w/2, y+h)}[side]
+
+            for edge in edges:
+                a, b = nodes[edge["from"]], nodes[edge["to"]]
+                side_a, side_b = edge.get("fromSide", "right"), edge.get("toSide", "left")
+                x1, y1 = port(a, side_a)
+                x2, y2 = port(b, side_b)
+                if edge.get("route") == "top-channel":
+                    channel = 82 if edge["id"] == "t-lease" else 119
+                    path = f'M{x1} {y1}V{channel}H{x2}V{y2}'
+                    lx, ly = (x1+x2)/2, channel-10
+                elif side_a in ("top", "bottom"):
+                    mid = (y1+y2)/2
+                    path = f'M{x1} {y1}V{mid}H{x2}V{y2}'
+                    lx, ly = (x1+x2)/2+27, mid-9
+                elif side_a == "left" and side_b == "bottom":
+                    path = f'M{x1} {y1}H{x2}V{y2}'
+                    lx, ly = x2, y1+23
+                else:
+                    mid = (x1+x2)/2
+                    path = f'M{x1} {y1}H{mid}V{y2}H{x2}'
+                    lx, ly = mid, (y1+y2)/2-12
+                dashed = ' stroke-dasharray="5 5"' if edge.get("variant") in ("dashed", "security") else ''
+                parts.append(f'<path d="{path}" fill="none" stroke="{blue}" stroke-width="1.8"{dashed} marker-end="url(#arrow)"/>')
+                if edge.get("label"):
+                    label = edge["label"]
+                    width = len(label)*7+12
+                    parts.append(f'<rect x="{lx-width/2}" y="{ly-13}" width="{width}" height="18" fill="{bg}"/>')
+                    text(lx, ly, label, 12, muted)
+            for node in nodes.values():
+                x, y, w, h = (node[k] for k in ("x", "y", "w", "h"))
+                primary = node["id"] in ("cli", "record", "done", "gate")
+                parts.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="9" fill="{tint if primary else surface}" stroke="{blue if primary else border}" stroke-width="1.5"/>')
+                text(x+w/2, y+h/2-3, node["label"], 16, bold=True)
+                text(x+w/2, y+h/2+19, node["sublabel"], 12, muted)
+            parts.append('</svg>')
+            source = "\n".join(parts) + "\n"
+            stem = f'{name}-{scheme}'
+            (ASSETS / (stem + ".svg")).write_text(source)
+            cairosvg.svg2png(bytestring=source.encode(), write_to=str(ASSETS / (stem + ".png")), scale=2)
+            print(f'{stem}.png: {len(nodes)} nodes, {len(edges)} connections')
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--only", choices=("banner", "terminal", "workflow", "hub", "hub-tour"))
+    parser.add_argument("--only", choices=("banner", "terminal", "workflow", "hub", "hub-tour", "diagrams"))
     selected = parser.parse_args().only
-    for name, render in (("banner", banner), ("terminal", terminal), ("workflow", workflow), ("hub", hub), ("hub-tour", hub_tour)):
+    for name, render in (("banner", banner), ("terminal", terminal), ("workflow", workflow), ("hub", hub), ("hub-tour", hub_tour), ("diagrams", diagrams)):
         if selected is None or selected == name:
             render()
