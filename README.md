@@ -6,10 +6,10 @@
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-35745a?style=flat-square"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-586579?style=flat-square"></a>
   <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-4d6a7a?style=flat-square&amp;logo=python&amp;logoColor=white">
-  <img alt="Claude Code: native hooks" src="https://img.shields.io/badge/Claude_Code-native_hooks-b38340?style=flat-square">
-  <img alt="Codex: AGENTS.md" src="https://img.shields.io/badge/Codex-AGENTS.md-355944?style=flat-square">
+  <img alt="Claude Code: native hooks" src="https://img.shields.io/badge/Claude_Code-native_hooks-586579?style=flat-square">
+  <img alt="Codex: AGENTS.md" src="https://img.shields.io/badge/Codex-AGENTS.md-386cbe?style=flat-square">
 </p>
 
 <p align="center">
@@ -22,11 +22,11 @@
 
 # Start with an idea. Finish with proof.
 
-**Alpaca is an engineering harness for Claude Code and Codex.** Your agent takes a rough idea through a spec, a runbook, tracked work and checked results. Alpaca keeps the artifacts, decisions and evidence in one local record, so progress survives the session and completion can be inspected.
+**Alpaca helps Claude Code and Codex plan, run and verify work.** It keeps tasks, decisions and evidence in one local record. Follow progress in the hub and resume across sessions.
 
 ## From idea to proof
 
-**Raw idea &rarr; spec &rarr; runbook &rarr; checklist &rarr; agent work &rarr; proof report.** Each step leaves an artifact the next step can use. Follow one requirement through the whole loop:
+**Raw idea &rarr; spec &rarr; runbook &rarr; checklist &rarr; agent work &rarr; proof report.**
 
 <p align="center">
   <picture>
@@ -35,109 +35,49 @@
   </picture>
 </p>
 
-<sub>Animated walkthrough of the bundled link-shortener example. Results are illustrative, not benchmark measurements. [Replay or enlarge](docs/assets/workflow.gif) &middot; [View the still](docs/assets/workflow.svg).</sub>
+<sub>Link-shortener example with illustrative results. [Replay or enlarge](docs/assets/workflow.gif) &middot; [View the still](docs/assets/workflow.svg).</sub>
 
-### 1. Raw idea: keep the intent, find the gaps
+| Step | What happens |
+| --- | --- |
+| **1. Idea** | Save the notes. Clarify the goal, constraints and owner decisions. |
+| **2. Spec** | Write testable requirements. Use spec-kit for new work or OpenSpec for changes. |
+| **3. Runbook** | Define commands, dependencies, checks, retry limits and owner gates. |
+| **4. Checklist** | Intake creates requirement rows, task contracts and profile stages. |
+| **5. Agent work** | Claim a task, implement, run checks and retry within the approved limits. |
+| **6. Proof** | Write and seal the report. Close the task with its proof, then continue. |
 
-> "Build a small link shortener. Keep links across restarts, make redirects fast, and let a teammate set it up easily."
-
-Start with notes, a rough brief, or a pasted idea. The agent saves the original words and clarifies the missing constraints: who uses it, what success means, and which decisions belong to you.
+Start from notes:
 
 ```sh
 bin/alpaca start notes/link-shortener.md --prepare
 ```
 
-`start` selects and prepares the bundled spec tools and prints the next steps. The agent follows that flow. In Claude Code, `/alpaca-from-notes` walks the preparation, spec, runbook and intake steps; Codex can follow the same printed steps and project instructions.
+This prepares the spec tools and prints the next steps for the agent. Claude Code also has `/alpaca-from-notes`.
 
-### 2. Spec: turn "fast" into something testable
+### One requirement, end to end
 
-For a new project, **spec-kit** turns the idea into user stories, functional requirements and measurable success criteria. **OpenSpec** handles changes to an existing specification. The agent asks the clarification questions before carrying a vague requirement into the plan.
+The [example spec](templates/runbook-example/spec.md) requires **SC-002: redirect p95 <= 50 ms at 200 requests/second**. Its [runbook](templates/runbook-example/runbook.yaml) maps that requirement to a load test and `out/load.json`.
 
-Our example becomes:
-
-> **SC-002:** A redirect answers within 50 ms at the 95th percentile under 200 requests per second.
-
-That ID stays with the work. You can trace `SC-002` from the [spec](templates/runbook-example/spec.md) to its checks, checklist row, results and proof.
-
-### 3. Runbook: decide how the work will be done and checked
-
-The agent forges `runbook.yaml` from the spec. It names the stages, dependencies, commands, expected outputs, pass checks, permitted retries and owner gates. Each check names the requirements it covers.
-
-For `SC-002`, the [worked runbook](templates/runbook-example/runbook.yaml) includes this check:
-
-```yaml
-- id: redirect-p95
-  type: json-field
-  path: out/load.json
-  field: redirect.p95_ms
-  op: "<="
-  value: ${P95_LIMIT_MS}
-  covers: [SC-002]
-```
-
-The same runbook sets the latency limit to **50 ms**, the load to **200 requests/second**, and marks both as owner-only settings. It permits up to **three load-test attempts**, increasing `WORKERS` by two when the latency check fails. A wrong redirect status ends the attempt sequence.
-
-```sh
-bin/alpaca runbook check path/to/runbook.yaml --spec path/to/spec.md
-```
-
-Coverage must pass before intake: every required criterion or scenario needs a check or an owner gate. A planned check describes how to prove a requirement; the agent still has to run the work and collect the result.
-
-### 4. Checklist: turn the runbook into work the agent can claim
-
-```sh
-# With an op open, inspect the plan before recording it.
-bin/alpaca intake path/to/spec.md path/to/runbook.yaml --dry-run
-bin/alpaca intake path/to/spec.md path/to/runbook.yaml
-```
-
-Intake generates three connected pieces:
-
-| Artifact | What it gives the agent |
-| --- | --- |
-| **Checklist rows** | One row per required success criterion or scenario, linked to the checks that cover it |
-| **Task contracts** | Work for each command stage and owner gate, with inputs, expected outputs, a done bar and known failures |
-| **Profile stages** | The stages the project uses to organize execution |
-
-`SC-002` now has a checklist row and a load-test task with a concrete result to produce. You can inspect both with `bin/alpaca board show --op <op>` and `bin/alpaca task list --op <op>`.
-
-When the spec changes, run intake again. It keeps unchanged rows and their verdicts, supersedes affected rows, adds new ones, and withdraws removed requirements under the applicable gates. The previous record stays available.
-
-### 5. Agent work: claim, implement, check, recover
-
-The agent reads a task contract, claims the task, follows the runbook's dependencies, implements the work, and runs the commands and checks. Its autonomy follows the level and scope you authorized.
-
-Here is the retry path in the animation, using illustrative results:
-
-| Attempt | Result | What happens next |
+| Attempt | Example result | Next action |
 | --- | --- | --- |
-| 1: two workers | 68.4 ms p95, **FAIL** | Record the failure; apply the permitted worker-count change |
-| 2: four workers | 41.2 ms p95, **PASS** | Keep the evidence and write the report |
-| Wrong redirect status, missing inputs, or exhausted retries | No completed result | Stop that path and surface the failure or blocker |
+| 1: two workers | 68.4 ms, **FAIL** | Save the failure. Apply the permitted retry. |
+| 2: four workers | 41.2 ms, **PASS** | Save the evidence. Write the report. |
 
-The requirement stays at 50 ms and 200 requests/second throughout. A retry changes only settings the runbook permits. A passing check supplies evidence; closing the work also needs a sealed report.
+The runbook allows three attempts and worker-count changes. The latency limit and request rate stay fixed. Wrong status codes, missing inputs or exhausted retries stop the path.
 
-### 6. Proof report: make the result inspectable
+### What the proof contains
 
-The agent writes the report an engineer would hand over:
+Every report covers **what changed, how, where, the result, issues, reproduction steps and evidence**. Failed attempts stay in the report.
 
-| Section | What the reader can check |
-| --- | --- |
-| **What I did** | The requirement addressed and the change made |
-| **How I did it** | The approach, commands and settings used |
-| **Where** | The files, stages and outputs involved |
-| **Result** | Observed values against the original acceptance criteria |
-| **Deviations and issues** | Failed attempts, blockers, departures and how they were handled |
-| **How to reproduce** | The steps someone else can run |
-| **Evidence** | Resolvable pointers to results, logs, artifacts and record events |
+Sealing checks completeness and hashes the evidence. Tests and review establish correctness. Closing a task requires a report sealed for that task.
 
-Alpaca fills the report header and mechanical appendix from the record. Sealing checks the written sections, resolves and hashes the evidence, preserves local evidence copies, and records the seal. It checks that the report is complete and its evidence is intact; the actual tests and review establish whether the work meets the requirement.
+Checklist rows can pass through recorded checks or owner decisions; manual closure requires a sealed report for the row. Closing a task does not automatically close its requirements.
 
-**Closing a task, or manually moving a checklist row to done, requires a report sealed for that ID.** Checklist rows can also be discharged through their recorded check results or owner decisions. A task's proof does not automatically discharge every requirement it touches. The next authorized piece of work can then continue, with the results and remaining obligations available to the next session.
+[Full runbook example](templates/runbook-example/runbook.yaml) &middot; [Spec-to-checklist guide](docs/intake.md) &middot; [Proof commands](MANUAL.md)
 
 ## See the proof gate
 
-An agent tries to close a task. The gate asks for proof. Once the agent writes and seals its report, the task can close.
+A task can close only with a sealed proof report.
 
 <p align="center">
   <picture>
@@ -198,7 +138,7 @@ Bootstrap creates a local Python environment inside the copy. It changes no glob
 
 ## Watch it in the hub
 
-The hub makes autonomous work visible: **who is doing what, what is running, and what proves the result.** Watch parallel project sessions side by side, follow live jobs, then open the tasks, logs and conversations behind the work. Alongside the hub, a built-in project wiki keeps captured context available to your agents.
+**See who is working, what is running and what passed.** Open tasks, logs, proof and captured conversations from one hub.
 
 <p align="center">
   <picture>
@@ -207,21 +147,21 @@ The hub makes autonomous work visible: **who is doing what, what is running, and
   </picture>
 </p>
 
-<sub>Simplified illustrations with invented examples, not a live feed or exact UI screenshots. [Replay or enlarge](docs/assets/hub-tour.gif). Each feature below links to its still view.</sub>
+<sub>Simplified views with example data. [Replay or enlarge](docs/assets/hub-tour.gif). Each feature below links to its still view.</sub>
 
 | Explore | What you can inspect |
 | --- | --- |
-| **[Parallel sessions & agents](docs/assets/hub-tour.svg)** | Active project sessions side by side, with task claims, heartbeat, latest recorded tool and latest captured request. Unclaimed work is flagged. Open a session's conversation or its **Agent crew** view to inspect captured parent and child agents separately. |
-| **[Work & evidence](docs/assets/hub-tour-work.svg)** | Task progress, contracts, completing sessions, methods, results and linked proof reports. Acceptance outcomes have their own current checks and evidence. |
-| **[Runs & logs](docs/assets/hub-tour-runs.svg)** | Profile-defined stages, recorded attempts and live output. Follow a running job, pause scrolling, filter lines, or revisit the log behind a verdict. A past pass does not certify today's inputs. |
-| **[Live job monitor](docs/assets/hub-tour-live.svg)** | One tile per running profile job, with logs, flagged errors and warnings, and sampled process memory. Tiles follow stage changes. Choose a layout, focus one job, pause following, or pin finished jobs for comparison. |
-| **[Log analysis](docs/assets/hub-tour-logs.svg)** | Flagged errors and warnings, search, phase markers and jump-to-line navigation. Profiles can add agent reviews whose findings quote the log, with engineer confirmation or dispute kept visible. |
-| **[Passive project wiki](docs/assets/hub-tour-wiki.svg)** | Session events and captured transcript summaries become project-local raw notes. Sorting links intents and results back to their sources; unmatched work stays visible. Agents can revisit that history across sessions. |
-| **[Session analytics](docs/assets/hub-tour-analytics.svg)** | Measured tokens, estimated API costs where rates are known, context growth, tool calls, hooks and the visible conversation. Inspect individual responses, follow chart points to their source, or export the response ledger. Capture gaps stay explicit. |
+| **[Parallel sessions & agents](docs/assets/hub-tour.svg)** | Active sessions, task claims and recent activity. Open captured conversations and parent/child agent views. |
+| **[Work & evidence](docs/assets/hub-tour-work.svg)** | Tasks in a timeline, cards or table. Open results and linked proof. |
+| **[Runs & logs](docs/assets/hub-tour-runs.svg)** | Stage status, recorded attempts and live logs. Revisit any captured run. |
+| **[Live job monitor](docs/assets/hub-tour-live.svg)** | Side-by-side job logs, errors, warnings and memory readings. Focus, pause or pin a tile. |
+| **[Log analysis](docs/assets/hub-tour-logs.svg)** | Search errors and warnings, jump to source lines, and inspect profile-provided agent reviews. |
+| **[Passive project wiki](docs/assets/hub-tour-wiki.svg)** | Captured session notes, intents and results with links to their sources. |
+| **[Session analytics](docs/assets/hub-tour-analytics.svg)** | Tokens, estimated costs, context growth, tools and conversations. Trace measurements to source records. |
 
-Session cards reflect recorded activity in this project. Child-agent visibility depends on captured sources; missing or incomplete capture is shown explicitly. A task claim alone does not establish that an agent process is still running.
+Session cards show recorded activity. Agent visibility depends on capture; a task claim alone does not prove the process is running.
 
-The wiki captures context through the session lifecycle or the enabled collector. Capturing a note does not admit it as a trusted lesson. The shipped template uses deterministic providers with LLM extraction off; adding LLM extraction requires a custom provider adapter.
+Wiki capture runs through session lifecycle commands or the enabled collector. Raw notes need review before becoming trusted lessons. LLM extraction is off by default and requires a custom provider adapter.
 
 <details>
 <summary><b>Also in the hub: history, handoffs, reports and host health</b></summary>
@@ -239,9 +179,9 @@ The wiki captures context through the session lifecycle or the enabled collector
 
 [Read the hub guide](docs/operations-hub.md) &middot; [Explore the wiki commands](MANUAL.md#knowledge)
 
-### Watch the runbook blocks turn green
+### Follow the runbook
 
-With a project profile, the stage map follows the runbook alongside task cards and their evidence. This example moves through a failed check, a retry and an owner check-in before release.
+Follow stages, task cards and proof through a failure, retry and owner check-in.
 
 <p align="center">
   <picture>
@@ -250,13 +190,13 @@ With a project profile, the stage map follows the runbook alongside task cards a
   </picture>
 </p>
 
-**Green:** stage passed or task proof sealed. **Blue:** running now. **Red:** failed attempt. **Amber:** owner check-in. Unstarted work stays outlined, and failures remain in the history as the next attempt goes live.
+**Green:** passed / sealed. **Blue:** running. **Red:** failed. **Amber:** owner check-in. Outlined cards have not started.
 
-<sub>Simplified illustration with sample states, not a live feed. The stage layout comes from your project profile. [Replay or enlarge](docs/assets/hub.gif) &middot; [Still view](docs/assets/hub.svg) &middot; [Hub guide](docs/operations-hub.md).</sub>
+<sub>Example data. Stages come from your project profile. [Replay or enlarge](docs/assets/hub.gif) &middot; [Still view](docs/assets/hub.svg) &middot; [Hub guide](docs/operations-hub.md).</sub>
 
 ## Autonomous progress
 
-Once you have set the scope and authorized a level, the agent drives the work through the board. It reads the next contract, checks dependencies, acts, evaluates the result, follows permitted recovery steps, and records what happened. Alpaca supplies the record, contracts and gates that keep each step inspectable.
+Set the scope and autonomy level. The agent takes the next task, runs checks, follows allowed retries and records the result.
 
 ```text
 Read the next task -> claim -> implement -> run checks
@@ -272,7 +212,7 @@ Read the next task -> claim -> implement -> run checks
           next authorized task
 ```
 
-Progress is visible in the board, task list, session history and `RESUME.md`. On the next session, the agent reads that state, checks for a running job or an existing claim, and resumes from the recorded next action.
+The next session reads `RESUME.md`, checks for running jobs and existing claims, then resumes from the record.
 
 | The agent can continue when... | It hands control back when... |
 | --- | --- |
