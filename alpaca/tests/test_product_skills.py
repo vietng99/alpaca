@@ -89,7 +89,9 @@ def test_no_file_points_at_the_old_skill_paths():
     stale = re.compile(r"(?<![./\w])skills/alpaca-|alpaca-intake/|skill alpaca-intake|`alpaca-intake`")
     hits = []
     for rel in listed.stdout.split("\n"):
-        if not rel or rel.startswith(("vendor/", "plugin/")) or rel == "MANIFEST.json":
+        # .alpaca/ (the record) and docs/alpaca-bootstrap/ (the private build history) quote the
+        # old paths on purpose as evidence; a private tree tracks them and neither ships.
+        if not rel or rel.startswith(("vendor/", "plugin/", ".alpaca/", "docs/alpaca-bootstrap/")) or rel == "MANIFEST.json":
             continue
         path = os.path.join(REPO, rel)
         try:

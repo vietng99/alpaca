@@ -10,7 +10,7 @@ The sign-in page shows a rotating world globe (coastlines only: no place markers
 
 ## Reading the work
 
-- Cockpit is the live engineering view: current assignment, operation completion ring, the current stage map when the project's profile supplies stages, active runs, recent completions, next action, and meaningful activity. Unbound instrument diagnostics stay in Activity (Work and checks / All recorded events), while the cockpit shows task progress and any bound profile results and capture failures. It refreshes every 15 seconds when visible; Pause and Focus view support a stable display. Refresh defers while a control in the main view or navigation has focus. Assignments are not evidence of a running process. Task percentages show counts, not estimated time remaining.
+- Cockpit is the live engineering view: current assignment, operation completion ring, the current stage map when the project's profile supplies stages, active runs, recent completions, next action, and meaningful activity. Unbound instrument diagnostics stay in Activity (Work and checks / All recorded events), while the cockpit shows task progress and any bound profile results and capture failures. It refreshes every 15 seconds when visible; Pause and Focus view support a stable display. Refresh defers while a control in the main view or navigation has focus. Assignments are not evidence of a running process. Task percentages show counts, not estimated time remaining. A pinned operation (`bin/alpaca op pin OP`) adds an Operation map above the roadmap: the op's phases in order with a phase strip, each phase's tasks by workstream, prerequisite arrows, owner holds and blocked tasks; finished tasks stay on the map as done.
 - Overview leads with the current assignment, work progress, current acceptance, recent changes, and reports. Machine resources do not stand in for work progress.
 - Work & evidence separates tasks from acceptance outcomes. Use numbered cards or a table. Each completed task shows the completing event time and session, delivered work, result, expandable method, and proof. The full record includes purpose/source and lifecycle history. Assigned workers and sessions are distinct; missing provenance stays explicitly unrecorded. Reopened tasks retain historical reports with a warning. Open an acceptance outcome for its current check, recorded completion, verification method, source, and proof. Internal specification checks are not counted as completed engineering outcomes.
 - Every open task card says whether the task has a contract. The task detail shows it as four cards: input, expected output, done bar and fail cases, with who recorded it and the source it restates. Record or replace one with `bin/alpaca task contract <id> --input ... --expected ... --done-bar ... --fail-case ... [--source ...]` (each flag repeatable, or `--file <json>`); `task add` takes the same flags. Each call appends a `task-contract` event and the newest is current. A contract restates the task; the task still closes only with a sealed proof report.
@@ -28,12 +28,61 @@ Navigation stays available at desktop and mobile sizes. Ctrl+K or Cmd+K opens wo
 
 ## Maintaining a useful checklist
 
-`CHECKLIST.md` is generated from the shared record. Its first section numbers each task and records purpose, source operation, creation/update/completion time, actual completing session, method, result, next action, and work report. Report excerpts are bounded; their historical seal is not a fresh proof check. Its acceptance section groups acceptance outcomes and labels them as the last recorded check. Detailed internal obligation rows remain below those sections for audit and agent tooling. The live hub separately checks current evidence validity.
+The cockpit's Task roadmap and Work & evidence's grouped checklist read the same plan. Work areas such as CI/CD, Visualization, Features and Documentation contain named workstreams such as Release pipeline or Cost analytics. Phases still describe delivery stages; they are separate from work areas. Arrows record actual prerequisites. Task numbers and screen positions never create dependencies. The roadmap uses compact task cards inside workstream sectors that share rows when space permits. Open a card's actions button for details, chat and dependency tracing. The Task roadmap header collapses the entire map and remembers its state through live refresh; individual workstreams can also fold while retaining external arrows.
 
-Add justified work through the normal task API, for example:
+Start with all operations and Active work. Choose a work area or search the operation picker to narrow the view; Full plan includes completed nodes. Completed workstreams start collapsed. Chat choices use the assigned work's name. Trace highlights immediate prerequisites and successors. Compact task cards wrap within the available width, including on phones; card position does not define order. Continuous arrows show recorded dependencies and connect to workstream headers when groups are collapsed. Details expands a card to show prerequisites and reasons. Group expansion, task details, filters and focus survive refresh.
+
+Agents organize tasks as they create them:
 
 ```sh
-bin/alpaca --session SESSION_ID task add op-006 "Explain the failed integration test and its recovery" --title "Explain failed test" --phase verify --why "Owner request: engineers need the failed test, the cause, and a reproducible recovery"
+bin/alpaca --session SESSION_ID task group op-001 release --title "Release pipeline" --category "CI/CD"
+bin/alpaca --session SESSION_ID task add op-001 "Build the verified release" --title "Build release" --group release --independent --resource release-source
+# For a follow-up, inherit only the existing task's group and name the actual prerequisite:
+bin/alpaca --session SESSION_ID task add op-001 "Check the release" --title "Check release" --inherit t-001 --after t-001 --resource release-source
+bin/alpaca --session SESSION_ID task map t-002 --group release
+```
+
+Replace example IDs with the recorded operation and task IDs. Create or reuse a group before adding a task. `task add` saves the task and its mapping together; a rejected mapping saves neither. Supply `--group` or `--inherit`, `--after` (repeatable) or `--independent`, and `--resource` (repeatable) or `--no-resources`. `--requires-stage` is repeatable. Inheritance copies only group membership, so prerequisites and resources stay explicit. `task map` preserves any omitted fields and all other tasks; a first mapping needs the same three declarations as creation. Changing a group never clears an existing hold.
+
+`task planning --require` enables a project-local policy rejecting new unmapped CLI tasks. `--show` reads it; `--allow-unmapped` restores compatibility. Legacy and internal intake tasks remain readable as Needs organization until mapped. Do not guess their constraints to make them appear ready. Add dependencies only when one task consumes another's output; use resources for shared-file or machine contention. Review groups and prerequisites when splitting work or changing direction.
+
+Read or author a plan through the normal task API:
+
+```sh
+bin/alpaca task plan op-001 --show
+bin/alpaca task plan op-001 --file plan.json
+```
+
+A plan file includes the revision returned by `--show` (0 before the first plan), the ordered groups, and explicit constraints for each planned task:
+
+```json
+{
+  "version": 1,
+  "revision": 0,
+  "title": "Release pipeline",
+  "summary": "Move verified work into a public release.",
+  "groups": [{"id": "implementation", "title": "Release pipeline", "category": "CI/CD"}],
+  "tasks": [
+    {"id": "t-001", "group": "implementation", "after": [], "resources": [], "requires_stages": [], "hold": null},
+    {"id": "t-002", "group": "implementation", "after": ["t-001"], "resources": ["build-machine"], "requires_stages": [], "hold": null}
+  ]
+}
+```
+
+All task references must belong to the operation and appear in the plan. A task with multiple prerequisites waits for all of them. Plans reject cycles, duplicate or missing references, unknown fields and updates based on an old revision. Read the latest plan and reapply your changes after a revision conflict. Up to 500 tasks and 80 groups can be planned per operation; tasks omitted from the plan remain Needs organization. Optional `title` (80 characters), `summary` (240) and group `category` (60) supply display labels; old snapshots remain valid. Use explicit empty arrays to record that no known task, stage or resource constraint applies.
+
+`hold` is null or an object such as `{"kind":"approval","reason":"Owner chooses the target"}`. Supported kinds are `approval`, `resources` and `blocked`. Replacing the plan changes or removes the hold; it does not change task status or grant execution permission. `requires_stages` names profile stages that need current PASS evidence. The existing phase and execution gates still apply.
+
+Ready means recorded prerequisites have valid completion reports, required stage evidence passes, the task's phase has been opened, and no recorded hold or active resource conflict is found. A valid historical report does not establish current domain input validity; record the required profile stages for that check. Named resources are exclusive: ready tasks sharing a resource are alternatives, and a task recorded in progress retains its resource constraint even when its chat assignment expires. Active tasks with unplanned constraints make resource availability unknown. Assignment and progress labels do not certify that a process is running.
+
+Generated `CHECKLIST.md` includes the same groups and prerequisite labels. Its roadmap checks completion seals and current stage evidence at render time without running a stage. These observations can age; the live view refreshes them.
+
+`CHECKLIST.md` is generated from the shared record. Its first section numbers each task and records purpose, source operation, creation/update/completion time, actual completing session, method, result, next action, and work report. Report excerpts are bounded; their historical seal is not a fresh proof check. Its acceptance section groups acceptance outcomes and labels them as the last recorded check. Detailed internal obligation rows remain below those sections for audit and agent tooling. The live hub separately checks current evidence validity.
+
+Add justified work through the normal task API after creating its group, for example:
+
+```sh
+bin/alpaca --session SESSION_ID task add op-006 "Explain the failed integration test and its recovery" --title "Explain failed test" --group verification --independent --no-resources --phase verify --why "Owner request: engineers need the failed test, the cause, and a reproducible recovery"
 ```
 
 The title is the short name the pages show; the statement is the full description. Short names for
@@ -144,3 +193,22 @@ invoice.
 The hub uses the existing Python server, authentication, and Cloudflare origin. No browser CDN or Node build is required. IBM Plex fonts are bundled under their SIL Open Font License; interface icons are original SVG paths.
 
 Run `bin/alpaca serve --detach --keep --port PORT` for the existing project. During development, a separate loopback preview can use `serve.make_handler` without replacing `.alpaca/serve.json`. Before changing an existing deployment, retain the prior source and verify the authenticated public page after restart. The previous views remain available for comparison.
+
+
+## Mission map
+
+Every workspace has a Mission map page, with an overview on Cockpit. Development is the default view: compact sector and component nodes show linked work progress, while the development plan below shows concrete tasks, workstreams, prerequisites and ready work. Both use the workspace theme and the shared task-roadmap renderer. Select a component and enable Selected component only to focus its tasks. Open tasks without a component link appear under Needs component mapping; link them explicitly instead of guessing from their titles. Components and Change impact views retain search, concern filters, source relationships, checks, dates and recorded changes.
+
+Component colors describe development: in progress, ready, planned, blocked, work complete or no linked work. Completed work requires a currently valid sealed task proof; it does not certify the component's checks. Failed checks and stale evidence remain visible, and verification details distinguish Not checked from Verified. Ready next uses recorded prerequisites, gates and exclusive resources, not the order in which tasks were numbered.
+
+Initialize a map with `bin/alpaca mission init --preset generic`, or use `--preset alpaca` for the harness's ten areas. An unconfigured workspace displays an unknown starter map. `mission show --definition` exports the current definition and revision. Edit the definition object and apply it with `mission define --file FILE --revision REVISION`; a stale revision is rejected. Definitions contain groups, nodes, inventory roots and typed relationships. Capability source patterns are relative to the project. Runtime directories, tool environments and symlinks are excluded. Coverage counts identify the declared inventory, unmapped files and exclusions; the graph does not claim exhaustive dependency discovery.
+
+`mission link NODE TASK --kind work` associates current work. Use `--kind fix` only for an actual repair. A last verified fix requires that explicit relationship, a completed task with a valid sealed proof, and all declared capability checks passing after task completion. Ordinary task completion never marks component verification as passed. Last changed, last verified fix and last checked remain separate.
+
+Execute a declared check with `bin/alpaca mission check --check tests NODE -- COMMAND`. This runs the explicit argument list without a shell and records the command, return code, log and input fingerprint. Verified means all declared checks pass for their current inputs and their retained logs still match. Failures, missing inputs, log changes, incomplete checks and changes during a run stay visible. Choose commands that actually exercise the capability; the generic runner records results but cannot judge whether a command adequately tests a requirement.
+
+Confirmed `feeds`, `depends_on` and `governs` edges point from provider to consumer and propagate input invalidation. Documentation and verification-reference links do not. Inferred edges appear only when Suggested links is enabled and never certify impact coverage. Change impact offers direct or transitive dependents with the relationship reason and explanatory path. Potential impact does not imply failure.
+
+The observability collector records changed source snapshots when it processes project events. `mission scan` captures an explicit snapshot, and map reads also detect current filesystem changes without writing. If no collector event has captured a change yet, its timestamp is labeled a filesystem observation. Historical views use saved source observations, task states and task-plan readiness (older snapshots explicitly report that their development plan is unavailable), with a clear historical label; they do not recompute old health using today's files. Reads and check-log access use the hub's authentication boundary; check-log reading requires a configured login.
+
+The first map includes recorded source history and snapshot selection. It does not infer every code dependency or reconstruct source history that was never captured. Additional relationships and capability requirements are versioned project decisions.

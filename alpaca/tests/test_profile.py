@@ -289,9 +289,10 @@ def test_without_a_profile_domain_routes_do_not_exist(project):
     url = "http://127.0.0.1:%d" % httpd.server_address[1]
     try:
         for path in ("/hub/logscan.json?receipt=" + "a" * 32, "/hub/contract.json",
-                     "/hub/log.json?receipt=" + "a" * 32, "/live/job.json", "/flow/job.json",
-                     "/hub/assets/mission.js"):
+                     "/hub/log.json?receipt=" + "a" * 32, "/live/job.json", "/flow/job.json"):
             assert _get(url + path)[0] == 404, path
+        assert _get(url + "/hub/assets/mission.js")[0] == 200
+        assert json.loads(_get(url + "/hub/mission.json")[1])["configured"] is False
         status, body = _get(url + "/hub/runs.json")
         assert status == 200 and json.loads(body)["items"] == []
     finally:
@@ -363,7 +364,6 @@ def test_the_hub_gates_profile_pages_on_the_profile():
     assert "const PROFILE_PAGES = ['runs','live'];" in text
     assert "!PROFILE_PAGES.includes(id)||profileOn(id)" in text
     assert "const pages = [" not in text        # every page list goes through visiblePages()
-    assert not (WEB / "mission.js").exists()
 
 
 # ------------------------------------------ (c) generic code never reaches a domain directly

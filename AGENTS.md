@@ -13,6 +13,8 @@ Codex uses explicit lifecycle commands. Claude-specific hook configuration does 
 
 ## Operation rules
 
+- Organize every new task into a named feature/workstream and work area when creating it; record actual prerequisites (or independence) and exclusive resources explicitly. Use mapped `task add`; update relationships with `task map` as the plan changes. See `docs/operations-hub.md` under "Maintaining a useful checklist" for commands. Do not use phases as feature groups or infer dependencies from task numbers.
+
 - Phases and profile stages run in their declared order. A missing result is BLOCKED, never PASS.
 - Poll a running job before starting another. A disconnected chat does not mean a job stopped.
 - Every completion claim has current evidence. Input changes invalidate prior evidence. Record both failures and successful runs.

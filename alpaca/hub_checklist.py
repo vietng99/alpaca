@@ -1,12 +1,12 @@
-"""Readable checklist projection from recorded work, without checking or running any profile stage.
+"""Readable checklist projection from recorded work, without running profile stages.
 
-The live hub performs current evidence checks. This document labels its results as
-last recorded observations so rendering never turns a filesystem probe into truth.
+Task readiness uses current evidence checks when a project root is available.
+The outcome cards retain their separately labelled recorded observations.
 """
 import re
 from pathlib import Path
 from urllib.parse import quote
-from alpaca import db, render as text, work_record
+from alpaca import db, render as text, work_record, taskplan
 
 
 def _cell(value):
@@ -30,23 +30,55 @@ def render(conn, cards):
     # The database path supplies the project root without a second connection or
     # any migration. In-memory records can still render provenance without files.
     database = next((row[2] for row in conn.execute('PRAGMA database_list') if row[1] == 'main'), '')
+    root = None
+    checked = []
     if database and Path(database).parent.name == '.alpaca':
         from alpaca.hub import _tasks
-        tasks = _tasks(Path(database).resolve().parent.parent, conn)
+        root = Path(database).resolve().parent.parent
+        tasks = _tasks(root, conn)
+        from alpaca.hub import _checked
+        checked, _, _ = _checked(root)
     else:
         tasks = work_record.tasks(conn)
     ops = {row['id']:row for row in db.rows(conn, 'ops')}
+    roadmap = taskplan.project(conn, tasks, root=root, stages=checked)
+    by_id = {t['id']: t for t in tasks}
+    nodes = [n for op in roadmap['operations'] for g in op['groups'] for n in g['nodes']]
     active = [row for row in tasks if row['status'] not in ('done','cancelled','canceled')]
     lines = ['', '## Work and next action', '',
              'This is the shared work record for people and agents. Completion is a recorded result backed by a report. '
              'The live Operations hub checks whether recorded evidence still matches current inputs.', '']
     if active:
-        next_task = active[0]
-        verb = 'Unblock' if next_task['status'] == 'blocked' else 'Continue'
-        lines += ['Next action: %s %s: %s' % (verb,next_task['id'],_cell(next_task['title'])), '']
+        candidates = [by_id[n['id']] for n in nodes if n['state'] in ('working', 'ready')]
+        doing = [t for t in active if t['status'] == 'doing']
+        next_task = (doing or candidates or [None])[0]
+        if next_task:
+            lines += ['Next action: Continue %s: %s' % (next_task['id'], _cell(next_task['title'])), '']
+        else:
+            lines += ['Next action: review waiting reasons or record a task plan. No ready task is identified.', '']
     else:
         lines += ['Next action: no open task is recorded. Review current evidence before accepting or extending the work.', '']
     lines += ['%d tasks recorded complete; %d tasks remain.' % (sum(t['status']=='done' for t in tasks),len(active)), '']
+    lines += ['## Task roadmap', '',
+              'Groups and prerequisites come from the recorded plan. Readiness is an observation at render time; execution gates still apply.', '']
+    for op in roadmap['operations']:
+        lines += ['### %s: %s' % (_cell(op['op']), _cell(ops.get(op['op'], {}).get('intent'))), '']
+        if op['error']:
+            lines += ['Plan unavailable: %s' % _cell(op['error']), '']
+        for group in op['groups']:
+            done = sum(by_id[n['id']]['status'] == 'done' for n in group['nodes'])
+            lines += ['#### %s (%d/%d done)' % (_cell(group['title']), done, len(group['nodes'])), '']
+            for node in group['nodes']:
+                task = by_id[node['id']]
+                lines.append('- %s: %s [%s]' % (task['id'], _cell(task['title']), node['label']))
+                if node['after']:
+                    lines.append('  - Prerequisites: ' + ', '.join(node['after']))
+                if node['reasons']:
+                    lines.append('  - ' + _cell('; '.join(node['reasons'])))
+                if node['session']:
+                    lines.append('  - Assigned chat: ' + _cell(node['session']))
+            lines.append('')
+    lines += ['## Detailed work records', '']
     for task in tasks:
         op = ops.get(task['op'], {})
         label = '%s. %s' % (task['number'],task['id']) if task['number'] is not None else task['id']

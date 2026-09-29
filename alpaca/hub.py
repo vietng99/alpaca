@@ -96,6 +96,48 @@ def _summary(kind, data, ref=None):
     return kind.replace("-", " ") + (": " + str(ref) if ref else "")
 
 
+def _phases(row):
+    """The op's declared phase order; an op opened without phases has none."""
+    try:
+        value = json.loads(row.get("phases") or "[]")
+    except (TypeError, ValueError):
+        return []
+    return [p for p in value if isinstance(p, str)] if isinstance(value, list) else []
+
+
+def _op_states(conn):
+    """Pin choice and phase events per op, read from the record in event order. The newest pin or
+    unpin wins; nothing is inferred from activity."""
+    pins, phase_events = {}, {}
+    for row in _rows(conn, "SELECT op,kind,ts,data FROM events WHERE kind IN "
+                           "('op-pin','op-unpin','phase-enter','phase-advance','phase-door-closed') ORDER BY id"):
+        if row["kind"] in ("op-pin", "op-unpin"):
+            pins[row["op"]] = row["kind"] == "op-pin"
+        else:
+            phase_events.setdefault(row["op"], []).append({"kind": row["kind"], "at": row["ts"], "data": _json(row["data"])})
+    return pins, phase_events
+
+
+def _phase_state(phases, events):
+    """Opened and completed phases, the current phase, and the last door refusal since the last
+    advance. A phase is complete only when a recorded advance leaves it."""
+    opened, completed, door = set(), set(), None
+    for event in events:
+        data = event["data"] if isinstance(event["data"], dict) else {}
+        if event["kind"] == "phase-enter" and isinstance(data.get("phase"), str):
+            opened.add(data["phase"])
+        elif event["kind"] == "phase-advance":
+            source, _, target = str(data.get("boundary") or "").partition("->")
+            completed.add(source); opened.update(p for p in (source, target) if p); door = None
+        elif event["kind"] == "phase-door-closed":
+            door = {"boundary": data.get("boundary"), "verdict": data.get("verdict"),
+                    "reason": data.get("reason"), "at": event["at"]}
+    order = phases + sorted(p for p in opened | completed if p not in phases)
+    current = next((p for p in reversed(order) if p in opened and p not in completed), None)
+    return {"opened": [p for p in order if p in opened], "completed": [p for p in order if p in completed],
+            "current": current, "door": door}
+
+
 def _event(row):
     data = _json(row["data"])
     return {**{k: row.get(k) for k in ("id", "ts", "kind", "actor", "session", "op", "ref")},
@@ -474,9 +516,14 @@ def overview(root):
         resolved_ops = profile.listed(cap, "resolved_ops")
         error_kinds = profile.listed(cap, "error_kinds")
         tasks = _tasks(root, conn)
+        from alpaca import taskplan
+        roadmap = taskplan.project(conn, tasks, root=root, stages=checked)
+        pins, phase_events = _op_states(conn)
         ops = [{"id": row["id"], "title": row["intent"], "status": row["status"], "done_when": row["done_when"],
                 "tasks_total": sum(t["op"] == row["id"] for t in tasks),
-                "tasks_done": sum(t["op"] == row["id"] and t["status"] == "done" for t in tasks)}
+                "tasks_done": sum(t["op"] == row["id"] and t["status"] == "done" for t in tasks),
+                "pinned": pins.get(row["id"], False), "phases": _phases(row),
+                "phase_state": _phase_state(_phases(row), phase_events.get(row["id"], []))}
                for row in _rows(conn, "SELECT * FROM ops ORDER BY opened DESC,id")]
         messages = [{**{k: row[k] for k in ("id", "ts", "session", "sender", "kind", "body", "ref")}, "to": row["to_"]}
                     for row in _rows(conn, "SELECT * FROM messages ORDER BY id DESC")]
@@ -535,7 +582,7 @@ def overview(root):
     cap_status = str(cap_block.get("status") or "ok")
     return {"project": {"name": name}, "as_of": newest[0]["ts"] if newest else None,
             "profile": profile.web_meta(root),
-            "tasks": tasks, "ops": ops, "items": items, "stages": stages,
+            "tasks": tasks, "ops": ops, "items": items, "stages": stages, "roadmap": roadmap,
             "observability": capture_health(root),
             "acceptance": {"status": ("PASS" if stages and all(s["status"] == "PASS" for s in stages)
                                       else "BLOCKED" if stages else "unavailable")},

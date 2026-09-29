@@ -66,6 +66,11 @@ COLUMNS = (TODO, DOING, DONE, BLOCKED)
 # writes these same kinds (write-ahead), so both paths feed one derivation.
 CLAIM_KIND = "claim"
 RELEASE_KIND = "claim-release"
+# M2.5 renews a lease with a `heartbeat` on the row and ends one with `lease-expired`; the fold
+# below reads both, so a renewed claim stays live and an expired one ends. The hook heartbeats
+# carry no row and never enter it.
+HEARTBEAT_KIND = "heartbeat"
+EXPIRE_KIND = "lease-expired"
 
 #: the default lease a board claim carries, in minutes, when the caller names none.
 DEFAULT_LEASE_MINUTES = 60
@@ -96,29 +101,67 @@ def _lease_until(minutes) -> str:
     return (base + datetime.timedelta(minutes=minutes)).isoformat(timespec="seconds")
 
 
+def fold_leases(conn, refs=None, *, ended=False) -> dict:
+    """row_id -> {worker, fence, lease_until, since, session, ended, ended_id}: each row's holder.
+
+    Oldest event first: a `claim` (a take or a takeover) sets the holder; a `heartbeat` on the
+    row carrying the holder's fence extends its lease (claims.renew, or the same worker claiming
+    again); a `claim-release` or a `lease-expired` ends it. `since` is when the holder took the
+    row and `session` is the session that last took or renewed it. Liveness is left to the
+    caller, so a lease past its instant is still returned and a view can tell a lapsed lease from
+    no claim at all. An ended holder is dropped unless `ended` is set, in which case it stays with
+    `ended` naming the event kind that ended it and `ended_id` that event's id. `refs` narrows
+    the fold to those rows.
+    """
+    sql = ("SELECT id, ts, session, kind, ref, data FROM events "
+           "WHERE kind IN (?,?,?,?) AND ref IS NOT NULL")
+    params = [CLAIM_KIND, HEARTBEAT_KIND, RELEASE_KIND, EXPIRE_KIND]
+    if refs is not None:
+        refs = sorted(set(refs))
+        if not refs:
+            return {}
+        sql += " AND ref IN (%s)" % ",".join("?" * len(refs))
+        params += refs
+    held = {}
+    for e in conn.execute(sql + " ORDER BY id", params):
+        rid, kind = e["ref"], e["kind"]
+        try:
+            data = json.loads(e["data"]) if e["data"] else {}
+        except ValueError:
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        holder = held.get(rid)
+        if kind == CLAIM_KIND:
+            held[rid] = {"worker": data.get("worker"), "fence": data.get("fence"),
+                         "lease_until": data.get("lease_until"), "since": e["ts"],
+                         "session": e["session"], "ended": None, "ended_id": None}
+        elif kind == HEARTBEAT_KIND:
+            if holder is not None and not holder["ended"] and data.get("fence") == holder["fence"]:
+                holder["lease_until"] = data.get("lease_until")
+                holder["session"] = e["session"]
+        elif holder is not None:
+            if ended:
+                holder["ended"], holder["ended_id"] = kind, e["id"]
+            else:
+                del held[rid]
+    return held
+
+
 def live_claims(conn, now=None) -> dict:
     """row_id -> {worker, lease_until, since} for every row that currently holds a LIVE claim.
 
-    A row's claim is the LATEST of its claim / claim-release events (latest-wins); it is live
-    only when that latest event is a claim whose lease has not passed `now`. A released claim,
-    or one whose lease_until is at or before now, is not live and the row falls back to todo."""
+    The holder is the one `fold_leases` gives: the latest claim, its lease extended by each
+    renewal on its fence, ended by a release or an expiry. It is live only while its lease has not
+    passed `now`; one whose lease_until is at or before now is not live and the row falls back to
+    todo."""
     now = now or util.now_iso()
-    latest = {}
-    for e in db.events(conn, limit=10 ** 9):            # oldest first; later overwrites
-        if e["kind"] not in (CLAIM_KIND, RELEASE_KIND):
-            continue
-        rid = e["ref"]
-        if rid is None:
-            continue
-        latest[rid] = e
     out = {}
-    for rid, e in latest.items():
-        if e["kind"] != CLAIM_KIND:
-            continue
-        lu = e["data"].get("lease_until")
+    for rid, h in fold_leases(conn).items():
+        lu = h["lease_until"]
         if lu is not None and lu <= now:
             continue
-        out[rid] = {"worker": e["data"].get("worker"), "lease_until": lu, "since": e["ts"]}
+        out[rid] = {"worker": h["worker"], "lease_until": lu, "since": h["since"]}
     return out
 
 

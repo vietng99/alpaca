@@ -42,6 +42,16 @@ def handle(payload):
         if not db.rows(conn, "sessions", "sid=?", (sid,)):
             db.upsert(conn, "sessions", "sid", {"sid": sid, "started": now, "last_beat": now, "beats": 0})
         conn.execute("UPDATE sessions SET beats=beats+1, last_beat=? WHERE sid=?", (now, sid))
+    # t-027: a session making calls is alive, so it keeps the task leases it holds; without this
+    # a claim ran out after its hour and the cockpit showed the working session as unclaimed.
+    # Guarded on its own: a lease that cannot be renewed never costs the record its heartbeat.
+    try:
+        from alpaca import claims
+        claims.keep_alive(conn, sid)
+    except Exception as exc:
+        common.record_failure(payload, "post_tool_keep_alive", exc)
+        if payload.get("_strict"):
+            raise
     # E6: the heartbeat above keeps its shape; the pool keeps the whole call beside the record,
     # so a tool input and a tool response survive the session that produced them. Guarded on its
     # own: a pool that cannot be written never costs the record its heartbeat.

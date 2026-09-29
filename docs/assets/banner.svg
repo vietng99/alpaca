@@ -1,83 +1,81 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="480" viewBox="0 0 1280 480" role="img" aria-labelledby="title desc">
   <title id="title">Alpaca. Good work. With receipts.</title>
-  <desc id="desc">A calm alpaca in side profile with a continuous tapered neck, upright ears, a short muzzle and fluffy cream fleece stands in a blue scarf beside a sealed proof. A local record for Claude Code and Codex: plan, build, prove, resume.</desc>
+  <desc id="desc">A calm alpaca with a long woolly neck, full cream fleece and relaxed eyes stands in a green scarf beside a sealed proof. A local record for Claude Code and Codex: plan, build, prove, resume.</desc>
   <defs>
-    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M32 0H0V32" fill="none" stroke="#dce2eb" stroke-width="0.7"/></pattern>
-    <radialGradient id="halo"><stop stop-color="#dae6fa"/><stop offset="1" stop-color="#edf2fa"/></radialGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M32 0H0V32" fill="none" stroke="#dedfd3" stroke-width="0.7"/></pattern>
+    <radialGradient id="halo"><stop stop-color="#d8e6cf"/><stop offset="1" stop-color="#edf0e3"/></radialGradient>
   </defs>
-  <rect width="1280" height="480" fill="#f3f5f8"/>
+  <rect width="1280" height="480" rx="24" fill="#f7f5ed"/>
   <path d="M736 0H1256Q1280 0 1280 24V394H736Z" fill="url(#grid)"/>
   <circle cx="1025" cy="209" r="163" fill="url(#halo)"/>
   <g font-family="Arial, Helvetica, sans-serif">
-    <rect x="64" y="52" width="235" height="30" rx="15" fill="#e3eafa"/>
-    <circle cx="81" cy="67" r="4" fill="#386cbe"/>
-    <text x="94" y="72" font-size="12" font-weight="700" letter-spacing="1.5" fill="#34527e">THE ENGINEERING HARNESS</text>
-    <text x="58" y="212" font-size="132" font-weight="700" letter-spacing="-7" fill="#253041">Alpaca<tspan fill="#386cbe">.</tspan></text>
-    <text x="65" y="270" font-size="34" font-weight="600" letter-spacing="-0.8" fill="#253041">Good work. With receipts.</text>
-    <text x="66" y="318" font-size="20" fill="#586579">Plan, run and verify agent work.</text>
-    <text x="66" y="349" font-size="20" fill="#586579">Keep the evidence. Resume anytime.</text>
+    <rect x="64" y="52" width="235" height="30" rx="15" fill="#e4ebdd"/>
+    <circle cx="81" cy="67" r="4" fill="#35745a"/>
+    <text x="94" y="72" font-size="12" font-weight="700" letter-spacing="1.5" fill="#355944">THE ENGINEERING HARNESS</text>
+    <text x="58" y="212" font-size="132" font-weight="700" letter-spacing="-7" fill="#213e32">Alpaca<tspan fill="#b38340">.</tspan></text>
+    <text x="65" y="270" font-size="34" font-weight="600" letter-spacing="-0.8" fill="#213e32">Good work. With receipts.</text>
+    <text x="66" y="318" font-size="20" fill="#667266">A local record for coding agents.</text>
+    <text x="66" y="349" font-size="20" fill="#667266">Every task closes with a sealed proof.</text>
   </g>
-  <ellipse cx="1006" cy="363" rx="131" ry="13" fill="#d6dde7"/>
-  <!-- Head, tapered neck and body share one continuous side-view silhouette. -->
-  <g transform="translate(859 40)" stroke="#3b4658" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-    <!-- Far legs and tail sit behind the fleece. -->
-    <path d="M78 257L81 314Q82 320 89 320H100L101 258M185 256L190 315Q191 320 198 320H207L208 257" fill="#d7d1c4"/>
-    <path d="M38 223Q14 213 20 198Q23 191 29 199Q33 205 46 205" fill="#faf8f1"/>
-    <!-- Alpaca ears are upright, with short pointed tips. -->
-    <path d="M177 74Q164 53 173 20Q176 12 179 23L193 67" fill="#faf8f1"/>
-    <path d="M178 36L184 62" fill="none" stroke="#cbbdac" stroke-width="5"/>
-    <path d="M205 64Q204 41 223 15Q229 9 227 20L224 73" fill="#faf8f1"/>
-    <path d="M221 31L215 61" fill="none" stroke="#cbbdac" stroke-width="5"/>
-    <!-- No join line or gap between the head, neck and shoulder. -->
-    <path d="M167 92
-      Q159 85 165 77Q161 67 174 65Q178 54 189 59Q199 50 209 59Q221 56 228 67
-      Q237 72 236 86Q240 93 253 98Q265 103 263 115Q264 126 251 132Q241 138 228 135
-      Q220 145 222 159Q226 166 222 179Q228 188 224 200Q231 209 229 222
-      Q240 230 234 244Q241 257 230 267Q233 280 216 285Q207 297 191 289
-      Q175 299 161 291Q146 300 131 290Q115 298 101 290Q84 299 70 287Q53 294 42 280
-      Q26 278 27 263Q15 253 24 239Q20 224 33 216Q33 203 49 202Q57 189 73 195
-      Q87 186 101 194Q117 185 129 196Q141 191 149 197
-      Q161 183 161 164Q156 154 163 144Q159 132 166 121Q163 107 167 92Z" fill="#faf8f1"/>
-    <!-- Planted legs emerge naturally from the body. -->
-    <path d="M48 272L47 317Q47 327 57 327H68Q75 327 74 319L78 282M176 281L178 318Q178 327 187 327H198Q205 327 203 318L207 282" fill="#faf8f1"/>
-    <path d="M49 323H73M180 323H202" stroke-width="6"/>
-    <!-- A short muzzle, small nostril and relaxed eye, all in the same profile. -->
-    <path d="M224 96Q239 93 252 101Q263 107 257 119Q253 128 238 129Q224 127 219 116Q216 104 224 96Z" fill="#e8dfcf" stroke="none"/>
-    <path d="M252 110L255 112" stroke="#596273" stroke-width="2.5"/>
-    <path d="M243 123L253 121" fill="none" stroke="#596273" stroke-width="2"/>
-    <g id="eyes">
-      <path d="M211 91Q218 94 225 90" fill="none" stroke-width="2.5"/>
-      <ellipse cx="219" cy="94" rx="2.5" ry="1.5" fill="#3b4658" stroke="none"/>
+  <ellipse cx="1006" cy="363" rx="131" ry="13" fill="#d9decf"/>
+  <!-- Long woolly neck, full fleece, relaxed lids and a neutral muzzle. -->
+  <g transform="translate(866 52)" stroke="#344e3e" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Far legs sit behind the deep fleece. -->
+    <path d="M72 248L73 294Q73 302 81 302H89Q97 302 97 294L100 253M190 248L192 294Q192 302 200 302H208Q216 302 215 294L211 248" fill="#d8d3bc"/>
+    <path d="M32 215Q9 219 10 201Q11 193 20 195Q26 194 29 190Q40 190 42 203" fill="#fcfaf0"/>
+    <!-- One flowing outline connects the tall fleece-covered neck to a full body. -->
+    <path d="M156 91Q149 99 153 110Q145 119 151 129Q143 139 150 149Q142 158 148 168Q140 177 146 187Q139 196 143 207
+      Q126 196 115 204Q104 191 91 200Q74 192 66 204Q47 198 42 214Q26 213 25 230Q11 239 22 252Q13 267 30 277Q32 293 51 292Q62 305 79 296Q93 308 108 299Q123 309 137 299Q154 307 166 296Q183 302 192 289Q211 290 216 274Q233 267 226 250Q234 237 222 225
+      L224 215Q233 204 226 193Q233 183 226 173Q233 163 226 153Q233 143 226 133Q233 123 226 113Q230 101 219 94Z" fill="#fcfaf0"/>
+    <!-- Near legs emerge from the wool, with quiet, planted feet. -->
+    <path d="M47 278L46 301Q46 311 56 311H69Q79 311 78 302L80 285M174 283L176 302Q176 311 185 311H198Q208 311 206 301L203 278" fill="#fcfaf0"/>
+    <path d="M48 304H77M178 304H205" stroke="#344e3e" stroke-width="7"/>
+    <!-- Light curls give depth without drawing separate wool bubbles. -->
+    <g fill="none" stroke="#dedcca" stroke-width="2.6">
+      <path d="M42 239Q48 228 57 235Q60 224 71 230M84 215Q92 209 100 215M117 235Q127 224 137 233"/>
+      <path d="M49 265Q56 253 66 261M87 250Q96 241 104 249M108 279Q118 269 128 276M151 264Q160 251 170 260M186 237Q195 229 202 236"/>
+      <path d="M160 126Q168 119 175 126M200 143Q207 135 214 142M160 181Q168 174 175 181M190 204Q198 195 206 203"/>
     </g>
-    <!-- Fleece follows the neck and shoulder instead of a stack of circles. -->
-    <g fill="none" stroke="#d8d2c6" stroke-width="2.4">
-      <path d="M173 78Q181 71 189 77M190 70Q199 65 207 71"/>
-      <path d="M175 111Q181 104 188 110M193 134Q202 129 210 135M175 166Q183 160 190 167"/>
-      <path d="M165 197Q172 188 181 194M195 220Q204 214 212 221"/>
-      <path d="M44 232Q51 222 60 229M76 211Q84 204 92 212M113 222Q122 213 131 223"/>
-      <path d="M56 259Q64 250 73 258M88 245Q96 237 105 245M120 273Q128 265 137 272M155 245Q164 236 173 246M190 265Q198 256 207 264"/>
+    <!-- A smaller head makes the neck's length unmistakable. -->
+    <g transform="translate(27 -34) scale(0.86)">
+      <path d="M157 81Q142 69 137 40Q134 24 145 31Q164 43 175 75" fill="#fcfaf0"/>
+      <path d="M149 44L163 68" stroke="#cbb79b" stroke-width="6"/>
+      <g id="ear">
+        <path d="M204 77Q207 51 224 29Q234 18 235 34Q235 56 222 84" fill="#fcfaf0"/>
+        <path d="M224 45L215 67" stroke="#cbb79b" stroke-width="6"/>
+      </g>
+      <path d="M149 101Q139 91 151 82Q149 69 165 69Q171 56 184 64Q197 52 208 65Q224 58 230 73Q246 75 241 91Q254 103 241 116Q240 140 219 150Q190 163 166 146Q147 137 149 121Q138 112 149 101Z" fill="#fcfaf0"/>
+      <path d="M158 109Q159 95 177 100Q196 103 217 99Q233 101 233 118Q231 140 210 146Q186 153 170 138Q159 127 158 109Z" fill="#e9ddc4" stroke="none"/>
+      <path d="M155 86Q163 77 173 84M181 77Q189 68 198 77M208 83Q216 77 223 85" fill="none" stroke="#dedcca" stroke-width="2.8"/>
+      <g id="eyes">
+        <ellipse cx="176" cy="115" rx="3" ry="1.8" fill="#344e3e" stroke="none"/>
+        <ellipse cx="220" cy="114" rx="3" ry="1.8" fill="#344e3e" stroke="none"/>
+        <path d="M168 111Q176 114 183 111M212 110Q220 113 227 110" fill="none" stroke-width="2.5"/>
+      </g>
+      <path d="M191 127Q197 124 203 127L198 131Z" fill="#59624c" stroke="none"/>
+      <path d="M198 131V135M192 138Q198 139 204 138" fill="none" stroke="#59624c" stroke-width="2"/>
     </g>
-    <!-- A blue scarf follows the taper of the neck. -->
+    <!-- A loose scarf rests against the neck; the tail moves almost imperceptibly. -->
     <g id="scarf-tail">
-      <path d="M203 161L224 194L210 203L191 165" fill="#386cbe"/>
-      <path d="M215 195L219 202M210 198L214 205" stroke="#b8d1fa" stroke-width="2"/>
+      <path d="M202 163L220 203L201 209L185 169" fill="#35745a"/>
+      <path d="M204 200L207 210M210 198L213 207" stroke="#c7d5ad" stroke-width="2.2"/>
     </g>
-    <path d="M162 147Q190 160 221 148L222 164Q193 178 161 164Z" fill="#386cbe"/>
-    <path d="M169 160Q189 169 214 159" fill="none" stroke="#85b0ef" stroke-width="2"/>
+    <path d="M147 148Q183 165 227 148L226 165Q187 181 147 166Z" fill="#35745a"/>
+    <path d="M153 159Q182 172 211 163" fill="none" stroke="#78a17b" stroke-width="2.3"/>
   </g>
   <g transform="translate(1173 292) rotate(9)">
-    <circle r="42" fill="#253041"/>
-    <circle r="35" fill="none" stroke="#99bced" stroke-dasharray="2 5"/>
-    <path d="M-13 -6L-3 4L15 -15" fill="none" stroke="#f3f5f8" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-    <text y="22" text-anchor="middle" fill="#f3f5f8" font-family="Arial, Helvetica, sans-serif" font-size="10" font-weight="700" letter-spacing="2">SEALED</text>
+    <circle r="42" fill="#213e32"/>
+    <circle r="35" fill="none" stroke="#9bb494" stroke-dasharray="2 5"/>
+    <path d="M-13 -6L-3 4L15 -15" fill="none" stroke="#f7f5ed" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <text y="22" text-anchor="middle" fill="#f7f5ed" font-family="Arial, Helvetica, sans-serif" font-size="10" font-weight="700" letter-spacing="2">SEALED</text>
   </g>
-  <g fill="none" stroke="#95a9c7" stroke-width="2" stroke-linecap="round">
+  <g fill="none" stroke="#9aad89" stroke-width="2" stroke-linecap="round">
     <path d="M856 122v14m-7-7h14M1188 156v12m-6-6h12"/>
     <circle cx="896" cy="290" r="3"/><circle cx="1158" cy="89" r="3"/>
   </g>
-  <path d="M64 395H1216" stroke="#d6dde7"/>
-  <g font-family="Arial, Helvetica, sans-serif" font-size="13" letter-spacing="1.4" fill="#586579">
-    <text x="66" y="439"><tspan fill="#386cbe" font-weight="700">01</tspan> PLAN <tspan dx="25" fill="#a2adbd">/</tspan><tspan dx="25" fill="#386cbe" font-weight="700">02</tspan> BUILD <tspan dx="25" fill="#a2adbd">/</tspan><tspan dx="25" fill="#386cbe" font-weight="700">03</tspan> PROVE <tspan dx="25" fill="#a2adbd">/</tspan><tspan dx="25" fill="#386cbe" font-weight="700">04</tspan> RESUME</text>
+  <path d="M64 395H1216" stroke="#d9dfd0"/>
+  <g font-family="Arial, Helvetica, sans-serif" font-size="13" letter-spacing="1.4" fill="#667266">
+    <text x="66" y="439"><tspan fill="#35745a" font-weight="700">01</tspan> PLAN <tspan dx="25" fill="#b1b8a8">/</tspan><tspan dx="25" fill="#35745a" font-weight="700">02</tspan> BUILD <tspan dx="25" fill="#b1b8a8">/</tspan><tspan dx="25" fill="#35745a" font-weight="700">03</tspan> PROVE <tspan dx="25" fill="#b1b8a8">/</tspan><tspan dx="25" fill="#35745a" font-weight="700">04</tspan> RESUME</text>
     <text x="1214" y="439" text-anchor="end" font-size="12" letter-spacing="1">CLAUDE CODE + CODEX</text>
   </g>
 </svg>

@@ -16,9 +16,21 @@ hand-edit is a lie the next render erases.
 
 ## The ruling
 
-The store is truth. `.alpaca/alpaca.db` is the source of every assertion. `RESUME.md`, `CHECKLIST.md`,
-`board.json`, `data.json` and the markdown rendered under `.alpaca/wiki/` are projections: rendered
-from the record and never hand-edited.
+The owning store is truth within its scope. For operational assertions, `.alpaca/alpaca.db` is the source. `RESUME.md`, `CHECKLIST.md`,
+`board.json`, `data.json` and operational decision pages under `.alpaca/wiki/decisions/` are
+projections rendered from that record and never hand-edited.
+
+Rune2 has a separate, scoped store: `.alpaca/wiki/rune.db` and its ledger hold indexed
+source documents, evidence-linked graph assertions and answer history. Operational event
+notes are derived from Alpaca DB; transcript notes derive from preserved visible exchanges;
+explicitly ingested wiki documents retain their source content in the vault. Rune2's rendered
+`projection/` is downstream of that store. A Rune2 assertion does not change task state,
+acceptance, policy authority or the original operational record. Corrections target the
+owning source and enter Rune2 through ingestion, never by editing a rendered projection.
+
+The dashboard's wiki page count measures operational pages. `bin/alpaca wiki status` reports
+the Rune2 corpus and capture gaps separately. A document count is not a graph-fact count,
+and capture is not automatic admission of lessons.
 
 A correction targets the assertion in the record, not the rendered page. You do not fix a wrong
 line in `board.json` by editing `board.json`; you move the card (one `alpaca` verb, one event), and

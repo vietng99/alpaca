@@ -26,16 +26,10 @@ km.7 `recompute_communities(db)`:
 """
 from __future__ import annotations
 
-from typing import Any
-
 from ..clock import now_iso
-from ..determinism import canonical_json, nfc, sha256_hex, to_band, ppr
+from ..determinism import canonical_json, nfc, sha256_hex
 
-# ---------------------------------------------------------------- dm.10 constants
-TOP_BAND = 3                      # tier-1 == the highest integer band (stable_rank sorts page_band DESC)
-BAND_CUTS = (0.07, 0.25, 0.55)    # cumulative top-fractions for bands 3 / 2 / 1 (rest -> 0)
-BRIDGE_CAP = 2                    # Stage-B: at most this many bridge-in promotions
-BRIDGE_MIN_INDEG = 2             # Stage-B: a bridge candidate needs >= this many distinct in-neighbours
+from ..store.tier_policy import TOP_BAND, BAND_CUTS, BRIDGE_CAP, BRIDGE_MIN_INDEG
 
 # ---------------------------------------------------------------- km.7 constants
 LPA_MAX_ITERS = 100              # fixed iteration budget for label propagation
@@ -50,30 +44,8 @@ EVENT_GENESIS = "km7.genesis"    # prev_hash anchor for the first event in the c
 
 # ================================================================ km.7 : versioned tier/community events
 
-def _last_event(db) -> tuple[int, str]:
-    """(seq, event_hash) of the newest tier_event, or (0, GENESIS) if the ledger is empty."""
-    r = db.conn.execute(
-        "SELECT event_seq, event_hash FROM tier_events ORDER BY event_seq DESC LIMIT 1"
-    ).fetchone()
-    if r is None:
-        return 0, EVENT_GENESIS
-    return int(r["event_seq"]), r["event_hash"]
-
-
-def _emit_tier_event(db, node_id: str, kind: str, old: str | None, new: str | None) -> str:
-    """Append ONE versioned, hash-chained change event. seq is monotonic; event_hash folds the
-    prior hash (a chain) so the ledger is tamper-evident. recorded_at is advisory (never hashed)."""
-    seq, prev = _last_event(db)
-    seq += 1
-    payload = canonical_json({"seq": seq, "node_id": nfc(node_id), "kind": kind,
-                              "old": old, "new": new, "prev": prev})
-    h = sha256_hex(TIER_EVENT_TAG + payload)
-    db.conn.execute(
-        "INSERT INTO tier_events(event_seq,node_id,kind,old_value,new_value,prev_hash,event_hash,recorded_at)"
-        " VALUES(?,?,?,?,?,?,?,?)",
-        (seq, node_id, kind, old, new, prev, h, now_iso()),
-    )
-    return h
+from ..store.write import _last_event, _emit_tier_event, retier_nodes as retier
+from ..store.tier_policy import _band_for_position, compute_tiers, _graph
 
 
 def read_tier_events(db, node_id: str | None = None) -> list[dict]:
@@ -90,134 +62,6 @@ def read_tier_events(db, node_id: str | None = None) -> list[dict]:
 
 
 # ================================================================ dm.10 : page-tiering
-
-def _band_for_position(pos: int, n: int) -> int:
-    """Stage-A percentile band for rank position `pos` (0 = top) out of `n` nodes."""
-    frac = pos / n
-    if frac < BAND_CUTS[0]:
-        return TOP_BAND            # 3
-    if frac < BAND_CUTS[1]:
-        return TOP_BAND - 1        # 2
-    if frac < BAND_CUTS[2]:
-        return TOP_BAND - 2        # 1
-    return TOP_BAND - 3            # 0
-
-
-def compute_tiers(
-    node_ids: list[str],
-    scores: dict[str, float],
-    statuses: dict[str, str],
-    in_neighbors: dict[str, set],
-    updates_exempt: set,
-) -> dict[str, Any]:
-    """Pure tiering core (no DB). Returns {'band', 'promoted', 'demoted', 'order'}.
-
-    `node_ids` MUST already be canonical node_id-ASC (NFC). `scores` are advisory floats; they are
-    projected to INTEGER ranks via `to_band` BEFORE ordering so a 1-ULP float cannot flip a band.
-    """
-    n = len(node_ids)
-    if n == 0:
-        return {"band": {}, "promoted": set(), "demoted": set(), "order": []}
-
-    int_rank = {nid: to_band(scores.get(nid, 0.0)) for nid in node_ids}
-    # Stage-A: order by (-integer rank, node_id) BEFORE quantiling; band by percentile.
-    order = sorted(node_ids, key=lambda nid: (-int_rank[nid], nid))
-    band = {nid: _band_for_position(i, n) for i, nid in enumerate(order)}
-
-    # Stage-B: bounded bridge-in promotion. Candidates are sub-top nodes with enough distinct
-    # in-neighbours; promote the strongest BRIDGE_CAP of them by exactly one band.
-    candidates = [nid for nid in order
-                  if band[nid] < TOP_BAND and len(in_neighbors.get(nid, set())) >= BRIDGE_MIN_INDEG]
-    candidates.sort(key=lambda nid: (-len(in_neighbors.get(nid, set())), nid))
-    promoted: set = set()
-    for nid in candidates[:BRIDGE_CAP]:
-        band[nid] = min(band[nid] + 1, TOP_BAND)
-        promoted.add(nid)
-
-    # Stage-C: force-demote a superseded node OUT of tier-1 UNLESS rel == 'updates'.
-    demoted: set = set()
-    for nid in node_ids:
-        if statuses.get(nid) != "superseded":
-            continue
-        if nid in updates_exempt:
-            continue
-        if band[nid] == TOP_BAND:
-            band[nid] = TOP_BAND - 1
-            demoted.add(nid)
-
-    return {"band": band, "promoted": promoted, "demoted": demoted, "order": order}
-
-
-def _graph(db) -> tuple[list[str], dict[str, str], list[tuple[str, str]], set]:
-    """Read the full typed graph: (node_ids ASC, statuses, node->node active edges, updates-exempt)."""
-    node_ids: list[str] = []
-    statuses: dict[str, str] = {}
-    for r in db.conn.execute(
-        "SELECT node_id, status FROM nodes WHERE status IN ('active','superseded') ORDER BY node_id ASC"
-    ):
-        nid = nfc(r["node_id"])
-        node_ids.append(nid)
-        statuses[nid] = r["status"]
-    known = set(node_ids)
-    node_edges: list[tuple[str, str]] = []
-    updates_exempt: set = set()
-    for r in db.conn.execute(
-        "SELECT subj_node, obj_node, predicate FROM edges "
-        "WHERE status='active' AND obj_datatype='node' AND obj_node IS NOT NULL"
-    ):
-        s, o = nfc(r["subj_node"]), nfc(r["obj_node"])
-        if s in known and o in known:
-            node_edges.append((s, o))
-            if r["predicate"] == "updates":
-                updates_exempt.add(s)
-                updates_exempt.add(o)
-    return node_ids, statuses, node_edges, updates_exempt
-
-
-def retier(db, autocommit: bool = True) -> dict[str, int]:
-    """Run PPR + Stage-A/B/C, PERSIST `nodes.page_band` (+ advisory `pagerank`). Returns node->band.
-
-    Fires on full rebuild AND incrementally from absorb; page_band is what `stable_rank` and map.md
-    read as a real tier.
-    """
-    node_ids, statuses, node_edges, updates_exempt = _graph(db)
-    if not node_ids:
-        return {}
-
-    # in-neighbour sets (distinct sources) for Stage-B bridge detection.
-    in_neighbors: dict[str, set] = {nid: set() for nid in node_ids}
-    for s, o in node_edges:
-        in_neighbors[o].add(s)
-
-    # PPR: uniform restart over every node (seed = uniform), damping 0.85 == teleport 0.15.
-    ppr_edges = [(s, o, 1.0) for (s, o) in node_edges]
-    seed = {nid: 1.0 for nid in node_ids}
-    scores = ppr(ppr_edges, seed)
-
-    result = compute_tiers(node_ids, scores, statuses, in_neighbors, updates_exempt)
-    band = result["band"]
-
-    # prior persisted bands so a VERSIONED tier-change event fires only on an actual band change
-    # (a no-op re-tier emits nothing; NULL prior == first assignment).
-    prior_band = {
-        nfc(r["node_id"]): (None if r["page_band"] is None else int(r["page_band"]))
-        for r in db.conn.execute("SELECT node_id, page_band FROM nodes")
-    }
-
-    for nid in node_ids:
-        old_band = prior_band.get(nid)
-        new_band = band[nid]
-        if old_band != new_band:
-            _emit_tier_event(db, nid, "tier",
-                             None if old_band is None else str(old_band), str(new_band))
-        db.conn.execute(
-            "UPDATE nodes SET page_band=?, pagerank=? WHERE node_id=?",
-            (band[nid], float(scores.get(nid, 0.0)), nid),
-        )
-    if autocommit:
-        db.commit()
-    return band
-
 
 def tier_hash(db) -> str:
     """Fold the PERSISTED integer tiers into one digest. Fork-A: ONLY page_band (never the float)."""

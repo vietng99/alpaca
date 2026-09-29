@@ -219,37 +219,35 @@ if __name__ == "__main__":
     raise SystemExit(_p.main([__file__, "-q"]))
 
 
-def test_a_transcript_page_that_shrinks_after_a_parser_change_still_drains(project, monkeypatch):
-    """A transcript page is a projection of an append-only transcript. When a parser repair
-    makes it shorter (duplicate prompts dropped, say), the drain records why instead of failing
-    the whole sync, and the vault file follows what the wiki accepted."""
-    from alpaca.analytics import parse_session
+def test_a_transcript_page_that_shrinks_after_source_replacement_still_drains(project):
+    """A smaller source creates a new immutable projection without waiving the shrink gate."""
+    from pathlib import Path
     _seed(project)
-    _write_transcript(project)
-    real = parse_session.parse
-    many = [{"text": "prompt number %d with enough words to count as a body line" % n} for n in range(40)]
-    monkeypatch.setattr(parse_session, "parse", lambda path: dict(real(path), human_prompts=many))
+    source = Path(_write_transcript(project))
+    many = [{"type": "user", "message": {"content": "prompt number %d with enough words to count as a body line" % n}}
+            for n in range(40)]
+    source.write_text("".join(json.dumps(row) + "\n" for row in many))
     drain.run(project, "s1")
-    monkeypatch.setattr(parse_session, "parse", lambda path: dict(real(path), human_prompts=many[:3]))
+    source.write_text("".join(json.dumps(row) + "\n" for row in many[:3]))
     summary = drain.run(project, "s1")
     doc = next(d for d in summary["docs"] if "transcript-s1" in d)
-    text = open(os.path.join(drain.wiki_vault_dir(project), doc), encoding="utf-8").read()
-    assert text.count("\n- ") == 3
+    text = Path(drain.wiki_vault_dir(project), doc).read_text()
+    assert text.count("\nuser:\n") == 3
     assert "-summary-" in doc
     assert len([d for d in _docs(project) if "transcript-s1" in d]) == 2
 
 
-def test_summary_revision_preserves_previous_raw_document(project, monkeypatch):
+def test_summary_revision_preserves_previous_raw_document(project):
     from pathlib import Path
-    from alpaca.analytics import parse_session
     _seed(project)
-    _write_transcript(project)
-    many = [{"text": "historical prompt %d with meaningful source detail" % n} for n in range(40)]
-    monkeypatch.setattr(parse_session, "parse", lambda path: {"human_prompts": many})
+    source = Path(_write_transcript(project))
+    many = [{"type": "user", "message": {"content": "historical prompt %d with meaningful source detail" % n}}
+            for n in range(40)]
+    source.write_text("".join(json.dumps(row) + "\n" for row in many))
     first = drain.run(project, "s1")
     old = next(d for d in first["docs"] if "transcript-s1" in d)
     before = Path(drain.wiki_vault_dir(project), old).read_bytes()
-    monkeypatch.setattr(parse_session, "parse", lambda path: {"human_prompts": many[:1]})
+    source.write_text(json.dumps(many[0]) + "\n")
     second = drain.run(project, "s1")
     new = next(d for d in second["docs"] if "transcript-s1" in d)
     assert new != old

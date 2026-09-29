@@ -2,7 +2,8 @@
 
 Gathers the four arms - symbolic-exact floor · BM25 · vector · graph-PPR - and returns
 RetrievalHits carrying each channel's raw score plus the exact-floor flag. Fusion, rerank, and the
-tie-break happen in engine.fuse; verification in engine.oracle. Nothing here writes.
+tie-break happen in engine.fuse; verification in engine.oracle. Gathering is read-only;
+initialization delegates derived cache maintenance to the write door.
 
 Block-level as-of (F4, Operation-4-Litmus): every arm's block results are intersected with the
 as-of-visible block set, so a past-as-of read never surfaces a block whose domain window excludes T
@@ -252,8 +253,14 @@ def gather(db: DB, providers, question: str, asof: AsOf, k: int = 50,
 # NARROW profile ships the vector arm OFF, so the controller only calls this when a caller opts the
 # vector/graph profile in.
 def ensure_vector_index(db: DB) -> bool:
-    """Create the vector arm's fallback tables and best-effort load sqlite-vec, through the door.
-    Returns True iff the sqlite-vec extension is active (False keeps the pure-stdlib fallback)."""
-    from ..store import vec                     # store.vec is guarded; only the door reaches it
-    vec.ensure_vec_tables(db)
-    return vec.try_load_sqlite_vec(db)
+    """Backfill or invalidate the portable cache through the write door before ranking.
+
+    Derived-only maintenance emits no source assertions and never commits a caller's
+    open transaction. False denotes the deterministic extension-free backend.
+    """
+    from ..store.write import Writer
+    from ..store.ledger import Ledger
+    writer = Writer(db, Ledger(db.cfg.ledger_path, vault_dir=db.cfg.vault_dir))
+    with writer.transaction():
+        writer.maintain_indexes(db.cfg.providers())
+    return False

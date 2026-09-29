@@ -67,10 +67,11 @@ import shutil
 import yaml
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from alpaca.tests.conftest import SHIPPED_PROJECT_YAML
 
 
 def _template():
-    with open(os.path.join(REPO, "project.yaml"), encoding="utf-8") as fh:
+    with open(SHIPPED_PROJECT_YAML, encoding="utf-8") as fh:
         return yaml.safe_load(fh)
 
 
@@ -89,7 +90,7 @@ def test_shipped_project_yaml_is_a_template():
 
 
 def test_onboard_keeps_every_template_key(project):
-    shutil.copy(os.path.join(REPO, "project.yaml"), os.path.join(project, "project.yaml"))
+    shutil.copy(SHIPPED_PROJECT_YAML, os.path.join(project, "project.yaml"))
     tpl = _template()
     cli.main(["init"])
     rc = cli.main(["onboard", "--name", "demo", "--who", "alex:owner,robin:engineer",
@@ -120,7 +121,7 @@ def test_onboard_keeps_every_template_key(project):
 
 
 def test_onboard_template_sensed_commands_still_win(project):
-    shutil.copy(os.path.join(REPO, "project.yaml"), os.path.join(project, "project.yaml"))
+    shutil.copy(SHIPPED_PROJECT_YAML, os.path.join(project, "project.yaml"))
     open(os.path.join(project, "Makefile"), "w", encoding="utf-8").write("test:\n\tpytest\n")
     cli.main(["init"])
     assert cli.main(["onboard", "--name", "d", "--who", "a:owner", "--what", "w"]) == 0
@@ -138,7 +139,7 @@ def test_onboard_template_keeps_its_commands_over_the_harness_own_files(project)
     # the project, so it must not replace the template's own test command with a generic guess
     # (seen on the fresh-clone quickstart: `python3 -m pytest` replaced `bin/alpaca-python -m
     # pytest`, and the host python3 has no yaml).
-    shutil.copy(os.path.join(REPO, "project.yaml"), os.path.join(project, "project.yaml"))
+    shutil.copy(SHIPPED_PROJECT_YAML, os.path.join(project, "project.yaml"))
     shutil.copy(os.path.join(REPO, "pytest.ini"), os.path.join(project, "pytest.ini"))
     cli.main(["init"])
     assert cli.main(["onboard", "--name", "d", "--who", "a:owner", "--what", "w"]) == 0
@@ -160,7 +161,7 @@ def test_onboard_keeps_the_projects_own_pytest_ini_command(project):
     with open(os.path.join(REPO, "pytest.ini"), "rb") as fh:
         shipped = fh.read()
     _manifest_with(project, "pytest.ini", shipped)
-    shutil.copy(os.path.join(REPO, "project.yaml"), os.path.join(project, "project.yaml"))
+    shutil.copy(SHIPPED_PROJECT_YAML, os.path.join(project, "project.yaml"))
     with open(os.path.join(project, "pytest.ini"), "w", encoding="utf-8") as fh:
         fh.write("[pytest]\ntestpaths = tests\n")
     cli.main(["init"])
@@ -176,7 +177,7 @@ def test_onboard_keeps_the_template_command_over_the_shipped_pytest_ini(project)
     with open(os.path.join(REPO, "pytest.ini"), "rb") as fh:
         shipped = fh.read()
     _manifest_with(project, "pytest.ini", shipped)
-    shutil.copy(os.path.join(REPO, "project.yaml"), os.path.join(project, "project.yaml"))
+    shutil.copy(SHIPPED_PROJECT_YAML, os.path.join(project, "project.yaml"))
     shutil.copy(os.path.join(REPO, "pytest.ini"), os.path.join(project, "pytest.ini"))
     cli.main(["init"])
     assert cli.main(["onboard", "--name", "d", "--who", "a:owner", "--what", "w"]) == 0

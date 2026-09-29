@@ -45,6 +45,7 @@ The everyday operating verbs. Small on purpose.
 
 ### Maintenance
 
+- `alpaca release` - initialize GitHub test workflows, approve one exact development commit, build an allowlisted release, run mandatory and project checks, and prepare or publish a clean sync pull request. Configure `release:` in `project.yaml`; checks and publication refuse a commit without a current approval, publication defaults to a dry run and the owner merges. See [Release a clean public copy](docs/release.md) for configuration, receipts, credentials and retries.
 - `alpaca verify` - recompute the append-only event chain and report PASS or FAIL.
 - `alpaca retention` - apply the declared store retention and compaction policy.
 - `alpaca apply` - apply a recorded in-place change with its mandatory snapshot note.
@@ -296,3 +297,10 @@ work an op opens from lives in `intents/queue.md`.
 See `docs/observability-operations.md` for collection contracts, service setup, failure recovery,
 retention budgets and the restore rehearsal. The optional project SQLite runtime is described
 in `setup/sqlite-runtime.md`. Raw native reasoning is excluded from new analytical capture.
+
+
+### mission
+
+`alpaca op pin <op>` puts the op's operation map on the cockpit; `alpaca op unpin <op>` removes it. Both are recorded events and the newest one wins. The map lays the op's phases out in their recorded order, lists each phase's tasks by workstream with the roadmap's states and prerequisite arrows, and shows a phase strip (current phase, done counts, tasks in progress), the last phase-door refusal, tasks held for the owner and blocked tasks. Finished tasks stay on the map as done; it refreshes with the cockpit.
+
+`alpaca mission` keeps a project capability map. Initialize with `mission init --preset generic` (or `alpaca`), inspect with `mission show`, record source changes with `mission scan`, and associate work with `mission link NODE TASK --kind work|fix`. Run a declared check using `mission check --check tests NODE -- COMMAND`. Use `mission show --definition` and `mission define --file FILE --revision REVISION` to update the definition. Check results name their exact inputs and evidence; task completion does not certify a capability.

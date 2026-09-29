@@ -1,116 +1,20 @@
 """Vector arm. sqlite-vec seam + a pure-stdlib brute-force fallback (<=100k blocks, per §3).
 
-Embeddings are a recomputable cache (LEANN-style), never ground truth. If the sqlite-vec
-extension loads, vec0 virtual tables are used; otherwise a plain BLOB table + brute-force cosine.
-Both paths are deterministic given the same vectors.
+Embeddings are a recomputable cache, never ground truth. A portable float64 BLOB
+cache and brute-force cosine keep reads deterministic with or without sqlite-vec.
+The extension setup seam is retained for compatibility; reads use the portable cache.
 """
 from __future__ import annotations
 
-from collections.abc import Sequence
 import math
-import struct
 
 from .db import DB
 
 
-DEFAULT_EMBED_DIM = 64
-MAX_EMBED_DIM = 65536
-_FLOAT_BYTES = 8
-
-
-class VectorValidationError(ValueError):
-    """Vector data is unsafe or incompatible with the configured embedding dimension."""
-
-
-def _validated_embed_dim(db: DB) -> int:
-    raw = db.get_meta("embed_dim")
-    raw = DEFAULT_EMBED_DIM if raw is None else raw
-    if isinstance(raw, bool):
-        raise VectorValidationError("embed_dim must be an integer, not bool")
-    try:
-        dim = int(raw)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise VectorValidationError(f"embed_dim must be an integer: {raw!r}") from exc
-    if str(raw).strip() not in (str(dim), f"+{dim}"):
-        raise VectorValidationError(f"embed_dim must be an integer: {raw!r}")
-    if not 1 <= dim <= MAX_EMBED_DIM:
-        raise VectorValidationError(
-            f"embed_dim must be between 1 and {MAX_EMBED_DIM}, got {dim}"
-        )
-    return dim
-
-
-def _validated_vector(vec: Sequence[float], expected_dim: int | None = None) -> list[float]:
-    if isinstance(vec, (str, bytes, bytearray, memoryview)) or not isinstance(vec, Sequence):
-        raise VectorValidationError("vector must be a numeric sequence")
-    size = len(vec)
-    if size < 1 or size > MAX_EMBED_DIM:
-        raise VectorValidationError(f"vector dimension must be between 1 and {MAX_EMBED_DIM}")
-    if expected_dim is not None and size != expected_dim:
-        raise VectorValidationError(
-            f"vector dimension mismatch: expected {expected_dim}, got {size}"
-        )
-    values: list[float] = []
-    for value in vec:
-        if isinstance(value, bool):
-            raise VectorValidationError("vector values must be finite numbers")
-        try:
-            number = float(value)
-        except (TypeError, ValueError, OverflowError) as exc:
-            raise VectorValidationError("vector values must be finite numbers") from exc
-        if not math.isfinite(number):
-            raise VectorValidationError("vector values must be finite numbers")
-        values.append(number)
-    return values
-
-
-def _pack(vec: Sequence[float], expected_dim: int | None = None) -> bytes:
-    values = _validated_vector(vec, expected_dim)
-    try:
-        return struct.pack(f"<{len(values)}d", *values)
-    except struct.error as exc:
-        raise VectorValidationError("vector cannot be encoded") from exc
-
-
-def _unpack(blob: bytes, expected_dim: int | None = None) -> list[float]:
-    if not isinstance(blob, (bytes, bytearray, memoryview)):
-        raise VectorValidationError("vector blob must be bytes-like")
-    raw = bytes(blob)
-    if not raw or len(raw) % _FLOAT_BYTES:
-        raise VectorValidationError("vector blob length is not aligned to float64 values")
-    size = len(raw) // _FLOAT_BYTES
-    if size > MAX_EMBED_DIM:
-        raise VectorValidationError("vector blob exceeds maximum embedding dimension")
-    if expected_dim is not None and size != expected_dim:
-        raise VectorValidationError(
-            f"vector blob dimension mismatch: expected {expected_dim}, got {size}"
-        )
-    try:
-        values = struct.unpack(f"<{size}d", raw)
-    except struct.error as exc:
-        raise VectorValidationError("vector blob cannot be decoded") from exc
-    return _validated_vector(values, expected_dim)
-
-
-def _cosine(a: list[float], b: list[float]) -> float:
-    try:
-        av = _validated_vector(a)
-        bv = _validated_vector(b, len(av))
-    except VectorValidationError:
-        return 0.0
-    scale_a = max(abs(x) for x in av)
-    scale_b = max(abs(x) for x in bv)
-    if scale_a == 0.0 or scale_b == 0.0:
-        return 0.0
-    scaled_a = [x / scale_a for x in av]
-    scaled_b = [x / scale_b for x in bv]
-    dot = sum(x * y for x, y in zip(scaled_a, scaled_b))
-    na = math.sqrt(sum(x * x for x in scaled_a))
-    nb = math.sqrt(sum(y * y for y in scaled_b))
-    score = dot / (na * nb)
-    if not math.isfinite(score):
-        return 0.0
-    return max(-1.0, min(1.0, score))
+from .vector_codec import (
+    DEFAULT_EMBED_DIM, MAX_EMBED_DIM, VectorValidationError,
+    _validated_embed_dim, _validated_vector, _pack, _unpack, _cosine,
+)
 
 
 def try_load_sqlite_vec(db: DB) -> bool:
@@ -159,22 +63,14 @@ def _has_vec0(db: DB) -> bool:
 
 def upsert_block_vec(db: DB, block_id: str, vec: list[float]) -> None:
     packed = _pack(vec, _validated_embed_dim(db))
-    if _has_vec0(db):
-        db.conn.execute("INSERT OR REPLACE INTO vec_blocks(block_id, embedding) VALUES(?, ?)",
-                        (block_id, packed))
-    else:
-        db.conn.execute("INSERT OR REPLACE INTO vec_blocks_fallback(block_id, embedding) VALUES(?, ?)",
-                        (block_id, packed))
+    db.conn.execute("INSERT OR REPLACE INTO vec_blocks_fallback(block_id, embedding) VALUES(?, ?)",
+                    (block_id, packed))
 
 
 def upsert_node_vec(db: DB, node_id: str, vec: list[float]) -> None:
     packed = _pack(vec, _validated_embed_dim(db))
-    if _has_vec0(db):
-        db.conn.execute("INSERT OR REPLACE INTO vec_nodes(node_id, embedding) VALUES(?, ?)",
-                        (node_id, packed))
-    else:
-        db.conn.execute("INSERT OR REPLACE INTO vec_nodes_fallback(node_id, embedding) VALUES(?, ?)",
-                        (node_id, packed))
+    db.conn.execute("INSERT OR REPLACE INTO vec_nodes_fallback(node_id, embedding) VALUES(?, ?)",
+                    (node_id, packed))
 
 
 def knn_blocks(db: DB, qvec: list[float], limit: int = 50) -> list[tuple[str, float]]:
@@ -185,8 +81,6 @@ def knn_blocks(db: DB, qvec: list[float], limit: int = 50) -> list[tuple[str, fl
         return []
     rows = db.conn.execute(
         "SELECT block_id, embedding FROM vec_blocks_fallback"
-    ).fetchall() if not _has_vec0(db) else db.conn.execute(
-        "SELECT block_id, embedding FROM vec_blocks"
     ).fetchall()
     scored = []
     active = {r["block_id"] for r in db.conn.execute("SELECT block_id FROM blocks WHERE status='active'")}
@@ -210,7 +104,7 @@ def knn_nodes(db: DB, qvec: list[float], limit: int = 20) -> list[tuple[str, flo
         query = _validated_vector(qvec, _validated_embed_dim(db))
     except VectorValidationError:
         return []
-    tbl = "vec_nodes" if _has_vec0(db) else "vec_nodes_fallback"
+    tbl = "vec_nodes_fallback"
     rows = db.conn.execute(f"SELECT node_id, embedding FROM {tbl}").fetchall()
     scored = []
     for r in rows:

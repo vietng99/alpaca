@@ -22,6 +22,8 @@ This skill drives an op through the board and keeps every claim tied to a proof.
 
 ## Working the board
 
+- Organize every new task into a named feature/workstream and work area when creating it; record actual prerequisites (or independence) and exclusive resources explicitly. Use mapped `task add`; update relationships with `task map` as the plan changes. See `docs/operations-hub.md` under "Maintaining a useful checklist" for commands. Do not use phases as feature groups or infer dependencies from task numbers.
+
 - `alpaca task add` files a task; `alpaca task claim` takes it; `alpaca task move <id> <state>`
   advances it.
 - `task add` requires `--title`: a short name of at most 60 characters, e.g. "login page first release". The

@@ -172,6 +172,14 @@ def cmd_op(args):
         (opindex.archive if args.op_verb == "archive" else opindex.unarchive)(
             conn, args.id, session=sid, reason=args.reason)
         print("%s %sd" % (args.id, args.op_verb)); return cli.PASS
+    # A pinned op gets its own operation map on the cockpit. Pin and unpin are recorded events and
+    # the newest one wins; the cockpit never infers a pin from activity.
+    if args.op_verb in ("pin", "unpin"):
+        if not db.rows(conn, "ops", "id=?", (args.id,)):
+            print("GATE alpaca-op-%s: FAIL (no op %s)" % (args.op_verb, args.id)); return cli.FAIL
+        db.append_event(conn, session=sid, actor="alpaca", kind="op-" + args.op_verb, op=args.id,
+                        ref=args.id, data={"pinned": args.op_verb == "pin"})
+        print("%s %sned" % (args.id, args.op_verb)); return cli.PASS
     if args.op_verb == "index":
         from alpaca import opindex
         for e in opindex.list(conn, state=args.state):
@@ -199,8 +207,29 @@ def _contract_flags(parser):
     parser.add_argument("--stage", help="the profile stage this task runs, if any (alpaca/profile.py stages)")
     parser.add_argument("--source", help="where the contract is restated from")
 
+def _mapping_flags(parser):
+    membership = parser.add_mutually_exclusive_group()
+    membership.add_argument('--group', help='recorded workstream ID')
+    membership.add_argument('--inherit', help='inherit only the group of a same-operation task')
+    order = parser.add_mutually_exclusive_group()
+    order.add_argument('--after', action='append', help='prerequisite task; repeatable')
+    order.add_argument('--independent', action='store_true', help='explicitly no task prerequisites')
+    resources = parser.add_mutually_exclusive_group()
+    resources.add_argument('--resource', action='append', help='exclusive shared resource; repeatable')
+    resources.add_argument('--no-resources', action='store_true', help='explicitly no exclusive resources')
+    parser.add_argument('--requires-stage', action='append', help='required profile stage; repeatable')
+
+
+def _mapping_args(args):
+    result = {key: getattr(args, key) for key in ('group', 'inherit') if getattr(args, key, None)}
+    if args.after is not None or args.independent: result['after'] = args.after or []
+    if args.resource is not None or args.no_resources: result['resources'] = args.resource or []
+    if args.requires_stage is not None: result['requires_stages'] = args.requires_stage
+    return result or None
+
+
 def add_task(conn, op, statement, title, *, phase=None, why=None, session="cli", actor="human",
-             extra=None):
+             extra=None, mapping=None):
     """Add one open task to `op`: the task-add event and the tasks row in one transaction. Returns
     the new task id. `extra` adds keys to the event data (intake names the runbook stage a task came
     from there, so a later intake finds the task again). The caller has checked the op and title."""
@@ -215,12 +244,58 @@ def add_task(conn, op, statement, title, *, phase=None, why=None, session="cli",
         db.upsert(conn, "tasks", "id", {"id": tid, "op": op, "phase": phase, "statement": statement,
                                          "title": title, "status": "open", "why": why, "created": now,
                                          "updated": now})
+        if mapping is not None:
+            from alpaca import taskplan
+            taskplan.map_task(conn, op, tid, mapping, session=session, actor=actor, in_transaction=True)
     return tid
 
 
 @cli.command("task")
 def cmd_task(args):
     conn = db.connect(cli._root()); sid = args.session or "cli"; now = util.now_iso()
+    if args.task_verb == "planning":
+        value = 'required' if args.require else 'optional' if args.allow_unmapped else None
+        if value:
+            with db.transaction(conn):
+                db.meta_set(conn, 'task-planning', value)
+                db.append_event(conn, session=sid, actor=sid, kind='task-planning-policy',
+                                data={'policy': value}, conn_in_txn=True)
+        print('Task organization: ' + db.meta_get(conn, 'task-planning', 'optional'))
+        return cli.PASS
+    if args.task_verb in ('group', 'map'):
+        from alpaca import taskplan
+        try:
+            if args.task_verb == 'group':
+                taskplan.group(conn, args.op, args.group, args.title, args.category, session=sid, actor=sid)
+                print('%s group %s saved' % (args.op, args.group))
+            else:
+                rows = db.rows(conn, 'tasks', 'id=?', (args.id,))
+                if not rows: raise ValueError('no task %s' % args.id)
+                mapping = _mapping_args(args)
+                if not mapping: raise ValueError('provide the mapping fields to change')
+                taskplan.map_task(conn, rows[0]['op'], args.id, mapping, session=sid, actor=sid)
+                print('%s mapped' % args.id)
+        except ValueError as exc:
+            print('GATE alpaca-task-%s: FAIL (%s)' % (args.task_verb, exc)); return cli.FAIL
+        return cli.PASS
+    if args.task_verb == "plan":
+        from alpaca import taskplan
+        try:
+            if not db.rows(conn, 'ops', 'id=?', (args.op,)):
+                raise ValueError('no operation %s' % args.op)
+            if args.show:
+                print(json.dumps(taskplan.latest(conn, args.op), indent=2, ensure_ascii=True))
+            else:
+                with open(args.file, encoding='utf-8') as stream:
+                    raw = stream.read(512 * 1024 + 1)
+                if len(raw) > 512 * 1024:
+                    raise ValueError('plan exceeds 512 KiB')
+                event = taskplan.record(conn, args.op, json.loads(raw), session=sid, actor=args.by or sid)
+                print('%s plan recorded (revision %s)' % (args.op, event['id']))
+        except (ValueError, OSError, TypeError) as exc:
+            print('GATE alpaca-task-plan: FAIL (%s)' % exc)
+            return cli.FAIL
+        return cli.PASS
     if args.task_verb == "add":
         ops_rows = db.rows(conn, "ops", "id=?", (args.op,))
         if not ops_rows: print("GATE alpaca-task-add: FAIL (no op %s)" % args.op); return cli.FAIL
@@ -230,8 +305,15 @@ def cmd_task(args):
                   'the statement is the full description)' % TITLE_MAX); return cli.FAIL
         if len(title) > TITLE_MAX:
             print("GATE alpaca-task-add: FAIL (title is %d chars; keep it to %d)" % (len(title), TITLE_MAX)); return cli.FAIL
-        tid = add_task(conn, args.op, args.statement, title, phase=args.phase, why=args.why,
-                       session=sid, actor="human")
+        mapping = _mapping_args(args)
+        if mapping is None and db.meta_get(conn, 'task-planning') == 'required':
+            print('GATE alpaca-task-add: FAIL (organization required: use --group or --inherit, '
+                  '--after or --independent, and --resource or --no-resources)'); return cli.FAIL
+        try:
+            tid = add_task(conn, args.op, args.statement, title, phase=args.phase, why=args.why,
+                           session=sid, actor="human", mapping=mapping)
+        except ValueError as exc:
+            print('GATE alpaca-task-add: FAIL (%s)' % exc); return cli.FAIL
         if any(getattr(args, part, None) for part in ("input", "expected", "done_bar", "fail_case")):
             from alpaca import taskcontract
             try:
@@ -425,11 +507,27 @@ def _parser(sub):
     ov.add_parser("list")
     ar = ov.add_parser("archive"); ar.add_argument("id"); ar.add_argument("--reason")
     ua = ov.add_parser("unarchive"); ua.add_argument("id"); ua.add_argument("--reason")
+    ov.add_parser("pin", help="show the op's phase map on the cockpit").add_argument("id")
+    ov.add_parser("unpin", help="remove the op's phase map from the cockpit").add_argument("id")
     ix = ov.add_parser("index"); ix.add_argument("--state")
     tk = sub.add_parser("task"); tv = tk.add_subparsers(dest="task_verb")
+    pl = tv.add_parser('plan', help='record workstreams, dependencies and resource constraints for an operation')
+    pl.add_argument('op'); pl.add_argument('--by')
+    pm = pl.add_mutually_exclusive_group(required=True)
+    pm.add_argument('--file', help='version-1 JSON plan, including its previous revision')
+    pm.add_argument('--show', action='store_true', help='read the latest plan and revision')
     a = tv.add_parser("add"); a.add_argument("op"); a.add_argument("statement"); a.add_argument("--phase"); a.add_argument("--why")
     a.add_argument("--title", help="required: short display name, at most %d chars" % TITLE_MAX)
-    _contract_flags(a)
+    _contract_flags(a); _mapping_flags(a)
+    gr = tv.add_parser('group', help='create or rename a workstream within a work area')
+    gr.add_argument('op'); gr.add_argument('group')
+    gr.add_argument('--title', required=True); gr.add_argument('--category', required=True)
+    mp = tv.add_parser('map', help='edit task relationships without replacing the operation plan')
+    mp.add_argument('id'); _mapping_flags(mp)
+    policy = tv.add_parser('planning', help='set project-local organization policy for new CLI tasks')
+    choice = policy.add_mutually_exclusive_group()
+    choice.add_argument('--require', action='store_true'); choice.add_argument('--allow-unmapped', action='store_true')
+    choice.add_argument('--show', action='store_true')
     ct = tv.add_parser("contract", help="record a task's input, expected output, done bar and fail cases; the newest is current")
     ct.add_argument("id"); _contract_flags(ct); ct.add_argument("--file", help="a JSON object with the same keys")
     ct.add_argument("--by"); ct.add_argument("--show", action="store_true")

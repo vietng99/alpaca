@@ -361,6 +361,7 @@ def _data_sig(root):
 GENERIC_PATHS = frozenset((
     "/", "/index.html", "/login", "/logout", "/workspaces.json", "/hub", "/hub/", "/hub/index.html",
     "/hub/overview.json", "/hub/history.json", "/hub/system.json", "/hub/runs.json",
+    "/hub/mission.json", "/hub/mission-evidence.json",
     "/hub/documents.json", "/hub/document.json", "/hub/session.json", "/hub/analytics.json",
     "/hub/analytics-index.json", "/hub/analytics-children.json",
     "/analytics", "/analytics.html", "/analytics/", "/analytics/index.html", "/analytics/legacy/",
@@ -1073,6 +1074,9 @@ def make_handler(live, root, remote=False):
             assets = {"hub.css": "text/css; charset=utf-8", "hub.js": "text/javascript; charset=utf-8",
                       "analytics.js": "text/javascript; charset=utf-8", "analytics.css": "text/css; charset=utf-8",
                       "cockpit.js": "text/javascript; charset=utf-8", "cockpit.css": "text/css; charset=utf-8",
+                      "mission.js": "text/javascript; charset=utf-8", "mission.css": "text/css; charset=utf-8",
+                      "roadmap.js": "text/javascript; charset=utf-8", "roadmap.css": "text/css; charset=utf-8",
+                      "roadmap-routing.js": "text/javascript; charset=utf-8",
                       "runlog.js": "text/javascript; charset=utf-8", "runlog.css": "text/css; charset=utf-8",
                       "live.js": "text/javascript; charset=utf-8", "live.css": "text/css; charset=utf-8",
                       "theme.js": "text/javascript; charset=utf-8", "theme.css": "text/css; charset=utf-8",
@@ -1105,6 +1109,14 @@ def make_handler(live, root, remote=False):
             try:
                 if path == "/hub/overview.json":
                     value = hub.overview(root)
+                elif path == "/hub/mission.json":
+                    from alpaca import mission
+                    value = mission.project(root, at=one("at") or None)
+                elif path == "/hub/mission-evidence.json":
+                    if not files_auth(root):
+                        return self._json({"error": "Evidence reading requires a configured web login"}, 403)
+                    from alpaca import mission
+                    value = mission.evidence(root, int(one("event", "0")))
                 elif path == "/hub/history.json":
                     value = hub.history(root, before=one("before") or None, limit=int(one("limit", "50")),
                                         query=one("q"), kind=one("kind", "work"), session=one("session"), ref=one("ref"))

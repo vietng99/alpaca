@@ -1,9 +1,9 @@
 """M3.10 -- the skills plugin bundled from the canonical shared source.
 
-Proof test for the Done-when (the fifteen skills of the plugin bundle):
+Proof test for the Done-when (the fourteen skills of the plugin bundle):
 
-  * all fifteen skills named by P-010 are present in the bundle at the entry-point
-    path the plan table records for each: SKILL.md at the skill root for eleven of
+  * all fourteen skills named by P-010 are present in the bundle at the entry-point
+    path the plan table records for each: SKILL.md at the skill root for ten of
     them, the nested skills/eli5/SKILL.md and skills/i-have-adhd/SKILL.md, the seven
     caveman/skills/*/SKILL.md, and RULE.md (no SKILL.md) for html-safe;
   * every support file, hook script and hook data file the table names is recorded in
@@ -16,7 +16,7 @@ Proof test for the Done-when (the fifteen skills of the plugin bundle):
   * the eleven hook locations are flattened into one plugin/alpaca/hooks/ and the flattening
     is traceable back to each hook's upstream path;
   * the plugin hooks are registered under the M1.5 fail-open and timeout contract;
-  * the bundle contains no skill beyond those fifteen;
+  * the bundle contains no skill beyond those fourteen;
   * the six Alpaca-native skills alpaca-first-chat, alpaca-onboard, alpaca-op,
     alpaca-runbook-forge, alpaca-from-notes and alpaca-interview ship under .claude/skills/.
 
@@ -33,12 +33,12 @@ REPO = os.path.dirname(os.path.dirname(HERE))
 PLUGIN = os.path.join(REPO, "plugin", "alpaca")
 MANIFEST_PATH = os.path.join(PLUGIN, "BUNDLE-MANIFEST.json")
 
-# The fifteen skills P-010 names, and the entry-point shape the plan table records.
+# The fourteen skills P-010 names, and the entry-point shape the plan table records.
 # entry: relative path(s) from the skill dir plugin/alpaca/skills/<name>/ to its SKILL.md.
 # "html-safe" is the one skill with no SKILL.md; its entry is a RULE.md under plugin/alpaca/rules/.
-ROOT_ELEVEN = [
+ROOT_TEN = [
     "spear", "sang", "sam", "flare", "humanizer",
-    "autodrive", "timebomb", "capture", "vsys", "nuclear", "napalm",
+    "autodrive", "capture", "vsys", "nuclear", "napalm",
 ]
 CAVEMAN_SUBSKILLS = [
     "caveman", "caveman-commit", "caveman-review", "caveman-stats",
@@ -46,7 +46,7 @@ CAVEMAN_SUBSKILLS = [
 ]
 # skill -> list of entry-point paths relative to plugin/alpaca/
 EXPECTED_ENTRY = {}
-for _n in ROOT_ELEVEN:
+for _n in ROOT_TEN:
     EXPECTED_ENTRY[_n] = ["skills/%s/SKILL.md" % _n]
 EXPECTED_ENTRY["eli5"] = ["skills/eli5/skills/eli5/SKILL.md"]
 EXPECTED_ENTRY["i-have-adhd"] = ["skills/i-have-adhd/skills/i-have-adhd/SKILL.md"]
@@ -55,9 +55,9 @@ EXPECTED_ENTRY["caveman"] = [
 ]
 EXPECTED_ENTRY["html-safe"] = ["rules/html-safe/RULE.md"]
 
-ALL_FIFTEEN = set(EXPECTED_ENTRY)
+ALL_FOURTEEN = set(EXPECTED_ENTRY)
 
-# The four skills that carry an upstream LICENSE; the other eleven are part of Alpaca (MIT).
+# The four skills that carry an upstream LICENSE; the other ten are part of Alpaca (MIT).
 LICENSED = {"eli5", "humanizer", "caveman", "i-have-adhd"}
 
 # The eleven hook files that flatten into plugin/alpaca/hooks/.
@@ -93,14 +93,14 @@ def rows(manifest):
     return {r["name"]: r for r in manifest["skills"]}
 
 
-# ---------------------------------------------------------------- fifteen skills
+# ---------------------------------------------------------------- fourteen skills
 
-def test_exactly_the_fifteen_named_skills(rows):
+def test_exactly_the_fourteen_named_skills(rows):
     # positive: every P-010 skill is a manifest row.
-    for name in ALL_FIFTEEN:
+    for name in ALL_FOURTEEN:
         assert name in rows, "missing skill row: %s" % name
-    # negative: no extra skill row beyond the fifteen.
-    assert set(rows) == ALL_FIFTEEN, "unexpected skill rows: %s" % (set(rows) - ALL_FIFTEEN)
+    # negative: no extra skill row beyond the fourteen.
+    assert set(rows) == ALL_FOURTEEN, "unexpected skill rows: %s" % (set(rows) - ALL_FOURTEEN)
 
 
 def test_entry_points_present_at_the_recorded_path(rows):
@@ -202,8 +202,8 @@ def test_licensed_skills_reference_a_license_file(rows):
 
 
 def test_own_skills_are_marked_part_of_alpaca(rows):
-    for name in ALL_FIFTEEN - LICENSED:
-        # the eleven without an upstream license are the owner's own work, part of Alpaca (MIT).
+    for name in ALL_FOURTEEN - LICENSED:
+        # the ten without an upstream license are the owner's own work, part of Alpaca (MIT).
         assert rows[name]["license"] == "LICENSE (part of Alpaca, MIT)", \
             "%s should be marked part of Alpaca" % name
 
@@ -298,7 +298,7 @@ def test_bundle_skill_dirs_are_all_named(rows):
                if os.path.isdir(os.path.join(skills_dir, d))}
     # every directory under plugin/alpaca/skills/ is one of the named skills (minus html-safe,
     # which lives under rules/, not skills/).
-    allowed = (ALL_FIFTEEN - {"html-safe"})
+    allowed = (ALL_FOURTEEN - {"html-safe"})
     assert on_disk <= allowed, "unnamed skill dirs on disk: %s" % (on_disk - allowed)
 
 

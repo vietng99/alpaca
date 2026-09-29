@@ -102,6 +102,10 @@ dashboard is optional for Claude as well.
 
 A `bin/alpaca` verb run without `--session` takes its session from `ALPACA_SESSION_ID`, then from `CLAUDE_CODE_SESSION_ID`, which Claude Code exports in every shell call. A task move, a proof seal or a message sent from a Claude session is therefore recorded under that session and not under the placeholder `cli`. Outside any session the placeholder still applies.
 
+## Shared task planning
+
+Both operators assign a named feature/workstream, work area, prerequisites and resources when they add a task. Reuse an existing group where it fits. Keep the map current when work splits or its prerequisites change. Follow the commands in [Maintaining a useful checklist](operations-hub.md#maintaining-a-useful-checklist); this also covers the project-local required-planning policy.
+
 ## Shared boundaries
 
 The CLI shim pins its own root. Python callers can select an explicit root;
@@ -134,3 +138,72 @@ and any skill of your own) belongs to the project. Codex reads the same SKILL.md
 ## Optional bundled skills
 
 The root lifecycle adapters do not require a plugin installation. To load the optional bundled skills in Claude Code, launch from the project root with `ALPACA_ROOT="$PWD" claude --plugin-dir ./plugin/alpaca`. Codex may read the relevant bundled SKILL.md files directly. No global plugin or agent configuration is installed by bootstrap.
+
+## Project wiki evidence
+
+Rune2 is the local project wiki. Use `bin/alpaca wiki status` to inspect its corpus,
+provider settings, transcript coverage and missing event count. These counts are separate
+from the operational decision pages shown by the dashboard.
+
+Before using historical material for a new task or after a resume, run:
+
+```
+bin/alpaca wiki context "SQLite offline" --refresh
+bin/alpaca wiki query "Why does the project use SQLite?"
+```
+
+`context` returns bounded cited evidence. `query` returns JSON with the answer verdict,
+source document/block pointers, currency and completeness checks. An abstention is a
+successful query with no supported answer, not a claim that the source does not exist.
+`--refresh` replays recorded sources through a fixed cutoff before querying. For explicit
+catch-up without a query, use `bin/alpaca wiki recover`. Run `wiki status` afterward; new
+lifecycle or recovery events may arrive after the reported cutoff.
+
+Both operators share the query door. Codex can request startup context explicitly:
+
+```
+bin/alpaca --session SESSION session start --operator codex --wiki-question "SQLite offline"
+```
+
+A resumed session with a claimed task also attempts bounded context from that task's title.
+The boot message names the query commands and reports an unavailable wiki without blocking
+operational startup. Check capture freshness before relying on that context.
+
+Index a local authored document with a stable identity:
+
+```
+bin/alpaca wiki ingest docs/design.md --doc-id wiki/design.md
+```
+
+This copies its content into the local vault through the normal write door. For private
+material use `--doc-id wiki/private/design.md`; ordinary wiki paths remain eligible for
+public extraction after the existing privacy scan. Existing private sources cannot be
+copied into a public wiki path with this command. The
+stable document identity lets later ingests update the source while retaining history;
+normal shrink and integrity gates still apply. Ingestion does not grant policy authority
+or publish the content. Raw events and visible transcript exchanges remain evidence-only.
+Hidden reasoning records are excluded. Visible tool inputs and results use the same secret
+redaction as the transcript viewer; captured text still has no instruction authority.
+
+Configuration precedence is defaults, then `project.yaml` `wiki_providers`, then
+`.alpaca/wiki/rune.toml`. Unavailable provider names fail visibly. For example:
+
+```yaml
+wiki_providers:
+  embedder: deterministic
+  reranker: lexical
+  entailer: structural
+  llm_extractor: 'off'
+  meta:
+    retrieval_profile: full
+```
+
+The shipped providers run locally without external models. The deterministic hash embedder
+is a retrieval fallback, not a trained semantic model. Full/hybrid profiles maintain vector
+indexes, including backfill and invalidation on embedding changes. Narrow stays the default.
+The answer checks handle ordinary English grammatical variants conservatively; they are
+not a general language understanding guarantee.
+
+Dream stays disarmed and unscheduled; lessons and knowledge admission remain explicit library
+capabilities. Capture and retrieval do not automatically promote instructions or lessons.
+Evaluate any future experiential-memory service separately from this wiki integration.

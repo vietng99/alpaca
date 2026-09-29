@@ -76,11 +76,13 @@ TABLE: dict[str, dict] = {
     "retention": {"keys": ("verdict", "kept", "dropped"), "group": "maintenance"},
     "apply": {"keys": ("verdict", "change"), "group": "maintenance"},
     "token": {"keys": ("verdict", "token"), "group": "maintenance"},
+    "mission": {"keys": ("status", "revision", "nodes", "result"), "group": "record"},
     # record and coordination
     "day": {"keys": ("date", "totals", "ops", "unsorted"), "group": "record"},
     "proof": {"keys": ("verdict", "path", "sha256", "sections", "evidence"), "group": "record"},
     "review": {"keys": ("verdict", "card", "rows"), "group": "record"},
     "barrier": {"keys": ("verdict", "tier", "allowed"), "group": "record"},
+    "release": {"keys": ("receipt", "tree", "tree_hash", "status"), "group": "output"},
     # specs and runbooks
     "runbook": {"keys": ("verdict", "runbook", "spec", "errors", "warnings", "coverage"), "group": "spec"},
     "intake": {"keys": ("verdict", "op", "spec", "runbook", "rows", "tasks", "profile", "dry_run"),

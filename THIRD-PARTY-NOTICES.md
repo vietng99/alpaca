@@ -141,7 +141,6 @@ of Alpaca under `LICENSE`:
 | nuclear | `plugin/alpaca/skills/nuclear/**` |
 | napalm | `plugin/alpaca/skills/napalm/**` |
 | autodrive | `plugin/alpaca/skills/autodrive/**`, `plugin/alpaca/hooks/autodrive-*.sh` |
-| timebomb | `plugin/alpaca/skills/timebomb/**` |
 | sam | `plugin/alpaca/skills/sam/**`, `plugin/alpaca/hooks/sam-*`, `style/presets/**` |
 | sang | `plugin/alpaca/skills/sang/**` |
 | spear | `plugin/alpaca/skills/spear/**` |

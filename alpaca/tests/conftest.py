@@ -3,6 +3,25 @@ import os, shutil, pytest
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 
+
+def shipped_project_yaml(repo=REPO):
+    """The project.yaml a release ships. A private development tree names its shipped template
+    as the release overlay for project.yaml; a clean distribution ships project.yaml itself."""
+    import yaml
+    path = os.path.join(repo, "project.yaml")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            doc = yaml.safe_load(fh) or {}
+    except (OSError, yaml.YAMLError):
+        return path
+    overlay = ((doc.get("release") or {}).get("overlays") or {}).get("project.yaml")
+    if isinstance(overlay, str) and os.path.isfile(os.path.join(repo, overlay)):
+        return os.path.join(repo, overlay)
+    return path
+
+
+SHIPPED_PROJECT_YAML = shipped_project_yaml()
+
 # Integration glue for the vendored wiki suite. Wiki tests authored across M2.8-M2.16 install
 # sys.modules.setdefault(...) stand-ins for wiki modules that were not vendored yet at authoring
 # time. Every such module is now real, so import them here in the root conftest (loaded before any

@@ -20,6 +20,9 @@ from . import templates as T
 _NUM = re.compile(r"-?\d+(?:[.,]\d+)?|\d{4}-\d{2}-\d{2}")
 _SENT = re.compile(r"[^.!?。！？\n]+(?:[.!?。！？]+|\n|$)")
 _WORD = re.compile(r"[^\W_]+", re.UNICODE)
+_NEGATION = re.compile(r"\b(?:not|no|never|cannot|\w+n['\u2019]t)\b", re.IGNORECASE)
+_CAUSE = re.compile(r"\b(?:because|due to|owing to|as a result of)\b", re.IGNORECASE)
+_EVIDENCE_BOUNDARY = re.compile(r"(?<!\d)\.|\.(?!\d)|[!?。！？\n]+")
 _QUESTION_OPENERS = frozenset({
     "who", "what", "when", "where", "why", "how", "which",
     "is", "are", "was", "were", "do", "does", "did", "can", "could", "would", "should",
@@ -78,22 +81,68 @@ def entailment_gate(sentences, winner_texts, entail) -> tuple[list[str], list[st
 
 
 def _required_subclaim_entail(claim: str, source: str, entail) -> tuple[str, float]:
-    """Evaluate a planned question fragment against evidence without treating question words as facts."""
-    label, score = entail(claim, source)
-    words = [w.lower() for w in _WORD.findall(claim)]
-    if label == "supported" or not words or words[0] not in _QUESTION_OPENERS:
-        return label, score
-    required = [w for w in words if w not in _QUESTION_FILLER and w != "s"]
-    available = [w.lower() for w in _WORD.findall(source)]
+    """Check question coverage, retaining exact entities, numbers, polarity and causal evidence.
 
-    def matches(want: str) -> bool:
-        return any(want == got or (len(want) >= 4 and len(got) >= 4
-                                   and (want.startswith(got) or got.startswith(want)))
-                   for got in available)
+    The deterministic provider sees question words as asserted facts. For questions only, allow
+    regular present-tense inflections of lowercase words instead of arbitrary prefix matches.
+    This is a conservative lexical fallback, not a general semantic or causal inference model.
+    """
+    words = _WORD.findall(claim)
+    if not words or words[0].lower() not in _QUESTION_OPENERS:
+        return entail(claim, source)
+    required = [w for w in words if w.lower() not in _QUESTION_FILLER and w.lower() != "s"]
+    claim_numbers = set(_NUM.findall(claim))
 
-    if required and all(matches(word) for word in required):
-        return "supported", 1.0
-    return label, score
+    def inflect(base: str) -> str:
+        if base.endswith("y") and base[-2] not in "aeiou":
+            return base[:-1] + "ies"
+        if base.endswith(("s", "x", "z", "ch", "sh", "o")):
+            return base + "es"
+        return base + "s"
+
+    def matches(want: str, got: str) -> bool:
+        if want.lower() == got.lower():
+            return True
+        # Names and identifiers must match exactly. Only complete, bounded grammatical suffixes
+        # are allowed; e.g. use/uses and copy/copies, never SQL/SQLite or 2026/20260.
+        return (want.islower() and got.islower() and want.isalpha() and got.isalpha()
+                and min(len(want), len(got)) >= 3
+                and (inflect(want) == got or inflect(got) == want))
+
+    # Preserve decimal/version tokens while preventing a reason in another sentence from lending
+    # spurious coverage to this one.
+    for sentence in _EVIDENCE_BOUNDARY.split(source):
+        evidence = sentence
+        if words[0].lower() == "why":
+            cause = _CAUSE.search(sentence)
+            if not cause:
+                continue
+            reason = _WORD.findall(sentence[cause.end():])
+            if not any(w.lower() not in _QUESTION_FILLER for w in reason):
+                continue
+            # The requested assertion must precede the causal marker, not merely occur in its reason.
+            evidence = sentence[:cause.start()]
+        # Negation inside an explanation does not negate the assertion it explains. Providers also
+        # receive only this premise so their polarity veto cannot mistake a negative reason for it.
+        if not claim_numbers.issubset(set(_NUM.findall(evidence))):
+            continue
+        if bool(_NEGATION.search(claim)) != bool(_NEGATION.search(evidence)):
+            continue
+        available = _WORD.findall(evidence)
+        if claim_numbers:
+            # Mere co-occurrence cannot bind a number to an entity. Demand a contiguous content
+            # phrase for numeric questions, conservatively abstaining on reordered/paraphrased
+            # evidence rather than borrowing PostgreSQL 16 to answer a question about SQLite 16.
+            content = [w for w in available if w.lower() not in _QUESTION_FILLER and w.lower() != "s"]
+            if not any(all(matches(want, got) for want, got in zip(required, content[start:]))
+                       for start in range(len(content) - len(required) + 1)):
+                continue
+        if required and all(any(matches(word, got) for got in available) for word in required):
+            label, score = entail(claim, evidence)
+            if label == "contradicted":
+                return label, score
+            return "supported", 1.0
+    return "unsupported", 0.0
 
 
 def evaluate(db: DB, entailer, asof: AsOf, plan_templates: list[str],

@@ -28,6 +28,15 @@ def handle(payload):
     except Exception:
         if payload.get("_strict"):
             raise
+    # t-027: a prompt is work, so the session keeps the task leases it holds, and takes again one
+    # that lapsed while it sat idle. First, before pad.next_action below sweeps expired leases.
+    try:
+        from alpaca import claims
+        claims.keep_alive(conn, sid)
+    except Exception as exc:
+        common.record_failure(payload, "user_prompt_keep_alive", exc)
+        if payload.get("_strict"):
+            raise
     band = common.prompt_band(payload)
     parts = []
     if n % EVERY == 0:
@@ -74,8 +83,10 @@ def claim_nudge(conn, sid):
     """One reminder line when `sid` holds no live claim and edited a file after its last claim
     event or task move; None otherwise. A session that only reads or talks is left alone."""
     from alpaca import sessions_view
-    if sessions_view.claims_by_session(conn, sessions_view.record_now(conn)).get(sid):
-        return None
+    now = sessions_view.record_now(conn)
+    if sessions_view.claims_by_session(conn, now).get(sid) or \
+            sessions_view.lapsed_by_session(conn, now).get(sid):
+        return None                                     # it holds a task; a lapse is not "no claim"
     marks = "','".join(EDIT_TOOLS)
     edit = conn.execute(
         "SELECT MAX(id) FROM events WHERE session=? AND kind='heartbeat' AND json_valid(data) "

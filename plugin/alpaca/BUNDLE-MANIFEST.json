@@ -2,7 +2,7 @@
   "bundle": "alpaca",
   "source_root": "an earlier shared-skills snapshot",
   "note": "Required support files are included; runtime instructions use the bundled Alpaca APIs and native operator tools. Historical non-vendored rows record lineage only and are not runtime dependencies. Every physical plugin file is hashed under skills, hooks, or local_files.",
-  "license_review": "Four skills carry an upstream MIT LICENSE file (caveman, humanizer, eli5, i-have-adhd). The other eleven (spear, sang, sam, flare, autodrive, timebomb, capture, vsys, nuclear, napalm, html-safe) are the owner's own work and are part of Alpaca under the root LICENSE (MIT). THIRD-PARTY-NOTICES.md is the inventory.",
+  "license_review": "Four skills carry an upstream MIT LICENSE file (caveman, humanizer, eli5, i-have-adhd). The other ten (spear, sang, sam, flare, autodrive, capture, vsys, nuclear, napalm, html-safe) are the owner's own work and are part of Alpaca under the root LICENSE (MIT). THIRD-PARTY-NOTICES.md is the inventory.",
   "transcript_parser_debt": {
     "choice": "replaced-by-drain",
     "note": "The remember/capture-side transcript parser that read zero exchanges on the current model format is not revived here; the M2 session drain and alpaca sort path is the shipped capture route, and the record is its sink."
@@ -301,39 +301,6 @@
         {
           "upstream_path": "autodrive/autodrive-badge.sh",
           "sha256": "525a474bdac1cc7cd7f142b5690bd074b10ce1ec9d26bc2ee499c4e9ebab073f",
-          "vendored": false,
-          "role": "support"
-        }
-      ]
-    },
-    {
-      "name": "timebomb",
-      "upstream_path": "timebomb",
-      "entry_points": [
-        "skills/timebomb/SKILL.md"
-      ],
-      "license": "LICENSE (part of Alpaca, MIT)",
-      "symlink": null,
-      "resolved_target": null,
-      "files": [
-        {
-          "upstream_path": "timebomb/SKILL.md",
-          "bundle_path": "plugin/alpaca/skills/timebomb/SKILL.md",
-          "sha256": "97a3bd7dd923c5a4d34c2864bc42ed4fdf9d3d003a978a0b7bcd90a466c7cb7f",
-          "vendored": true,
-          "converted": "em-dash-to-hyphen",
-          "upstream_sha256": "d76122673fa0949107029b4f84dcea38e6e3cb447e2240be1215f5582de38196",
-          "role": "entry-point"
-        },
-        {
-          "upstream_path": "timebomb/install.sh",
-          "sha256": "b2ecef2b1e45e4de808086fa52f750b57151388217571a65f83ebc0a2d5b687f",
-          "vendored": false,
-          "role": "support"
-        },
-        {
-          "upstream_path": "timebomb/bin/timebomb",
-          "sha256": "57729b1657dede7b440f80c7d7ea901e9fd373f49b39e900b73bc01c6d17ff38",
           "vendored": false,
           "role": "support"
         }

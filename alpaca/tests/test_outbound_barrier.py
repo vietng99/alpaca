@@ -21,6 +21,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import shlex
 
 import pytest
 
@@ -177,7 +178,9 @@ def _push_env(root):
     os.makedirs(bindir, exist_ok=True)
     shim = os.path.join(bindir, "python3")
     if not os.path.exists(shim):
-        os.symlink(sys.executable, shim)
+        with open(shim, 'w', encoding='utf-8') as fh:
+            fh.write('#!/bin/sh\nexec ' + shlex.quote(sys.executable) + ' "$@"\n')
+        os.chmod(shim, 0o755)
     env = {**os.environ, "PYTHONPATH": REPO, "CLAUDE_PROJECT_DIR": root,
            "PATH": bindir + os.pathsep + os.environ.get("PATH", "")}
     env.pop("CLAUDE_CONFIG_DIR", None)
@@ -238,3 +241,9 @@ def test_barrier_is_mechanical_and_leaves_the_decision_to_a_review_card(repo):
     barrier.scan(root, _commits(root))
     after = _run(_bare, "rev-parse", "--verify", "main").returncode
     assert before != 0 and after != 0        # scanning pushed nothing to the remote
+
+
+def test_hook_python_preserves_the_test_environment(tmp_path):
+    env = _push_env(str(tmp_path))
+    result = subprocess.run(['python3', '-c', 'import sys; print(sys.prefix)'], env=env, capture_output=True, text=True, check=True)
+    assert os.path.realpath(result.stdout.strip()) == os.path.realpath(sys.prefix)

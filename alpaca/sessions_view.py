@@ -85,7 +85,7 @@ def parse_ts(value):
     if not value:
         return None
     try:
-        return datetime.datetime.fromisoformat(str(value))
+        return datetime.datetime.fromisoformat(str(value).replace('Z', '+00:00'))
     except (TypeError, ValueError):
         return None
 
@@ -268,28 +268,52 @@ def probe_window(view) -> dict:
 
 
 # ------------------------------------------------------------------------------- the claims
+def _holders(conn, now_ts):
+    """(ref, session, lapsed) for each row a session holds and no finished task settles.
+
+    The holder is `board.fold_leases`, the fold `board.live_claims` reads: the latest claim, its
+    lease extended by each renewal on its fence, ended by a release or an expiry. `session` is
+    the session that last took or renewed the lease; `lapsed` is True when that lease ran out in
+    record time (never without an as-of).
+    """
+    from alpaca import board
+    settled = {r[0] for r in conn.execute("SELECT id FROM tasks WHERE status='done'")}
+    for ref, h in board.fold_leases(conn).items():
+        if ref in settled:
+            continue                                    # a finished task is nobody's to hold
+        gap = seconds_between(now_ts, h["lease_until"]) if now_ts else None
+        yield ref, h["session"], gap is not None and gap >= 0
+
+
 def claims_by_session(conn, now_ts=None) -> dict:
     """sid -> the row ids that session holds a live claim on, sorted.
 
-    Latest claim / claim-release per row wins, the way `board.live_claims` folds it, but keyed on
-    the session that authored the claim and expired against the record clock rather than the wall
+    Folded the way `board.live_claims` folds it (renewals included), keyed on the session that
+    last took or renewed the lease and expired against the record clock rather than the wall
     clock.
     """
-    latest = {}
-    for r in conn.execute("SELECT id, session, kind, ref, data FROM events "
-                          "WHERE kind IN ('claim','claim-release') AND ref IS NOT NULL "
-                          "ORDER BY id"):
-        latest[r["ref"]] = r
-    settled = {r[0] for r in conn.execute("SELECT id FROM tasks WHERE status='done'")}
     out = {}
-    for ref, r in latest.items():
-        if r["kind"] != "claim" or ref in settled:
-            continue                                    # a finished task is nobody's to hold
-        lease = _blob(r["data"]).get("lease_until")
-        gap = seconds_between(now_ts, lease) if now_ts else None
-        if gap is not None and gap >= 0:
-            continue                                    # the lease ran out in record time
-        out.setdefault(r["session"], []).append(ref)
+    for ref, sid, lapsed in _holders(conn, now_ts):
+        if not lapsed:
+            out.setdefault(sid, []).append(ref)
+    for ids in out.values():
+        ids.sort()
+    return out
+
+
+def lapsed_by_session(conn, now_ts=None) -> dict:
+    """sid -> the task ids still in `doing` whose lease that session held ran out, sorted.
+
+    Nobody released, expired or took over the row, so the task is still that session's work; only
+    the lease lapsed. The cockpit names these instead of calling the session unclaimed, and the
+    session's next tool call or prompt takes them again (`claims.keep_alive`). Empty without an
+    as-of.
+    """
+    doing = {r[0] for r in conn.execute("SELECT id FROM tasks WHERE status='doing'")}
+    out = {}
+    for ref, sid, lapsed in _holders(conn, now_ts):
+        if lapsed and ref in doing:
+            out.setdefault(sid, []).append(ref)
     for ids in out.values():
         ids.sort()
     return out

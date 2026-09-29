@@ -1,8 +1,6 @@
 """Independent projections with durable checkpoints and capped retry backoff."""
 import datetime as dt
 import json
-import os
-from pathlib import Path
 
 from alpaca import db, util
 from . import _time, issue
@@ -11,21 +9,8 @@ BOUNDARIES = {'session-start','session-end','pre-compact','session-checkpoint','
 
 
 def _wiki(root, rows):
-    from alpaca.wiki.config import Config
-    from alpaca.wiki.ingest.absorb import Absorber
-    from alpaca.wiki.ingest.drain import wiki_vault_dir, _note_doc, _write_if_changed, observed_prefixes
-    vault = Path(wiki_vault_dir(root))
-    prefixes = observed_prefixes(root)
-    absorber = Absorber(Config.for_vault(str(vault)))
-    try:
-        for row in rows:
-            doc_id, text = _note_doc(row, prefixes=prefixes)
-            path = vault / doc_id
-            path.parent.mkdir(parents=True, exist_ok=True)
-            absorber.absorb_text(doc_id, text, kind='raw', path=doc_id)
-            _write_if_changed(str(path), text)
-    finally:
-        absorber.close()
+    from alpaca.wiki.ingest import drain
+    drain.capture(root, rows, sessions=[row["session"] for row in rows])
 
 
 def queue_snapshot(conn, session, *, event_id=0, observation_id=0):
@@ -71,7 +56,13 @@ def _profile(root, rows):
         raise RuntimeError('profile refresh failed')
 
 
-CONSUMERS = {'wiki': _wiki, 'snapshot-requests': _snapshots, 'projection': _projection, 'profile': _profile}
+def _mission(root, rows):
+    from alpaca import mission
+    mission.scan(root, session='observability-collector')
+
+
+CONSUMERS = {'wiki': _wiki, 'snapshot-requests': _snapshots, 'projection': _projection, 'profile': _profile,
+             'mission': _mission}
 
 
 def consume(root, conn, *, max_records=200):
@@ -135,6 +126,10 @@ def run_snapshot_jobs(root, conn, *, limit=8):
             fact = transcripts.snapshot(root,job['session'])
             if fact.get('mode') in ('none','busy') or fact.get('source_missing'):
                 raise OSError('snapshot unavailable; retry required')
+            # New transcript observations may arrive without any new operation event.
+            # Treat preservation plus wiki projection as one retryable job.
+            from alpaca.wiki.ingest import drain
+            drain.capture(root, [], sessions=[job['session']])
             if any(row.get('mode') in ('busy','missing','truncated') for row in fact.get('registry_children',[])):
                 # Each child gets its own retry job, so parent progress is independent.
                 with db.transaction(conn):

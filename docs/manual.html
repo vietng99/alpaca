@@ -157,6 +157,7 @@
 </ul>
 <h3>Maintenance</h3>
 <ul>
+<li><code>alpaca release</code> - initialize GitHub test workflows, approve one exact development commit, build an allowlisted release, run mandatory and project checks, and prepare or publish a clean sync pull request. Configure <code>release:</code> in <code>project.yaml</code>; checks and publication refuse a commit without a current approval, publication defaults to a dry run and the owner merges. See [Release a clean public copy](docs/release.md) for configuration, receipts, credentials and retries.</li>
 <li><code>alpaca verify</code> - recompute the append-only event chain and report PASS or FAIL.</li>
 <li><code>alpaca retention</code> - apply the declared store retention and compaction policy.</li>
 <li><code>alpaca apply</code> - apply a recorded in-place change with its mandatory snapshot note.</li>
@@ -269,6 +270,9 @@
 <li><code>alpaca workspace</code> registers this instance in the host workspace registry (<code>add</code>, <code>list</code>, <code>remove</code>, and <code>move</code> after its folder was moved) and renders one combined cloudflared config for every registered hostname (<code>render-ingress</code>), which the owner applies. See <code>docs/workspaces.md</code> for the pathway from a local root to a cockpit on localhost and on a public hostname.</li>
 </ul>
 <p>See <code>docs/observability-operations.md</code> for collection contracts, service setup, failure recovery, retention budgets and the restore rehearsal. The optional project SQLite runtime is described in <code>setup/sqlite-runtime.md</code>. Raw native reasoning is excluded from new analytical capture.</p>
+<h3>mission</h3>
+<p><code>alpaca op pin &lt;op&gt;</code> puts the op's operation map on the cockpit; <code>alpaca op unpin &lt;op&gt;</code> removes it. Both are recorded events and the newest one wins. The map lays the op's phases out in their recorded order, lists each phase's tasks by workstream with the roadmap's states and prerequisite arrows, and shows a phase strip (current phase, done counts, tasks in progress), the last phase-door refusal, tasks held for the owner and blocked tasks. Finished tasks stay on the map as done; it refreshes with the cockpit.</p>
+<p><code>alpaca mission</code> keeps a project capability map. Initialize with <code>mission init --preset generic</code> (or <code>alpaca</code>), inspect with <code>mission show</code>, record source changes with <code>mission scan</code>, and associate work with <code>mission link NODE TASK --kind work|fix</code>. Run a declared check using <code>mission check --check tests NODE -- COMMAND</code>. Use <code>mission show --definition</code> and <code>mission define --file FILE --revision REVISION</code> to update the definition. Check results name their exact inputs and evidence; task completion does not certify a capability.</p>
 </main>
 <footer>
 <p>Rendered from MANUAL.md by setup/build_manual_html.py. This page is pure ASCII, so it reads on a phone over a file link even when the browser ignores the charset.</p>

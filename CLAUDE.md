@@ -26,6 +26,8 @@ Rules that hold in every session:
    recorded. Dropping to a safer level is always allowed and clears nothing you already owe;
    raising your own level is not.
 
+7. Organize every new task into a named feature/workstream and work area when creating it; record actual prerequisites (or independence) and exclusive resources explicitly. Use mapped `task add`; update relationships with `task map` as the plan changes. See `docs/operations-hub.md` under "Maintaining a useful checklist" for commands. Do not use phases as feature groups or infer dependencies from task numbers.
+
 Verbs: `alpaca status | doctor | verify | onboard | op new/close/list | task add/claim/move/list |
 proof new/seal/check | msg post/read | analytics build | recall <sid>`. Autodrive level comes from the project-local session record.
 
@@ -55,7 +57,7 @@ stalls tools with `Disk quota exceeded` while the disk still has room. Rules:
 
 ## Operation
 
-The Claude Code hooks in `.claude/settings.json` record lifecycle events through `bin/alpaca-python`, the local interpreter. Bootstrap with `bash setup/bootstrap.sh` before opening a fresh installation. Hook failures are fail-open for chat availability; they never stand in for evidence, and an explicit `alpaca session checkpoint` is the way to require a visible capture result.
+The Claude Code hooks in `.claude/settings.json` record lifecycle events through `bin/te-python`, the local interpreter. Bootstrap with `bash setup/bootstrap.sh` before opening a fresh installation. Hook failures are fail-open for chat availability; they never stand in for evidence, and an explicit `te session checkpoint` is the way to require a visible capture result.
 
 Domain work plugs in as a profile named in `project.yaml`. Changing a profile's acceptance criteria or its protected inputs requires owner review. Poll a running job before launching another; a disconnected chat does not mean the job stopped.
 

@@ -18,7 +18,7 @@ import yaml
 
 from alpaca import barrier
 from alpaca.gates import verdict as vc
-from alpaca.tests.conftest import REPO
+from alpaca.tests.conftest import REPO, SHIPPED_PROJECT_YAML
 from alpaca.tests.test_outbound_barrier import (  # noqa: F401  (fixtures used by name)
     TERM, _commit, _commits, _fixed_clock, _push_env, _run, repo)
 
@@ -220,7 +220,7 @@ def test_each_blob_is_read_once_however_many_commits_carry_it(repo, monkeypatch)
 # ------------------------------------------------------------------ the shipped template
 def _template_rules():
     from alpaca.gates import leak_audit
-    with open(os.path.join(REPO, "project.yaml"), encoding="utf-8") as fh:
+    with open(SHIPPED_PROJECT_YAML, encoding="utf-8") as fh:
         block = yaml.safe_load(fh)["barrier"]
     rules, reasons, _detail = leak_audit.parse_shape_allow(block.get("allow"), "template")
     return block, rules, reasons
