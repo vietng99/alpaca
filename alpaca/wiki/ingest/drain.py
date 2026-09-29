@@ -18,6 +18,9 @@ from __future__ import annotations
 import os
 import json
 import re
+import stat
+from contextlib import contextmanager
+from pathlib import Path
 
 from alpaca import db as tedb
 from alpaca import paths
@@ -44,7 +47,12 @@ def _slug(value, fallback: str = "none") -> str:
     return out or fallback
 
 
-def _role_of(kind: str) -> str:
+def _role_of(kind: str, data=None) -> str:
+    data = data or {}
+    if kind == "msg":
+        kind = data.get("kind")
+    elif kind == "task-move" and data.get("to") == "done":
+        kind = "task-done"
     if kind in INTENT_KINDS:
         return "intent"
     if kind in RESULT_KINDS:
@@ -53,6 +61,8 @@ def _role_of(kind: str) -> str:
 
 
 def _pair_key(ev: dict) -> str:
+    if ev.get("_pair_key"):
+        return ev["_pair_key"]
     data = ev.get("data") or {}
     for candidate in (ev.get("ref"), data.get("row"), data.get("task"),
                       data.get("id"), data.get("op"), ev.get("op")):
@@ -66,11 +76,13 @@ def _summary(ev: dict) -> str:
     edges; sort, not capture, writes the assertions."""
     data = ev.get("data") or {}
     bits = ["%s during session %s" % (ev.get("kind", "event"), ev.get("session", ""))]
-    for k in ("reason", "statement", "body", "verdict", "note", "detail", "error"):
+    for k in ("reason", "statement", "title", "body", "verdict", "note", "detail", "error",
+              "context", "options", "choice", "consequence", "pointer", "proof", "from", "to"):
         v = data.get(k)
         if v:
-            bits.append(str(v).replace("\n", " ").strip())
-    return ". ".join(b for b in bits if b)
+            value = json.dumps(v, ensure_ascii=True) if isinstance(v, (dict, list)) else str(v)
+            bits.append(k + ": " + value.replace("\n", " ").strip())
+    return ". ".join(b for b in bits if b).replace("[[", "[ [").replace("]]", "] ]")
 
 
 def observed_prefixes(root) -> tuple:
@@ -84,8 +96,8 @@ def observed_prefixes(root) -> tuple:
 
 
 def _note_doc(ev: dict, prefixes=()):
-    op = ev.get("op") or "unassigned"
-    role = _role_of(ev.get("kind"))
+    op = ev.get("op") or (ev.get("data") or {}).get("op") or "unassigned"
+    role = _role_of(ev.get("kind"), ev.get("data"))
     seq = int(ev.get("id") or 0)
     header = [
         "op: %s" % op,
@@ -105,14 +117,108 @@ def _note_doc(ev: dict, prefixes=()):
     return doc_id, text
 
 
+def normalize_events(conn, events):
+    """Resolve native message task/op references from earlier immutable source events.
+
+    Never consult mutable current task state: a later replay at the same cutoff must
+    give the same operation and pairing key. The original event dictionaries stay intact.
+    """
+    normalized = []
+    for source in events:
+        event = dict(source)
+        data = event.get("data") or {}
+        if isinstance(data, str):
+            data = json.loads(data)
+        event["data"] = data
+        event["op"] = event.get("op") or data.get("op")
+        if event.get("kind") == "msg":
+            for target in (event.get("ref"), data.get("to")):
+                if not target:
+                    continue
+                prior = conn.execute(
+                    "SELECT op FROM events WHERE ref=? AND id<=? AND op IS NOT NULL "
+                    "AND op<>'' ORDER BY id LIMIT 1", (str(target), event["id"]),
+                ).fetchone()
+                if prior:
+                    event["op"] = event.get("op") or prior["op"]
+                    event["_pair_key"] = str(target)
+                    break
+        normalized.append(event)
+    return normalized
+
+
+class TranscriptUnavailable(OSError):
+    """A registered transcript has no readable native or preserved source."""
+
+
 def _transcript_path(root: str, session: str, conn, override: str | None) -> str | None:
-    if override and os.path.isfile(override):
-        return override
-    row = tedb.rows(conn, "sessions", "sid=?", (session,))
-    if row and row[0].get("transcript") and os.path.isfile(row[0]["transcript"]):
-        return row[0]["transcript"]
-    cand = os.path.join(paths.transcript_dir(root), "%s.jsonl" % session)
-    return cand if os.path.isfile(cand) else None
+    from alpaca import transcripts
+    registered = override or transcripts.registered(conn, session)
+    if registered:
+        candidate = registered if os.path.isabs(registered) else os.path.join(root, registered)
+        if os.path.isfile(candidate):
+            return candidate
+    candidate = transcripts.local_path(root, session)
+    if os.path.isfile(candidate):
+        return candidate
+    if registered:
+        raise TranscriptUnavailable("registered transcript is unavailable: " + session)
+    return None
+
+
+def _visible_transcript(session, path):
+    """Stream complete source records through the existing privacy/shape normalizer.
+
+    UI pagination budgets do not apply to durable capture. Full visible values still
+    use the canonical secret redactor; private reasoning is dropped by normalize.
+    """
+    import hashlib
+    from alpaca.analytics import detail
+
+    class Capture(detail._Capture):
+        def rows(self, path, kind, **kwargs):
+            digest = hashlib.sha256()
+            source_id = hashlib.sha256((self.sid + ":transcript").encode()).hexdigest()[:24]
+            with open(path, "rb") as stream:
+                offset = 0
+                for number, raw in enumerate(stream, 1):
+                    digest.update(raw)
+                    source = {"id": source_id, "kind": kind, "line": number, "offset": offset}
+                    offset += len(raw)
+                    if not raw.strip():
+                        continue
+                    try:
+                        record = json.loads(raw)
+                    except (ValueError, UnicodeError, RecursionError) as exc:
+                        raise OSError("transcript contains an incomplete or malformed record") from exc
+                    if not isinstance(record, dict) or record.get("type") == "capture-malformed-record":
+                        raise OSError("transcript contains a malformed record")
+                    yield record, source
+            self.source_sha256 = digest.hexdigest()
+            self.source_bytes = offset
+
+        def message(self, role, text, *args, **kwargs):
+            message = super().message(role, text, *args, **kwargs)
+            message["text"] = detail._redact(text)
+            message["truncated"] = False
+            return message
+
+        def call(self, msg, ident, name, value, source):
+            tool = super().call(msg, ident, name, value, source)
+            tool["input"] = detail._redact(value)
+            tool["input_truncated"] = False
+            return tool
+
+        def result(self, ident, value, *args, **kwargs):
+            tool = super().result(ident, value, *args, **kwargs)
+            tool["result"] = detail._redact(value)
+            tool["result_truncated"] = False
+            return tool
+
+    capture = Capture(session, "registered-transcript", detail._Budget())
+    capture.transcript(path)
+    capture.title = detail._redact(capture.title)
+    return capture
 
 
 def _transcript_doc(root: str, session: str, op: str, conn, override: str | None):
@@ -120,39 +226,174 @@ def _transcript_doc(root: str, session: str, op: str, conn, override: str | None
     if not tp:
         return None
     try:
-        from alpaca.analytics import parse_session
-        summary = parse_session.parse(tp)
-    except Exception:
-        return None
-    lines = ["role: transcript", "op: %s" % op, "session: %s" % session, ""]
-    if summary.get("title"):
-        lines.append("# %s" % str(summary["title"]).replace("\n", " ").strip())
-        lines.append("")
-    for prompt in summary.get("human_prompts") or []:
-        txt = (prompt.get("text") or "").replace("\n", " ").strip()
-        if txt:
-            lines.append("- %s" % txt)
-    # Derived summaries may shrink after parser repairs or source replacement. Keep
-    # each distinct summary immutable instead of waiving the knowledge shrink gate.
+        visible = _visible_transcript(session, tp)
+    except (FileNotFoundError, PermissionError, IsADirectoryError) as exc:
+        raise TranscriptUnavailable("registered transcript is unreadable: " + session) from exc
+    # Transcript identity is session-based, independent of the current event batch/op.
+    lines = ["role: transcript", "op: session", "session: %s" % session,
+             "trust: untrusted source", "source: " + tp,
+             "source_sha256: " + visible.source_sha256,
+             "source_bytes: " + str(visible.source_bytes), ""]
+    if visible.title:
+        lines.extend(["# " + str(visible.title).replace("\n", " ").strip(), ""])
+    for message in visible.messages:
+        text = message.get("text") or ""
+        if text:
+            lines.extend(["", message["role"] + ":", text])
+        for tool in message["tools"]:
+            lines.extend(["", "tool: " + tool["name"]])
+            for field in ("input", "result"):
+                value = tool.get(field)
+                if value is not None:
+                    rendered = value if isinstance(value, str) else json.dumps(value, sort_keys=True, ensure_ascii=True)
+                    lines.extend([field + ":", rendered])
+    # Keep immutable source projections for audit, retiring old versions from search.
     import hashlib
-    text = "\n".join(lines) + "\n"
+    text = "\n".join(lines).replace("[[", "[ [").replace("]]", "] ]") + "\n"
     version = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    doc_id = "raw/%s/transcript-%s-summary-%s.md" % (_slug(op), _slug(session), version)
+    identity = hashlib.sha256(session.encode("utf-8")).hexdigest()[:16]
+    doc_id = "raw/transcripts/%s/transcript-%s-summary-%s.md" % (identity, _slug(session), version)
     return doc_id, text
 
 
-def _write_if_changed(path: str, text: str) -> bool:
-    """Write only when the bytes differ, so a re-drain touches nothing on disk. Returns True on a
-    real write."""
-    data = text.encode("utf-8")
+def projection_identity(text):
+    """One source event or session, regardless of renderer version or operation label."""
+    meta = {}
+    for line in text.split("\n\n", 1)[0].splitlines():
+        key, separator, value = line.partition(":")
+        if separator:
+            meta[key] = value.strip()
+    if meta.get("event"):
+        return "event:" + meta["event"]
+    if meta.get("role") == "transcript" and meta.get("session"):
+        return "transcript:" + meta["session"]
+    return None
+
+
+def capture(root, events, *, sessions=(), clock=None, transcript_paths=None, absorber=None):
+    """Shared bounded event-batch capture for drains, collector and recovery."""
+    from alpaca.wiki.config import Config
+    from alpaca.wiki.ingest.absorb import Absorber
+
+    cfg = Config.for_project(root)
+    vault = str(cfg.vault_dir)
+    cfg.vault_dir.mkdir(parents=True, exist_ok=True)
+    conn = tedb.connect(root)
     try:
-        with open(path, "rb") as fh:
-            if fh.read() == data:
-                return False
-    except OSError:
+        events = normalize_events(conn, events)
+        prefixes = observed_prefixes(root)
+        docs = [_note_doc(event, prefixes=prefixes) for event in events]
+        for session in dict.fromkeys(sessions):
+            document = _transcript_doc(root, session, "session", conn,
+                                       (transcript_paths or {}).get(session))
+            if document:
+                docs.append(document)
+    finally:
+        conn.close()
+    owns_absorber = absorber is None
+    if owns_absorber:
+        absorber = Absorber(cfg, **({"clock": clock} if clock is not None else {}))
+    elif absorber.cfg.vault_dir.resolve() != cfg.vault_dir.resolve():
+        raise ValueError("recovery absorber belongs to another vault")
+    summary = {"notes": 0, "ingested": 0, "skipped": 0, "docs": [], "transcripts": [],
+               "through_event": max((event["id"] for event in events), default=0)}
+    try:
+        # Only active first blocks count. Old immutable files remain evidence, not
+        # competing searchable versions of the same source.
+        previous = {}
+        for row in absorber.db.conn.execute(
+                "SELECT b.doc_id,b.text FROM blocks b JOIN docs d ON d.doc_id=b.doc_id "
+                "WHERE d.kind='raw' AND b.status='active' AND b.ordinal=0"):
+            identity = projection_identity(row["text"])
+            if identity:
+                previous.setdefault(identity, []).append(row["doc_id"])
+        for doc_id, text in docs:
+            fpath = os.path.join(vault, doc_id)
+            with _projection_target(vault, doc_id) as parent_fd:
+                result = absorber.absorb_text(doc_id, text, kind="raw", path=doc_id)
+                _write_if_changed(fpath, text, parent_fd=parent_fd)
+            old = [item for item in previous.get(projection_identity(text), []) if item != doc_id]
+            if old:
+                absorber.retire_documents(old, reason="source-projection-replaced", superseded_by=doc_id)
+            if (projection_identity(text) or "").startswith("transcript:"):
+                from alpaca.wiki.determinism import sha256_hex
+                meta = dict(line.split(": ", 1) for line in text.split("\n\n", 1)[0].splitlines())
+                summary["transcripts"].append({
+                    "doc_id": doc_id, "content_sha256": sha256_hex(text),
+                    "session": meta["session"], "source": meta["source"],
+                    "source_sha256": meta["source_sha256"], "source_bytes": int(meta["source_bytes"]),
+                })
+            summary["notes"] += 1
+            summary["docs"].append(doc_id)
+            summary["skipped" if result.get("skipped") else "ingested"] += 1
+    finally:
+        if owns_absorber:
+            absorber.close()
+    return summary
+
+
+@contextmanager
+def _projection_target(vault, doc_id):
+    """Pin the destination before ingest; reject symlinks in every path component."""
+    from alpaca.wiki.store.db import open_vault_directory
+    key = Path(doc_id)
+    if key.is_absolute() or ".." in key.parts or not key.parts:
+        raise ValueError("invalid projection path")
+    _, directory = open_vault_directory(Path(vault))
+    try:
+        for component in key.parts[:-1]:
+            try:
+                os.mkdir(component, dir_fd=directory)
+            except FileExistsError:
+                pass
+            child = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                            dir_fd=directory)
+            os.close(directory)
+            directory = child
+        try:
+            info = os.stat(key.name, dir_fd=directory, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            if not stat.S_ISREG(info.st_mode):
+                raise ValueError("non-regular projection file refused")
+        yield directory
+    finally:
+        os.close(directory)
+
+
+def _write_if_changed(path: str, text: str, *, parent_fd=None) -> bool:
+    """Atomically publish accepted bytes through a pinned no-follow directory."""
+    if parent_fd is None:
+        with _projection_target(str(Path(path).parent), Path(path).name) as directory:
+            return _write_if_changed(path, text, parent_fd=directory)
+    data = text.encode("utf-8")
+    name = Path(path).name
+    try:
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent_fd)
+    except FileNotFoundError:
         pass
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(text)
+    else:
+        with os.fdopen(fd, "rb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                raise ValueError("non-regular projection file refused")
+            if stream.read() == data:
+                return False
+    import uuid
+    temporary = ".capture-" + uuid.uuid4().hex
+    try:
+        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                     0o600, dir_fd=parent_fd)
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+    finally:
+        try:
+            os.unlink(temporary, dir_fd=parent_fd)
+        except FileNotFoundError:
+            pass
     return True
 
 
@@ -164,10 +405,6 @@ def run(root: str, session: str, *, clock=None, transcript_path: str | None = No
     the hashgate, and the doc ids. A second call over the same session ingests nothing new.
     Recovery may lend an absorber to reuse its index across sessions; the caller owns it.
     """
-    vault = wiki_vault_dir(root)
-    raw_dir = os.path.join(vault, "raw")
-    os.makedirs(raw_dir, exist_ok=True)
-
     conn = tedb.connect(root)
     try:
         query = "SELECT * FROM events WHERE session=?"
@@ -176,44 +413,9 @@ def run(root: str, session: str, *, clock=None, transcript_path: str | None = No
             query += " AND id<=?"
             params.append(through_event)
         events = [dict(row) for row in conn.execute(query + " ORDER BY id", params)]
-        for event in events:
-            event['data'] = json.loads(event['data'])
-        prefixes = observed_prefixes(root)
-        docs = [_note_doc(ev, prefixes=prefixes) for ev in events]
-        op = next((ev["op"] for ev in events if ev.get("op")), "session")
-        td = _transcript_doc(root, session, op, conn, transcript_path)
     finally:
         conn.close()
-    if td:
-        docs.append(td)
-
-    from alpaca.wiki.config import Config
-    from alpaca.wiki.ingest.absorb import Absorber
-
-    cfg = Config.for_vault(vault)
-    kwargs = {"clock": clock} if clock is not None else {}
-    owns_absorber = absorber is None
-    if owns_absorber:
-        absorber = Absorber(cfg, **kwargs)
-    elif absorber.cfg.vault_dir.resolve() != cfg.vault_dir.resolve():
-        raise ValueError("recovery absorber belongs to another vault")
-    summary = {"session": session, "notes": 0, "ingested": 0, "skipped": 0, "docs": [],
-               "through_event": max((event['id'] for event in events), default=0)}
-    try:
-        for doc_id, text in docs:
-            fpath = os.path.join(vault, doc_id)
-            os.makedirs(os.path.dirname(fpath), exist_ok=True)
-            # The vault file follows the database: a page the absorb refuses is not written, so the
-            # file on disk never disagrees with what the wiki holds.
-            result = absorber.absorb_text(doc_id, text, kind="raw", path=doc_id)
-            _write_if_changed(fpath, text)
-            summary["notes"] += 1
-            summary["docs"].append(doc_id)
-            if result.get("skipped"):
-                summary["skipped"] += 1
-            else:
-                summary["ingested"] += 1
-    finally:
-        if owns_absorber:
-            absorber.close()
+    summary = capture(root, events, sessions=[session], clock=clock,
+                      transcript_paths={session: transcript_path}, absorber=absorber)
+    summary["session"] = session
     return summary

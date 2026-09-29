@@ -15,7 +15,18 @@ import pytest
 from alpaca.gates import proportionality, rc_conformance, verdict
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-FORBIDDEN, SANCTIONED = proportionality.load_non_adoptions(REPO)
+
+
+def _shipped_non_adoptions():
+    # The shipped template declares the list; a private development tree ships it as an overlay.
+    import yaml
+    from alpaca.tests.conftest import SHIPPED_PROJECT_YAML
+    with open(SHIPPED_PROJECT_YAML, encoding="utf-8") as fh:
+        block = (yaml.safe_load(fh) or {}).get("non_adoptions") or {}
+    return list(block.get("forbidden") or []), list(block.get("sanctioned") or [])
+
+
+FORBIDDEN, SANCTIONED = _shipped_non_adoptions()
 
 
 def _make_root(tmp_path):

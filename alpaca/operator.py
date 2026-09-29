@@ -20,7 +20,7 @@ class SessionError(ValueError):
 
 def run(action, root, session=None, *, operator=None, level=None, goal="",
         note="", reason=None, reply=None, tool=None, ref="", dashboard=False,
-        transcript=None):
+        transcript=None, wiki_question=None):
     """Apply one explicit boundary; return JSON-ready context and result data.
 
     `transcript` is an explicit path to this session's transcript file, accepted by start and end
@@ -68,7 +68,7 @@ def run(action, root, session=None, *, operator=None, level=None, goal="",
                    "_strict": True, "reason": reason, "note": note,
                    "dashboard": dashboard, "reply": reply,
                    "level": level, "goal": goal,
-                   "transcript_path": transcript,
+                   "transcript_path": transcript, "wiki_question": wiki_question,
                    "source": "resume" if row else "startup"}
         result = {"session": session, "operator": selected_operator, "action": action}
         if transcript is not None:
@@ -125,7 +125,8 @@ def cmd_session(args):
                      note=getattr(args, "note", ""), reason=getattr(args, "reason", None),
                      reply=reply, tool=getattr(args, "tool", None), ref=getattr(args, "ref", ""),
                      dashboard=getattr(args, "dashboard", False),
-                     transcript=getattr(args, "transcript", None))
+                     transcript=getattr(args, "transcript", None),
+                     wiki_question=getattr(args, "wiki_question", None))
     except SessionError as exc:
         print(json.dumps({"status": "BLOCKED", "error": str(exc)}))
         return cli.BLOCKED
@@ -141,6 +142,7 @@ def _parser(sub):
     start.add_argument("--level", choices=["L%d" % n for n in range(1, 7)])
     start.add_argument("--goal", default="")
     start.add_argument("--dashboard", action="store_true")
+    start.add_argument("--wiki-question", default=None, help="retrieve bounded cited context at startup/resume")
     start.add_argument("--transcript", default=None,
                        help="explicit path to this session's transcript file, stored in the record")
     cp = verbs.add_parser("checkpoint", help="persist events and a continuation note")

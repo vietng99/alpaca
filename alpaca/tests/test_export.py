@@ -237,7 +237,7 @@ def test_now_splits_the_sessions_and_counts_the_probes_without_listing_them(proj
     work = now["sessions"]["work"]
     assert [s["sid"] for s in work] == ["aaaaaaaa-1111"]
     assert set(work[0]) == {"sid", "operator", "started", "ended", "last_beat", "beats", "turns",
-                            "level", "active", "last_tool", "last_ref", "claims",
+                            "level", "active", "last_tool", "last_ref", "claims", "lapsed",
                             "subagent_stops"}
     assert work[0]["active"] is True, "it beat at the record's own newest instant"
     assert now["sessions"]["probes"]["count"] == 9

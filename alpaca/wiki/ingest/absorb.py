@@ -5,18 +5,13 @@ hashgate -> segment+anchor -> contextual enrich -> deterministic-first extract (
 quarantined) -> set-returning resolve -> agentic ENCODE (reconcile+place) -> incremental upsert +
 index delta -> chained ingest_event -> events.jsonl. Heavy consolidation is deferred to Dream.
 
-Alpaca vendoring note (M2.14): the upstream write path also side-writes the vector index
-(store.vec) and re-tiers on ingest (engine.tiering). Both are members of the ranking surface
-the Alpaca read-door guard (M2.9) fences off from every module except the retrieval door, and
-vectors are off by default (M2.11 keeps meta.retrieval_profile at NARROW). So this vendored copy
-carries the write path WITHOUT those two ranking side-writes; the graph, edges, echo-provenance,
-shelf-life and retire-not-delete behaviour are byte-faithful. When a project turns vectors on, the
-vector-write and on-ingest re-tier land behind the write door, not by a second import of the
-guarded surface here.
+Alpaca index maintenance runs through Writer, with the source changes and chained
+ledger in one transaction. Ranking primitives remain behind the retrieval door.
 """
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
 from pathlib import Path
 import stat
 
@@ -128,11 +123,24 @@ class Absorber:
         self.writer = Writer(self.db, self.ledger, clock)
         self.providers = Providers(cfg)
         self.vocab = {r["predicate"] for r in self.db.conn.execute("SELECT predicate FROM predicates")}
+        self._reload_echo_index()
+
+    def _reload_echo_index(self) -> None:
         self.echo_index = EchoIndex()
         for row in self.db.conn.execute(
             "SELECT block_id,doc_id,text FROM blocks WHERE status='active' ORDER BY block_id"
         ):
             self.echo_index.add(row["block_id"], row["text"], row["doc_id"])
+
+    @contextmanager
+    def _transaction(self):
+        try:
+            with self.writer.transaction():
+                yield
+        except BaseException:
+            # A provider or ledger failure must not leave phantom witnesses in memory.
+            self._reload_echo_index()
+            raise
 
     # ---- public API -----------------------------------------------------
     def absorb_text(self, doc_id: str, text: str, kind: str = "raw", path: str | None = None,
@@ -168,12 +176,14 @@ class Absorber:
         if retired_same_content:
             changed = True
         if not changed:
-            with self.writer.transaction():
+            with self._transaction():
+                self.writer.revive_projection(doc_id)
                 self.writer.refresh_doc_metadata(
                     doc_id, path=stored_path, kind=kind, domain=domain,
                     source_created_at=source_created_at, private=private_flag,
                     sensitivity=sensitivity,
                 )
+                self.writer.maintain_indexes(self.providers, retier=retier_after)
             return {"doc_id": doc_id, "skipped": True, "reason": "unchanged",
                     "metadata_repaired": True}
         blocks = segment(doc_id, text)
@@ -201,7 +211,8 @@ class Absorber:
                    "corroborated": 0, "corrections": 0, "world_changes": 0,
                    "retired_blocks": 0, "retracted_edges": 0,
                    "marking": fw.rule_id if fw.tripped else None}
-        with self.writer.transaction():
+        with self._transaction():
+            self.writer.revive_projection(doc_id)
             self.writer.upsert_doc(doc_id, stored_path, kind, sha,
                                    byte_len=len(text.encode("utf-8")), domain=domain,
                                    source_created_at=source_created_at,
@@ -228,8 +239,7 @@ class Absorber:
                                   cites_block_id=_cb, cites_node_id=_cn)
                 self.echo_index.add(block["block_id"], block["text"], doc_id)
 
-                # entity mentions -> nodes + mention links (node vectors are off by default; see the
-                # Alpaca vendoring note at the top of this module)
+                # Entity mentions become nodes and source links; Writer maintains derived vectors.
                 for nid, disp in ex.mentions(block["text"]):
                     ensure_node(self.db, self.writer, nid, disp, block["block_id"])
 
@@ -255,10 +265,7 @@ class Absorber:
                 expires_at=shelf_life["expires_at"],
                 volatile=shelf_life["volatile"],
             )
-            # on-ingest re-tier (engine.tiering) is a ranking side-write, off by default here; see
-            # the Alpaca vendoring note at the top of this module. retier_after is kept in the signature
-            # so the upstream caller contract is unchanged.
-            _ = retier_after
+            self.writer.maintain_indexes(self.providers, retier=retier_after)
         return summary
 
     def absorb_vault(self, include_kinds: tuple[str, ...] = ("raw", "wiki")) -> list[dict]:
@@ -291,6 +298,8 @@ class Absorber:
                 for relative, text in pages:
                     doc_id = (Path(sub) / relative).as_posix()
                     seen_doc_ids.add(doc_id)
+                    if self.writer.projection_superseded(doc_id):
+                        continue
                     results.append(self.absorb_text(
                         doc_id, text, kind=kind, path=doc_id, retier_after=False,
                     ))
@@ -303,7 +312,7 @@ class Absorber:
         ).fetchall() if include_kinds else []
         missing = [r["doc_id"] for r in existing if r["doc_id"] not in seen_doc_ids]
         if missing:
-            with self.writer.transaction():
+            with self._transaction():
                 for doc_id in missing:
                     retired_block_ids = [r["block_id"] for r in self.db.conn.execute(
                         "SELECT block_id FROM blocks WHERE doc_id=? AND status='active'", (doc_id,)
@@ -312,8 +321,31 @@ class Absorber:
                     for block_id in retired_block_ids:
                         self.echo_index.remove(block_id)
                     results.append({"doc_id": doc_id, "retired": True, **retired})
-        # on-ingest re-tier is a ranking side-write, off by default here (Alpaca vendoring note above).
+                self.writer.maintain_indexes(self.providers, retier=True)
+        else:
+            with self._transaction():
+                self.writer.maintain_indexes(self.providers, retier=True)
         return results
+
+    def retire_documents(self, doc_ids, reason: str = "source-projection-replaced",
+                         superseded_by: str | None = None) -> dict[str, int]:
+        """Retain historical evidence while removing replaced projections from current indexes."""
+        total = {"blocks": 0, "reanchored": 0, "retracted": 0}
+        retired_ids = []
+        with self._transaction():
+            for doc_id in sorted(set(doc_ids)):
+                if superseded_by is not None:
+                    self.writer.mark_projection_superseded(doc_id, superseded_by, reason)
+                retired_ids.extend(r[0] for r in self.db.conn.execute(
+                    "SELECT block_id FROM blocks WHERE doc_id=? AND status='active'", (doc_id,)
+                ))
+                result = self.writer.retire_doc(doc_id, reason=reason)
+                for key in total:
+                    total[key] += result[key]
+            self.writer.maintain_indexes(self.providers, retier=True)
+        for block_id in retired_ids:
+            self.echo_index.remove(block_id)
+        return total
 
     # ---- internal -------------------------------------------------------
     def _place(self, cand: dict, bcid: str, block: dict, summary: dict, quarantined: bool) -> None:

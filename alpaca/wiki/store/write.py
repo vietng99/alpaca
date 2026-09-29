@@ -12,10 +12,11 @@ import json
 from typing import Any, Optional
 
 from ..clock import Clock, now_iso
-from ..determinism import canonical_json, normalize_text, sha256_hex
+from ..determinism import canonical_json, normalize_text, sha256_hex, nfc, ppr
 from ..engine.compartment import PrivatePathViolation, assert_private_path, is_private_path
 from .db import DB
 from .ledger import GENESIS, Ledger, event_checksum
+from .tier_policy import compute_tiers, _graph
 
 
 class LedgerSyncError(RuntimeError):
@@ -104,6 +105,102 @@ class Writer:
             raise LedgerSyncError(
                 "SQLite commit succeeded, but events.jsonl sync is pending; reopen Writer to repair"
             ) from exc
+
+    def maintain_indexes(self, providers, *, retier: bool = False) -> None:
+        """Refresh recomputable indexes inside the caller's source/ledger transaction.
+
+        A portable float64 cache is the deterministic backend on every machine. The
+        optional extension may be installed, but its connection-local state is never
+        used to decide whether a persisted vector is readable.
+        """
+        if not self._tx_active:
+            raise RuntimeError("index maintenance requires Writer.transaction")
+        db = self.db
+        enabled = db.cfg.meta.get("retrieval_profile", "narrow") in ("hybrid", "full")
+        exists = db.conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='vec_blocks_fallback'"
+        ).fetchone()
+        if enabled or exists:
+            from .vector_codec import _pack
+            db.conn.execute("CREATE TABLE IF NOT EXISTS vec_blocks_fallback(block_id TEXT PRIMARY KEY, embedding BLOB)")
+            db.conn.execute("CREATE TABLE IF NOT EXISTS vec_nodes_fallback(node_id TEXT PRIMARY KEY, embedding BLOB)")
+            db.conn.execute("CREATE TABLE IF NOT EXISTS vector_cache_inputs("
+                            "kind TEXT, item_id TEXT, input_hash TEXT, PRIMARY KEY(kind,item_id))")
+            blocks = db.conn.execute(
+                "SELECT block_id,text,context_header FROM blocks WHERE status='active' ORDER BY block_id"
+            ).fetchall()
+            nodes = db.conn.execute(
+                "SELECT n.node_id,n.display_name FROM nodes n WHERE n.status='active' "
+                "AND EXISTS (SELECT 1 FROM node_blocks nb JOIN blocks b ON b.block_id=nb.block_id "
+                "WHERE nb.node_id=n.node_id AND b.status='active') ORDER BY n.node_id"
+            ).fetchall()
+            current = {
+                'blocks': {r['block_id']: (r['context_header'] or '') + '\n' + r['text'] for r in blocks},
+                'nodes': {r['node_id']: r['display_name'] or r['node_id'] for r in nodes},
+            }
+            signature = canonical_json({
+                'provider': db.cfg.embedder, 'name': providers.embedder.name,
+                'model': str(db.cfg.meta.get('embed_model', '')),
+                'version': str(db.cfg.meta.get('embed_version', '0')),
+                'dim': int(db.cfg.meta.get('embed_dim', 64)), 'format': 1,
+            })
+            rebuild = enabled and db.get_meta('vector_cache_signature') != signature
+            for kind, inputs in current.items():
+                key = 'block_id' if kind == 'blocks' else 'node_id'
+                table = f'vec_{kind}_fallback'
+                stored = {r[0] for r in db.conn.execute(f'SELECT {key} FROM {table}')}
+                prior = dict(db.conn.execute(
+                    'SELECT item_id,input_hash FROM vector_cache_inputs WHERE kind=?', (kind,)
+                ).fetchall())
+                for item_id in sorted((stored | set(prior)) - set(inputs)):
+                    db.conn.execute(f'DELETE FROM {table} WHERE {key}=?', (item_id,))
+                    db.conn.execute('DELETE FROM vector_cache_inputs WHERE kind=? AND item_id=?', (kind,item_id))
+                if not enabled:
+                    continue
+                for item_id, text in inputs.items():
+                    digest = sha256_hex(text)
+                    if not rebuild and item_id in stored and prior.get(item_id) == digest:
+                        continue
+                    packed = _pack(providers.embedder.embed(text), int(db.cfg.meta.get('embed_dim', 64)))
+                    db.conn.execute(f'INSERT OR REPLACE INTO {table}({key},embedding) VALUES(?,?)', (item_id,packed))
+                    db.conn.execute('INSERT OR REPLACE INTO vector_cache_inputs(kind,item_id,input_hash) VALUES(?,?,?)',
+                                    (kind,item_id,digest))
+                    if kind == 'blocks':
+                        db.conn.execute('UPDATE blocks SET embedded_model=? WHERE block_id=?',
+                                        (providers.embedder.name,item_id))
+            if enabled:
+                for key in ('embed_model', 'embed_version', 'embed_dim'):
+                    db.set_meta(key, str(db.cfg.meta.get(key, '')))
+                db.set_meta('vector_cache_signature', signature)
+        if retier:
+            retier_nodes(db, autocommit=False)
+
+    def mark_projection_superseded(self, doc_id: str, superseded_by: str, reason: str) -> None:
+        if not self._tx_active:
+            raise RuntimeError("projection retirement requires Writer.transaction")
+        if doc_id == superseded_by:
+            raise ValueError("a projection cannot supersede itself")
+        db = self.db
+        if not db.conn.execute('SELECT 1 FROM docs WHERE doc_id=?', (superseded_by,)).fetchone():
+            raise ValueError("replacement projection must be ingested first")
+        db.conn.execute('CREATE TABLE IF NOT EXISTS source_projections('
+                        'doc_id TEXT PRIMARY KEY, superseded_by TEXT NOT NULL, reason TEXT NOT NULL)')
+        prior = db.conn.execute('SELECT superseded_by,reason FROM source_projections WHERE doc_id=?',
+                                (doc_id,)).fetchone()
+        if prior and tuple(prior) == (superseded_by,reason):
+            return
+        db.conn.execute('INSERT OR REPLACE INTO source_projections VALUES(?,?,?)', (doc_id,superseded_by,reason))
+
+    def projection_superseded(self, doc_id: str) -> bool:
+        if not self.db.conn.execute("SELECT 1 FROM sqlite_master WHERE name='source_projections'").fetchone():
+            return False
+        return bool(self.db.conn.execute('SELECT 1 FROM source_projections WHERE doc_id=?', (doc_id,)).fetchone())
+
+    def revive_projection(self, doc_id: str) -> None:
+        if self.projection_superseded(doc_id):
+            if not self._tx_active:
+                raise RuntimeError("projection revival requires Writer.transaction")
+            self.db.conn.execute('DELETE FROM source_projections WHERE doc_id=?', (doc_id,))
 
     # ---- docs / blocks --------------------------------------------------
     def upsert_doc(self, doc_id, path, kind, content_sha256, byte_len=0, mtime="",
@@ -451,3 +548,78 @@ class Writer:
             "VALUES(?,?,?,?,?,?,?,?)",
             (seq, prev, checksum, ts, doc_id, op, canonical_json(payload), None),
         )
+
+
+# Derived tier persistence is shared with the engine's compatibility API.
+TIER_EVENT_TAG = "km7.tierevent\x00"
+EVENT_GENESIS = "km7.genesis"
+
+def _last_event(db) -> tuple[int, str]:
+    """(seq, event_hash) of the newest tier_event, or (0, GENESIS) if the ledger is empty."""
+    r = db.conn.execute(
+        "SELECT event_seq, event_hash FROM tier_events ORDER BY event_seq DESC LIMIT 1"
+    ).fetchone()
+    if r is None:
+        return 0, EVENT_GENESIS
+    return int(r["event_seq"]), r["event_hash"]
+
+
+def _emit_tier_event(db, node_id: str, kind: str, old: str | None, new: str | None) -> str:
+    """Append ONE versioned, hash-chained change event. seq is monotonic; event_hash folds the
+    prior hash (a chain) so the ledger is tamper-evident. recorded_at is advisory (never hashed)."""
+    seq, prev = _last_event(db)
+    seq += 1
+    payload = canonical_json({"seq": seq, "node_id": nfc(node_id), "kind": kind,
+                              "old": old, "new": new, "prev": prev})
+    h = sha256_hex(TIER_EVENT_TAG + payload)
+    db.conn.execute(
+        "INSERT INTO tier_events(event_seq,node_id,kind,old_value,new_value,prev_hash,event_hash,recorded_at)"
+        " VALUES(?,?,?,?,?,?,?,?)",
+        (seq, node_id, kind, old, new, prev, h, now_iso()),
+    )
+    return h
+
+
+def retier_nodes(db, autocommit: bool = True) -> dict[str, int]:
+    """Run PPR + Stage-A/B/C, PERSIST `nodes.page_band` (+ advisory `pagerank`). Returns node->band.
+
+    Fires on full rebuild AND incrementally from absorb; page_band is what `stable_rank` and map.md
+    read as a real tier.
+    """
+    node_ids, statuses, node_edges, updates_exempt = _graph(db)
+    if not node_ids:
+        return {}
+
+    # in-neighbour sets (distinct sources) for Stage-B bridge detection.
+    in_neighbors: dict[str, set] = {nid: set() for nid in node_ids}
+    for s, o in node_edges:
+        in_neighbors[o].add(s)
+
+    # PPR: uniform restart over every node (seed = uniform), damping 0.85 == teleport 0.15.
+    ppr_edges = [(s, o, 1.0) for (s, o) in node_edges]
+    seed = {nid: 1.0 for nid in node_ids}
+    scores = ppr(ppr_edges, seed)
+
+    result = compute_tiers(node_ids, scores, statuses, in_neighbors, updates_exempt)
+    band = result["band"]
+
+    # prior persisted bands so a VERSIONED tier-change event fires only on an actual band change
+    # (a no-op re-tier emits nothing; NULL prior == first assignment).
+    prior_band = {
+        nfc(r["node_id"]): (None if r["page_band"] is None else int(r["page_band"]))
+        for r in db.conn.execute("SELECT node_id, page_band FROM nodes")
+    }
+
+    for nid in node_ids:
+        old_band = prior_band.get(nid)
+        new_band = band[nid]
+        if old_band != new_band:
+            _emit_tier_event(db, nid, "tier",
+                             None if old_band is None else str(old_band), str(new_band))
+        db.conn.execute(
+            "UPDATE nodes SET page_band=?, pagerank=? WHERE node_id=?",
+            (band[nid], float(scores.get(nid, 0.0)), nid),
+        )
+    if autocommit:
+        db.commit()
+    return band

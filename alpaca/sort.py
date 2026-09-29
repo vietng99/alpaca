@@ -79,7 +79,7 @@ def run(root: str, day: str | None = None) -> dict:
     from alpaca.wiki.config import Config
     from alpaca.wiki.store.db import DB
 
-    db = DB(Config.for_vault(vault))
+    db = DB(Config.for_project(root))
     try:
         notes = _raw_notes(db, day)
 
@@ -118,7 +118,7 @@ def run(root: str, day: str | None = None) -> dict:
                 assertions.append(row)
             ops_out[op] = {"paired": paired, "unpaired": unpaired}
 
-        _persist(db, assertions)
+        _persist(db, assertions, day=day)
         return {"ops": ops_out, "assertions": assertions,
                 "paired": sum(1 for a in assertions if a["status"] == "paired"),
                 "unpaired": sum(1 for a in assertions if a["status"] == "unpaired")}
@@ -126,8 +126,14 @@ def run(root: str, day: str | None = None) -> dict:
         db.close()
 
 
-def _persist(db, assertions) -> None:
+def _persist(db, assertions, *, day=None) -> None:
     db.conn.executescript(_SCHEMA)
+    # Recompute the selected scope. Retired source projections must not leave stale
+    # paired/unpaired judgments behind after capture normalization changes.
+    if day:
+        db.conn.execute("DELETE FROM sort_assertion WHERE substr(ts,1,10)=? OR day=?", (day, day))
+    else:
+        db.conn.execute("DELETE FROM sort_assertion")
     for a in assertions:
         db.conn.execute(
             "INSERT INTO sort_assertion "

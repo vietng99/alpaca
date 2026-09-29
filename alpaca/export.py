@@ -85,6 +85,7 @@ def _now(conn, cards, root) -> dict:
     as_of = sessions_view.record_now(conn)
     prof = profile.load(root) if root else profile.for_conn(conn)
     claims = sessions_view.claims_by_session(conn, as_of)
+    lapsed = sessions_view.lapsed_by_session(conn, as_of)
     work = sessions_view.of_class(view, sessions_view.WORK)
     sealed = {r[0] for r in conn.execute(
         "SELECT DISTINCT ref FROM events WHERE kind='proof-report' AND ref IS NOT NULL")}
@@ -102,6 +103,7 @@ def _now(conn, cards, root) -> dict:
                          "last_tool": _render.for_json(s["last_tool"]),
                          "last_ref": _render.for_json(s["last_ref"]),
                          "claims": [_render.for_json(t) for t in claims.get(sid, [])],
+                         "lapsed": [_render.for_json(t) for t in lapsed.get(sid, [])],
                          "subagent_stops": s["subagent_stops"]})
     return {
         "as_of": as_of,

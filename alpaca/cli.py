@@ -14,10 +14,7 @@ ENV_SESSION_VARS = ("ALPACA_SESSION_ID", "CLAUDE_CODE_SESSION_ID")
 # M4.12: the verb modules whose import registers the rest of the dispatch table. main() imports
 # these (reporting a shortfall) and surface.lint reads the resulting table via registered_verbs.
 # A domain profile adds its own verb modules (alpaca/profile.py `verbs`), see _profile_verb_modules.
-VERB_MODULES = ("ops", "onboard", "doctor", "analytics_cli", "serve", "questions", "board",
-                "messages", "decisions", "sort", "export", "review", "upgrade", "barrier", "operator",
-                "proof", "observability.cli", "artifacts", "backup", "workspace", "spec_kits",
-                "runbook", "intake", "start", "note", "interview", "hub_publish")
+VERB_MODULES = ('ops', 'onboard', 'doctor', 'analytics_cli', 'serve', 'questions', 'board', 'messages', 'decisions', 'sort', 'export', 'review', 'upgrade', 'barrier', 'operator', 'proof', 'observability.cli', 'artifacts', 'backup', 'workspace', 'spec_kits', 'runbook', 'intake', 'start', 'note', 'interview', 'hub_publish', 'mission_cli', 'release.cli')
 
 
 def _profile_verb_modules():
@@ -131,6 +128,30 @@ def cmd_wiki(args):
     Every non-public row is excluded at the data layer (M2.12) and a page whose structural edge did
     not survive the emit is listed UNACCOUNTED in the manifest, never dropped silently."""
     from alpaca.gates import verdict as vc
+    if args.wiki_verb in ("query", "context", "status", "ingest"):
+        from alpaca.wiki import service
+        try:
+            refresh_report = None
+            if args.wiki_verb == "status":
+                result = service.status(_root())
+            elif args.wiki_verb == "ingest":
+                result = service.ingest(_root(), args.source, doc_id=args.doc_id)
+            else:
+                if args.refresh:
+                    from alpaca.wiki import recovery
+                    refresh_report = recovery.run(_root(), session=args.session or 'cli')
+                if args.wiki_verb == "context":
+                    print(service.context(_root(), args.question, max_chars=args.max_chars))
+                    return vc.BLOCKED if refresh_report and refresh_report['status'] != 'ok' else vc.PASS
+                result = service.query(_root(), args.question, as_of=args.as_of,
+                                       knowledge_as_of=args.knowledge_as_of)
+            if refresh_report is not None:
+                result['refresh'] = refresh_report
+            print(json.dumps(result, indent=2))
+            return vc.BLOCKED if refresh_report and refresh_report['status'] != 'ok' else vc.PASS
+        except Exception as exc:
+            print(json.dumps({'error': f'{type(exc).__name__}: {exc}'}), file=sys.stderr)
+            return vc.FAIL
     if args.wiki_verb == "recover":
         from alpaca.wiki import recovery
         def progress(done, total, report):
@@ -150,7 +171,7 @@ def cmd_wiki(args):
                 conn.close()
             return vc.emit_verdict('alpaca-wiki-recover', vc.FAIL, f'{type(exc).__name__}: {exc}')
         print(json.dumps(result, indent=2))
-        return vc.PASS
+        return vc.PASS if result['status'] == 'ok' else vc.BLOCKED
     if args.wiki_verb == "extract":
         from alpaca.wiki import extract
         try:
@@ -271,6 +292,19 @@ def build_parser():
     wk = sub.add_parser("wiki", help="wiki engine verbs (the extract leaves alpaca; nothing writes back)")
     wkv = wk.add_subparsers(dest="wiki_verb")
     wkv.add_parser("recover", help="replay all recorded sessions and verify wiki capture through a fixed cutoff")
+    wkv.add_parser("status", help="show corpus, providers and capture gaps separately from decision pages")
+    wq = wkv.add_parser("query", help="ask the wiki for a cited evidence-only answer (JSON)")
+    wq.add_argument("question")
+    wq.add_argument("--as-of", default=None, help="valid-time snapshot")
+    wq.add_argument("--knowledge-as-of", default=None, help="recorded-time snapshot")
+    wq.add_argument("--refresh", action="store_true", help="recover recorded sources before answering")
+    wc = wkv.add_parser("context", help="retrieve bounded evidence for a task or resume")
+    wc.add_argument("question")
+    wc.add_argument("--max-chars", type=int, default=2500)
+    wc.add_argument("--refresh", action="store_true")
+    wi = wkv.add_parser("ingest", help="index a local wiki document as evidence")
+    wi.add_argument("source")
+    wi.add_argument("--doc-id", required=True, help="stable wiki/... .md identity")
     wex = wkv.add_parser("extract",
                          help="emit the project wiki as a portable Rune-2 vault; the extract "
                               "LEAVES alpaca and nothing outside alpaca writes back into the record")

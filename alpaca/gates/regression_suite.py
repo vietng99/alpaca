@@ -62,6 +62,8 @@ def run_suite(tests_dir, root=None):
     tests_dir = os.path.abspath(tests_dir)
     child_env = dict(os.environ)
     child_env[_ACTIVE_ENV] = "1"
+    if root:
+        child_env['PYTHONPATH'] = os.path.abspath(root) + os.pathsep + child_env.get('PYTHONPATH', '')
     cwd = tests_dir if os.path.isdir(tests_dir) else (root or os.path.dirname(tests_dir))
     cmd = [sys.executable, "-m", "pytest", tests_dir, "-q", "-p", "no:cacheprovider"]
     try:

@@ -21,7 +21,7 @@ import pytest
 import yaml
 
 from alpaca import cli, db, hub_publish as pub
-from alpaca.tests.conftest import REPO
+from alpaca.tests.conftest import REPO, SHIPPED_PROJECT_YAML
 
 ME = pub.current_user()
 
@@ -275,7 +275,7 @@ def test_the_drop_is_the_flag_then_the_env_then_project_yaml(project, tmp_path, 
 
 
 def test_the_shipped_template_carries_hub_settings_off_and_neutral():
-    with open(os.path.join(REPO, "project.yaml"), encoding="utf-8") as fh:
+    with open(SHIPPED_PROJECT_YAML, encoding="utf-8") as fh:
         hub = yaml.safe_load(fh)["hub"]
     assert hub == {"enabled": False, "drop": "/srv/alpaca-hub/tiles", "slug": None, "name": None,
                    "href": None, "what": None}

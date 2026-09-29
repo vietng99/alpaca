@@ -57,6 +57,8 @@ plugin/alpaca/
 .claude/skills/alpaca-interview/
 .claude/skills/alpaca-runbook-forge/
 docs/manual.html
+docs/release.md
+docs/DEPLOY.md
 docs/projection-ruling.md
 docs/spec-shape.md
 docs/runbook-format.md

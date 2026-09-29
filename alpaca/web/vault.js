@@ -363,8 +363,10 @@
      response is parked in the Cache API under HANDOFF; hub.js takes it once on its first render and
      then deletes the cache, so later reads always go to the server. */
   var HANDOFF = 'alpaca-handoff', HANDOFF_WAIT_MS = 15000;
+  // Not /data.json: right after a server reload it waits for the analytics fold (up to a minute), and
+  // the cockpit paints without it.
   var HUB_FIRST_PAINT = ['/hub/overview.json', '/hub/runs.json', '/hub/history.json?limit=6&kind=progress',
-    '/board/data.json', '/data.json'];
+    '/board/data.json'];
   function prefetchWorkspace(href) {
     var url;
     try { url = new URL(href, location.href); } catch (_) { return Promise.resolve(); }
@@ -628,6 +630,14 @@
   }
 
   function initHub() {
+    // Behind the host hub's path router (its shim script carries data-prefix) the host hub lists every
+    // workspace and this page would list this workspace alone, so it forwards to the host hub's root.
+    // The link is protocol-relative: the router would prefix a plain "/" back to this page.
+    var shim = document.querySelector('script[data-prefix]');
+    if (shim && location.pathname.indexOf(shim.getAttribute('data-prefix') + '/') === 0) {
+      location.replace('//' + location.host + '/');
+      return;
+    }
     mountBackdrop(document.getElementById('backdrop'), 'ambient');
     mountSyslog(document.getElementById('syslog'), ['session vault ' + MID + ' open', 'workspace registry ' + MID + ' loaded',
       'record writer ' + MID + ' alpaca only', 'live summaries ' + MID + ' 15 s refresh']);

@@ -170,20 +170,23 @@ def _write_test(dir_path, body):
     return dir_path
 
 
-def test_regression_suite_green_subset_passes(tmp_path):
+def test_regression_suite_green_subset_passes(tmp_path, monkeypatch):
+    monkeypatch.delenv(regression_suite._ACTIVE_ENV, raising=False)
     d = _write_test(str(tmp_path / "green"), "def test_ok():\n    assert True\n")
     code, summary = regression_suite.run_suite(d)
     assert code == vc.PASS, summary
     assert "passed" in summary
 
 
-def test_regression_suite_red_subset_fails(tmp_path):
+def test_regression_suite_red_subset_fails(tmp_path, monkeypatch):
+    monkeypatch.delenv(regression_suite._ACTIVE_ENV, raising=False)
     d = _write_test(str(tmp_path / "red"), "def test_bad():\n    assert False\n")
     code, summary = regression_suite.run_suite(d)
     assert code == vc.FAIL, summary
 
 
-def test_regression_suite_empty_population_blocks(tmp_path):
+def test_regression_suite_empty_population_blocks(tmp_path, monkeypatch):
+    monkeypatch.delenv(regression_suite._ACTIVE_ENV, raising=False)
     d = str(tmp_path / "none")
     os.makedirs(d, exist_ok=True)
     code, summary = regression_suite.run_suite(d)
@@ -310,3 +313,15 @@ def test_structural_conformance_empty_declaration_blocks(tmp_path):
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))
+
+
+def test_regression_suite_imports_the_selected_project_root(tmp_path, monkeypatch):
+    from alpaca.gates import regression_suite
+    monkeypatch.delenv('PYTHONPATH', raising=False)
+    monkeypatch.delenv('ALPACA_REGRESSION_SUITE_ACTIVE', raising=False)
+    (tmp_path / 'local_product.py').write_text('VALUE = 42\n')
+    tests = tmp_path / 'tests'
+    tests.mkdir()
+    (tests / 'test_import.py').write_text('from local_product import VALUE\ndef test_value():\n    assert VALUE == 42\n')
+    code, summary = regression_suite.run_suite(str(tests), root=str(tmp_path))
+    assert code == vc.PASS, summary

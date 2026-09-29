@@ -110,18 +110,47 @@ class Config:
     def load(vault_dir: str | os.PathLike, toml_path: str | os.PathLike | None = None) -> "Config":
         cfg = Config.for_vault(vault_dir)
         p = Path(toml_path) if toml_path else cfg.vault_dir / "rune.toml"
-        if p.exists() and tomllib is not None:
-            data = tomllib.loads(p.read_text(encoding="utf-8"))
-            over: dict[str, Any] = {}
-            for k in ("embedder", "reranker", "entailer", "llm_extractor",
-                      "dream_armed", "dream_blast_cap", "dream_min_interval_s",
-                      "dream_kill_switch", "use_git", "refine_budget"):
-                if k in data:
-                    over[k] = data[k]
-            meta = dict(cfg.meta)
-            meta.update({str(k): str(v) for k, v in data.get("meta", {}).items()})
-            cfg = replace(cfg, meta=meta, **over)
+        if p.exists():
+            cfg = cfg.with_settings(tomllib.loads(p.read_text(encoding="utf-8")))
         return cfg
+
+    def with_settings(self, data: dict) -> "Config":
+        """Validated overrides shared by project settings and standalone vaults."""
+        if not isinstance(data, dict):
+            raise TypeError("wiki settings must be a table")
+        names = {"embedder", "reranker", "entailer", "llm_extractor", "dream_armed",
+                 "dream_blast_cap", "dream_min_interval_s", "dream_kill_switch", "use_git",
+                 "refine_budget", "meta"}
+        unknown = set(data) - names
+        if unknown:
+            raise ValueError("unknown wiki settings: " + ", ".join(sorted(unknown)))
+        meta_over = data.get("meta", {})
+        if not isinstance(meta_over, dict):
+            raise TypeError("wiki meta must be a table")
+        meta = dict(self.meta)
+        meta.update({str(k): str(v) for k, v in meta_over.items()})
+        return replace(self, meta=meta, **{k: v for k, v in data.items() if k != "meta"})
+
+    @staticmethod
+    def for_project(root: str | os.PathLike) -> "Config":
+        """Defaults < project wiki_providers < vault rune.toml; reject unavailable providers.
+
+        This reads settings only. It does not create a vault or enable optional learning.
+        """
+        from alpaca import paths, project
+        runtime = Path(paths.runtime_dir(str(root)))
+        vault = runtime / "wiki"
+        if runtime.is_symlink() or vault.is_symlink():
+            raise ValueError("project wiki must not be a symlink")
+        cfg = Config.for_vault(vault)
+        settings = project.load(str(root)).get("wiki_providers", {})
+        cfg = cfg.with_settings(settings)
+        local = cfg.vault_dir / "rune.toml"
+        if local.exists():
+            cfg = cfg.with_settings(tomllib.loads(local.read_text(encoding="utf-8")))
+        cfg.providers()
+        return cfg
+
 
 
 def _bounded_int(name: str, value: Any, minimum: int, maximum: int) -> int:

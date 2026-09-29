@@ -7,7 +7,7 @@ export const FLAGS=['overview','runs','sessions','analytics','library'];
 export const SURFACES={board:['overview','runs'],data:['sessions','analytics'],pricing:['sessions','analytics'],lib:['library']};
 // Page -> caches it renders from, and so clears when it renders; a flag a page never clears would
 // refresh it on every idle moment. The live log page follows its own stream and never refreshes here.
-export const ROUTE_NEEDS={cockpit:['overview','runs','sessions'],overview:['overview','runs'],work:['overview'],activity:['overview'],messages:['overview'],runs:['overview','runs'],library:['library'],sessions:['sessions','analytics'],live:[]};
+export const ROUTE_NEEDS={mission:['overview'],cockpit:['overview','runs','sessions'],overview:['overview','runs'],work:['overview'],activity:['overview'],messages:['overview'],runs:['overview','runs'],library:['library'],sessions:['sessions','analytics'],live:[]};
 // The caches one page reads. A session's Work & reports tab also renders tasks and messages from the overview.
 export function needs(route,params={}){const base=ROUTE_NEEDS[route]||FLAGS;return route==='sessions'&&params.sid&&params.view==='report'?[...base,'overview']:[...base];}
 export function parseRev(text){try{const value=JSON.parse(text);return value&&typeof value==='object'&&!Array.isArray(value)?value:null;}catch{return null;}}

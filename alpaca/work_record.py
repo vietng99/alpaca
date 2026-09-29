@@ -58,7 +58,7 @@ def _assigned_session(row, events, now):
             lease = row.get("lease_until") or data.get("lease_until")
             if lease is not None:
                 try:
-                    if datetime.fromisoformat(lease) <= datetime.fromisoformat(now):
+                    if datetime.fromisoformat(str(lease).replace('Z', '+00:00')) <= datetime.fromisoformat(str(now).replace('Z', '+00:00')):
                         return None
                 except (TypeError, ValueError):
                     return None
@@ -102,6 +102,7 @@ def tasks(conn, report_reader=None):
         items.append({"id": row["id"], "number": number(row["id"]), "title": row["title"] or row["statement"],
                       "description": row["statement"] if row["title"] else None,
                       "status": row["status"], "op": row["op"], "claimant": row["claimant"],
+                      "phase": row["phase"], "lease_until": row["lease_until"],
                       "assigned_session": _assigned_session(row, events, now),
                       "proof": row["proof"], "reason": row["why"],
                       "source": row["where_"] if isinstance(row["where_"], str) else None, "ref": row["id"],

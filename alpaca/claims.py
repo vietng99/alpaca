@@ -55,28 +55,12 @@ class StaleLease(ClaimError):
 
 
 # --------------------------------------------------------------------- fold the holder
-def _events_for(conn, row_id):
-    """Every claim-relevant event on `row_id`, oldest first."""
-    return [e for e in db.events(conn, limit=10 ** 9) if e["ref"] == row_id
-            and e["kind"] in (CLAIM_KIND, HEARTBEAT_KIND, RELEASE_KIND, EXPIRE_KIND)]
-
-
 def _fold_holder(conn, row_id):
     """Fold the row's claim events into the current holder, or None when the lease was ended
     (released or expired) or never taken. Liveness is NOT applied here: the holder is returned
-    whether or not its lease has passed, so `expire_due` can find an expired-but-unended lease."""
-    holder = None
-    for e in _events_for(conn, row_id):
-        k, data = e["kind"], e["data"]
-        if k == CLAIM_KIND:
-            holder = {"worker": data.get("worker"), "fence": data.get("fence"),
-                      "lease_until": data.get("lease_until"), "since": e["ts"]}
-        elif k == HEARTBEAT_KIND:
-            if holder is not None and data.get("fence") == holder["fence"]:
-                holder["lease_until"] = data.get("lease_until")
-        elif k in (RELEASE_KIND, EXPIRE_KIND):
-            holder = None
-    return holder
+    whether or not its lease has passed, so `expire_due` can find an expired-but-unended lease.
+    The fold is `board.fold_leases`, the one every claim view reads."""
+    return board.fold_leases(conn, [row_id]).get(row_id)
 
 
 def live(conn, row_id, now=None):
@@ -263,6 +247,74 @@ def release(conn, row_id, worker, *, session=None, now=None):
             data={"worker": worker}, conn_in_txn=True, clock=lambda: now)
         _return_task_todo(conn, row_id, now)
     return ev
+
+
+# --------------------------------------------------------------------- keep a working session's leases
+#: keep_alive renews a lease once no more than this many minutes of it remain, so a working
+#: session writes one renewal per task per half lease, however many calls it makes.
+RENEW_WITHIN_MINUTES = DEFAULT_LEASE_MINUTES // 2
+
+#: the reason a claim taken again by keep_alive carries in the record.
+KEEP_ALIVE_REASON = "keep_alive: the session that held this lease is working again"
+
+
+def _moved_since(conn, row_id, event_id):
+    """True when a `task-move` on `row_id` came after event `event_id`: somebody decided where
+    the task goes after its lease ended, and keep_alive leaves that decision alone."""
+    return conn.execute("SELECT 1 FROM events WHERE kind='task-move' AND ref=? AND id>? LIMIT 1",
+                        (row_id, event_id)).fetchone() is not None
+
+
+def keep_alive(conn, session, *, minutes=DEFAULT_LEASE_MINUTES, now=None):
+    """Keep the task leases `session` holds while it works. Its own hooks call this on every tool
+    call and every prompt (t-027); a lease otherwise ran out after an hour of work and the cockpit
+    showed the working session as holding no task.
+
+    Only a task whose lease this session last took or renewed is touched, and only one of these:
+      * a task in `doing` with a live lease that has RENEW_WITHIN_MINUTES or less left: renewed
+        on its fence;
+      * a task in `doing` whose lease already ran out, with no release or expiry since: taken
+        again with a new fence, which is what `alpaca task claim` would do;
+      * a task the lease sweep (`lease-expired`) returned to `open`, with no task move and no
+        other claim since: taken again the same way.
+    A lease another session holds or took over, a released row, a task moved by hand after its
+    lease ended and a finished task are never touched. With nothing due this is two indexed
+    reads. Returns one {row, action, fence, lease_until} per row written.
+    """
+    now = now or util.now_iso()
+    mine = [r[0] for r in conn.execute(
+        "SELECT DISTINCT ref FROM events WHERE session=? AND kind IN (?,?) AND ref IS NOT NULL",
+        (session, CLAIM_KIND, HEARTBEAT_KIND))]
+    if not mine:
+        return []
+    due = {r[0]: r[1] for r in conn.execute(
+        "SELECT id, status FROM tasks WHERE id IN (%s) AND ((status='doing' AND lease_until IS "
+        "NOT NULL AND lease_until <= ?) OR (status='open' AND claimant IS NULL))"
+        % ",".join("?" * len(mine)), mine + [_lease_from(now, RENEW_WITHIN_MINUTES)])}
+    if not due:
+        return []
+    done = []
+    for row_id, h in sorted(board.fold_leases(conn, list(due), ended=True).items()):
+        if h["session"] != session or h["lease_until"] is None:
+            continue
+        try:
+            if due[row_id] == "doing" and not h["ended"] and h["lease_until"] > now:
+                res, action = renew(conn, row_id, h["worker"], fence=h["fence"], minutes=minutes,
+                                    session=session, now=now), "renewed"
+            elif (due[row_id] == "doing" and not h["ended"]) or (
+                    due[row_id] == "open" and h["ended"] == EXPIRE_KIND
+                    and not _moved_since(conn, row_id, h["ended_id"])):
+                res, action = take(conn, row_id, h["worker"], minutes=minutes, session=session,
+                                   reason=KEEP_ALIVE_REASON, now=now), "re-claimed"
+            else:
+                continue
+        except ClaimError:
+            continue
+        if res.get("status") != CLAIMED:
+            continue
+        done.append({"row": row_id, "action": action, "fence": res["fence"],
+                     "lease_until": res["lease_until"]})
+    return done
 
 
 # --------------------------------------------------------------------- the concurrency signal

@@ -1,0 +1,807 @@
+{
+  "version": 1,
+  "title": "Alpaca system map",
+  "purpose": "Understand the harness, follow changes and trace current evidence.",
+  "inventory": [
+    "alpaca",
+    "bin",
+    "setup",
+    "doctrine",
+    "contracts",
+    "agents",
+    "formations",
+    "templates",
+    "step-models",
+    "plugin",
+    "style",
+    "docs",
+    "intents",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "ALPACA-MANIFEST",
+    "MANIFEST.json",
+    "README.md",
+    "MANUAL.md",
+    "MAP.md",
+    "LICENSE",
+    "THIRD-PARTY-NOTICES.md",
+    "requirements.txt",
+    "pytest.ini"
+  ],
+  "groups": [
+    {
+      "id": "authority",
+      "title": "Rules & authority"
+    },
+    {
+      "id": "planning",
+      "title": "Planning & work"
+    },
+    {
+      "id": "record",
+      "title": "Shared record"
+    },
+    {
+      "id": "verification",
+      "title": "Verification & proof"
+    },
+    {
+      "id": "operators",
+      "title": "Operators & sessions"
+    },
+    {
+      "id": "coordination",
+      "title": "Coordination & recovery"
+    },
+    {
+      "id": "knowledge",
+      "title": "Knowledge & memory"
+    },
+    {
+      "id": "cockpit",
+      "title": "Cockpit & observability"
+    },
+    {
+      "id": "delivery",
+      "title": "Installation & delivery"
+    },
+    {
+      "id": "integrations",
+      "title": "Profiles & integrations"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "doctrine",
+      "group": "authority",
+      "title": "Operating rules",
+      "purpose": "Keep engineering decisions within declared rules.",
+      "sources": [
+        "doctrine/**",
+        "style/**"
+      ],
+      "checks": [
+        "tests"
+      ],
+      "tags": [
+        "reliability"
+      ],
+      "lifecycle": "current"
+    },
+    {
+      "id": "authority",
+      "group": "authority",
+      "title": "Autonomy & decisions",
+      "purpose": "Apply owner decisions and protected-input boundaries.",
+      "sources": [
+        "alpaca/posture/**",
+        "alpaca/decisions.py",
+        "alpaca/barrier.py",
+        "contracts/**"
+      ],
+      "checks": [
+        "tests"
+      ],
+      "tags": [
+        "security"
+      ],
+      "lifecycle": "current"
+    },
+    {
+      "id": "intake",
+      "group": "planning",
+      "title": "Intake & specifications",
+      "purpose": "Turn project intent into specifications and explicit work.",
+      "sources": [
+        "alpaca/intake.py",
+        "alpaca/interview.py",
+        "alpaca/start.py",
+        "alpaca/note.py",
+        "alpaca/spec_kits.py",
+        "alpaca/runbook*.py",
+        "templates/**",
+        "step-models/**",
+        "intents/**"
+      ],
+      "checks": [
+        "tests"
+      ],
+      "tags": [
+        "documentation"
+      ],
+      "lifecycle": "current"
+    },
+    {
+      "id": "tasks",
+      "group": "planning",
+      "title": "Operations & tasks",
+      "purpose": "Track work, contracts, assignments and dependency plans.",
+      "sources": [
+        "alpaca/ops.py",
+        "alpaca/taskcontract.py",
+        "alpaca/taskplan.py",
+        "alpaca/work_record.py",
+        "alpaca/opindex.py",
+        "alpaca/intent.py",
+        "alpaca/questions.py"
+      ],
+      "checks": [
+        "tests"
+      ],
+      "tags": [
+        "reliability"
+      ],
+      "lifecycle": "current"
+    },
+    {
+      "id": "phases",
+      "group": "planning",
+      "title": "Phase progression",
+      "purpose": "Apply declared phase ordering and decision gates.",
+      "sources": [
+        "alpaca/phase/**",
+        "alpaca/checklist/**"
+      ],
+      "checks": [
+        "tests"
+      ],
+      "tags": [
+        "reliability"
+      ],
+      "lifecycle": "current"
+    },
+    {
+      "id": "record",
+      "group": "record",
+      "title": "Event record",
+      "purpose": "Persist project events and their hash chain.",
+      "sources": [
+        "alpaca/db.py",
+        "alpaca/schema.sql",
+        "alpaca/migrate.py",
+        "alpaca/paths.py",
+        "alpaca/util.py",
+        "alpaca/lineage.py"
+      ],
+      "checks": [
+        "tests"
+      ],
+      "tags": [
+        "reliability",
+        "security"
+      ],
+      "lifecycle": "current"
+    },
+    {
+      "id": "projections",
+      "group": "record",
+      "title": "Record projections",
+      "purpose": "Render the pad, board and checklist from recorded work.",
+      "sources": [
+        "alpaca/export.py",
+        "alpaca/board.py",
+        "alpaca/pad.py",
+        "alpaca/render.py",
+        "alpaca/hub_checklist.py",
+        "alpaca/messages.py",
+        "alpaca/sort.py"
+      ],
+      "checks": [
+        "tests"
+      ],
+      "tags": [
+        "reliability"
+      ],
+      "lifecycle": "current"
+    },
+    {
+      "id": "proof",
+      "group": "verification",
+      "title": "Proof reports",
+      "purpose": "Seal work reports and retain their evidence.",
+      "sources": [
+        "alpaca/proof.py",
+        "alpaca/review.py",
+        "alpaca/freshness.py"
+      ],
+      "checks": [
+        "tests"
+      ],
+      "tags": [
+        "reliability"
+      ],
+      "lifecycle": "current"
+    },
+    {
+      "id": "gates",
+      "group": "verification",
+      "title": "Acceptance gates",
+      "purpose": "Judge requirements and stop invalid or stale advancement.",
+      "sources": [
+        "alpaca/gates/**",
+        "alpaca/determinism.py",
+        "alpaca/contracts_runner.py"
+      ],
+      "checks": [
+        "tests"
+      ],
+      "tags": [
+        "reliability",
+        "security"
+      ],
+      "lifecycle": "current"
+    },
+    {
+      "id": "tests",
+      "group": "verification",
+      "title": "Regression tests",
+      "purpose": "Exercise Alpaca mechanisms and their failure cases.",
+      "sources": [
+        "alpaca/tests/**",
+        "pytest.ini",
+        "requirements.txt"
+      ],
+      "checks": [
+        "tests"
+      ],
+      "tags": [
+        "testing"
+      ],
+      "lifecycle": "current"
+    },
+    {
+      "id": "sessions",
+      "group": "operators",
+      "title": "Operator lifecycle",
+      "purpose": "Start, checkpoint and resume independent Codex and Claude sessions.",
+      "sources": [
+        "alpaca/operator.py",
+        "alpaca/hooks/**",
+        "alpaca/sessions_view.py",
+        "AGENTS.md",
+        "CLAUDE.md"
+      ],
+      "checks": [
+        "tests"
+      ],
+      "tags": [
+        "reliability"
+      ],
+      "lifecycle": "current"
+    },
+    {
+      "id": "transcripts",
+      "group": "operators",
+      "title": "Transcript capture",
+      "purpose": "Collect registered conversation and tool sources.",
+      "sources": [
+        "alpaca/transcripts.py",
+        "alpaca/capture_io.py",
+        "alpaca/historian.py",
+        "alpaca/analytics/parse_session.py",
+        "alpaca/journal.py"
+      ],
+      "checks": [
+        "tests"
+      ],
+      "tags": [
+        "reliability"
+      ],
+      "lifecycle": "current"
+    },
+    {
+      "id": "claims",
+      "group": "coordination",
+      "title": "Claims & workers",
+      "purpose": "Coordinate task holders and worker assignments.",
+      "sources": [
+        "alpaca/claims.py",
+        "alpaca/pool.py",
+        "alpaca/formation/**",
+        "agents/**",
+        "formations/**"
+      ],
+      "checks": [
+        "tests"
+      ],
+      "tags": [
+        "reliability"
+      ],
+      "lifecycle": "current"
+    },
+    {
+      "id": "workspaces",
+      "group": "coordination",
+      "title": "Workspace isolation",
+      "purpose": "Keep concurrent work in separate project trees.",
+      "sources": [
+        "alpaca/workspace.py",
+        "alpaca/resolve.py",
+        "alpaca/where.py"
+      ],
+      "checks": [
+        "tests"
+      ],
+      "tags": [
+        "reliability"
+      ],
+      "lifecycle": "current"
+    },
+    {
+      "id": "recovery",
+      "group": "coordination",
+      "title": "Recovery & budgets",
+      "purpose": "Recover interrupted work and track resource boundaries.",
+      "sources": [
+        "alpaca/resilience/**",
+        "alpaca/token.py",
+        "alpaca/retention.py",
+        "alpaca/clock.py"
+      ],
+      "checks": [
+        "tests"
+      ],
+      "tags": [
+        "reliability"
+      ],
+      "lifecycle": "current"
+    },
+    {
+      "id": "ingestion",
+      "group": "knowledge",
+      "title": "Knowledge capture",
+      "purpose": "Ingest project events and recover source coverage.",
+      "sources": [
+        "alpaca/wiki/ingest/**",
+        "alpaca/wiki/recovery.py",
+        "alpaca/wiki/service.py"
+      ],
+      "checks": [
+        "tests"
+      ],
+      "tags": [
+        "reliability"
+      ],
+      "lifecycle": "current"
+    },
+    {
+      "id": "retrieval",
+      "group": "knowledge",
+      "title": "Knowledge retrieval",
+      "purpose": "Return bounded answers with source provenance.",
+      "sources": [
+        "alpaca/wiki/engine/**",
+        "alpaca/wiki/providers/**"
+      ],
+      "checks": [
+        "tests"
+      ],
+      "tags": [
+        "reliability",
+        "performance"
+      ],
+      "lifecycle": "current"
+    },
+    {
+      "id": "memory",
+      "group": "knowledge",
+      "title": "Knowledge store & lessons",
+      "purpose": "Preserve structured knowledge and admitted lessons.",
+      "sources": [
+        "alpaca/wiki/store/**",
+        "alpaca/wiki/reflect/**",
+        "alpaca/wiki/*.py",
+        "alpaca/wiki/*.sql",
+        "alpaca/wiki/*.toml*",
+        "alpaca/knowledge.py",
+        "alpaca/lessons.py"
+      ],
+      "checks": [
+        "tests"
+      ],
+      "tags": [
+        "reliability"
+      ],
+      "lifecycle": "current"
+    },
+    {
+      "id": "web",
+      "group": "cockpit",
+      "title": "Web workspace",
+      "purpose": "Serve project pages and authenticated read services.",
+      "sources": [
+        "alpaca/hub.py",
+        "alpaca/serve.py",
+        "alpaca/weblogin.py",
+        "alpaca/web/**",
+        "alpaca/hub_publish.py"
+      ],
+      "checks": [
+        "tests"
+      ],
+      "tags": [
+        "security"
+      ],
+      "lifecycle": "current"
+    },
+    {
+      "id": "mission",
+      "group": "cockpit",
+      "title": "Mission map",
+      "purpose": "Connect enduring capabilities, changes and evidence.",
+      "sources": [
+        "alpaca/mission*.py",
+        "alpaca/mission-presets/**",
+        "alpaca/web/mission.*"
+      ],
+      "checks": [
+        "tests"
+      ],
+      "tags": [
+        "reliability"
+      ],
+      "lifecycle": "current"
+    },
+    {
+      "id": "analytics",
+      "group": "cockpit",
+      "title": "Session analytics",
+      "purpose": "Calculate recorded usage and display session detail.",
+      "sources": [
+        "alpaca/analytics/**",
+        "alpaca/analytics_cli.py",
+        "alpaca/web/analytics.*"
+      ],
+      "checks": [
+        "tests"
+      ],
+      "tags": [
+        "performance"
+      ],
+      "lifecycle": "current"
+    },
+    {
+      "id": "observability",
+      "group": "cockpit",
+      "title": "Logs & collection",
+      "purpose": "Project collection health, events and bounded logs.",
+      "sources": [
+        "alpaca/observability/**",
+        "alpaca/runlog/**",
+        "alpaca/sysmon.py"
+      ],
+      "checks": [
+        "tests"
+      ],
+      "tags": [
+        "reliability"
+      ],
+      "lifecycle": "current"
+    },
+    {
+      "id": "installation",
+      "group": "delivery",
+      "title": "Installation & onboarding",
+      "purpose": "Prepare a clean project installation.",
+      "sources": [
+        "setup/bootstrap.sh",
+        "setup/boot-check.py",
+        "alpaca/onboard.py",
+        "alpaca/adopt.py",
+        "alpaca/project.py",
+        "alpaca/project_schema.py",
+        "alpaca/doctor.py",
+        "bin/**"
+      ],
+      "checks": [
+        "tests"
+      ],
+      "tags": [
+        "reliability"
+      ],
+      "lifecycle": "current"
+    },
+    {
+      "id": "shipping",
+      "group": "delivery",
+      "title": "Packaging & upgrades",
+      "purpose": "Ship allowlisted mechanism files and preserve project memory.",
+      "sources": [
+        "alpaca/package.py",
+        "alpaca/manifest.py",
+        "alpaca/upgrade.py",
+        "alpaca/release/**",
+        "setup/*.py",
+        "ALPACA-MANIFEST",
+        "MANIFEST.json",
+        "setup/cutover.sh",
+        "setup/sqlite-runtime.md"
+      ],
+      "checks": [
+        "tests"
+      ],
+      "tags": [
+        "security",
+        "reliability"
+      ],
+      "lifecycle": "current"
+    },
+    {
+      "id": "backup",
+      "group": "delivery",
+      "title": "Backup & artifacts",
+      "purpose": "Keep recoverable project snapshots and result bytes.",
+      "sources": [
+        "alpaca/backup.py",
+        "alpaca/artifacts.py"
+      ],
+      "checks": [
+        "tests"
+      ],
+      "tags": [
+        "reliability"
+      ],
+      "lifecycle": "current"
+    },
+    {
+      "id": "profiles",
+      "group": "integrations",
+      "title": "Domain profiles",
+      "purpose": "Supply domain stages, checks and extensions through one seam.",
+      "sources": [
+        "alpaca/profile.py"
+      ],
+      "checks": [
+        "tests"
+      ],
+      "tags": [
+        "reliability"
+      ],
+      "lifecycle": "current"
+    },
+    {
+      "id": "cli",
+      "group": "integrations",
+      "title": "Command interface",
+      "purpose": "Expose registered operations through the shared CLI.",
+      "sources": [
+        "alpaca/cli.py",
+        "alpaca/surface.py",
+        "alpaca/__main__.py",
+        "alpaca/__init__.py"
+      ],
+      "checks": [
+        "tests"
+      ],
+      "tags": [
+        "reliability"
+      ],
+      "lifecycle": "current"
+    },
+    {
+      "id": "plugins",
+      "group": "integrations",
+      "title": "Plugins & documentation",
+      "purpose": "Provide operator skills, guides and integration contracts.",
+      "sources": [
+        "plugin/**",
+        "docs/**",
+        "README.md",
+        "MANUAL.md",
+        "MAP.md",
+        "LICENSE",
+        "THIRD-PARTY-NOTICES.md",
+        "alpaca/wiki/LICENSE"
+      ],
+      "checks": [
+        "tests"
+      ],
+      "tags": [
+        "documentation"
+      ],
+      "lifecycle": "current"
+    }
+  ],
+  "edges": [
+    {
+      "source": "record",
+      "target": "tasks",
+      "kind": "feeds",
+      "confidence": "confirmed",
+      "reason": "Task state and work history read the shared record.",
+      "evidence": [
+        "alpaca/work_record.py"
+      ]
+    },
+    {
+      "source": "record",
+      "target": "proof",
+      "kind": "feeds",
+      "confidence": "confirmed",
+      "reason": "Proof seals and completion evidence live in the record.",
+      "evidence": [
+        "alpaca/proof.py"
+      ]
+    },
+    {
+      "source": "record",
+      "target": "projections",
+      "kind": "feeds",
+      "confidence": "confirmed",
+      "reason": "Board and pad derive their state from recorded events.",
+      "evidence": [
+        "alpaca/export.py"
+      ]
+    },
+    {
+      "source": "tasks",
+      "target": "projections",
+      "kind": "feeds",
+      "confidence": "confirmed",
+      "reason": "Work records populate task and roadmap projections.",
+      "evidence": [
+        "alpaca/hub.py"
+      ]
+    },
+    {
+      "source": "proof",
+      "target": "tasks",
+      "kind": "governs",
+      "confidence": "confirmed",
+      "reason": "Task completion requires a sealed proof report.",
+      "evidence": [
+        "alpaca/ops.py"
+      ]
+    },
+    {
+      "source": "profiles",
+      "target": "web",
+      "kind": "feeds",
+      "confidence": "confirmed",
+      "reason": "The workspace calls profile hooks for domain cards and checks.",
+      "evidence": [
+        "alpaca/hub.py"
+      ]
+    },
+    {
+      "source": "projections",
+      "target": "web",
+      "kind": "feeds",
+      "confidence": "confirmed",
+      "reason": "The web workspace reads record projections.",
+      "evidence": [
+        "alpaca/serve.py"
+      ]
+    },
+    {
+      "source": "sessions",
+      "target": "transcripts",
+      "kind": "feeds",
+      "confidence": "confirmed",
+      "reason": "Lifecycle registration identifies transcript sources.",
+      "evidence": [
+        "alpaca/operator.py"
+      ]
+    },
+    {
+      "source": "transcripts",
+      "target": "analytics",
+      "kind": "feeds",
+      "confidence": "confirmed",
+      "reason": "Analytics consumes captured session records.",
+      "evidence": [
+        "alpaca/analytics/parse_session.py"
+      ]
+    },
+    {
+      "source": "analytics",
+      "target": "web",
+      "kind": "feeds",
+      "confidence": "confirmed",
+      "reason": "The hub serves the session analytics read services.",
+      "evidence": [
+        "alpaca/serve.py"
+      ]
+    },
+    {
+      "source": "record",
+      "target": "mission",
+      "kind": "feeds",
+      "confidence": "confirmed",
+      "reason": "Mission definitions, snapshots and checks use the shared record.",
+      "evidence": [
+        "alpaca/mission.py"
+      ]
+    },
+    {
+      "source": "tasks",
+      "target": "mission",
+      "kind": "feeds",
+      "confidence": "confirmed",
+      "reason": "Explicit task links supply work state on capabilities.",
+      "evidence": [
+        "alpaca/mission.py"
+      ]
+    },
+    {
+      "source": "mission",
+      "target": "web",
+      "kind": "feeds",
+      "confidence": "confirmed",
+      "reason": "The cockpit displays mission-map projections.",
+      "evidence": [
+        "alpaca/web/mission.js"
+      ]
+    },
+    {
+      "source": "transcripts",
+      "target": "ingestion",
+      "kind": "feeds",
+      "confidence": "confirmed",
+      "reason": "Knowledge capture ingests registered transcript sources.",
+      "evidence": [
+        "alpaca/wiki/ingest/drain.py"
+      ]
+    },
+    {
+      "source": "memory",
+      "target": "retrieval",
+      "kind": "feeds",
+      "confidence": "confirmed",
+      "reason": "Retrieval reads the structured knowledge store.",
+      "evidence": [
+        "alpaca/wiki/engine/retrieve.py"
+      ]
+    },
+    {
+      "source": "ingestion",
+      "target": "memory",
+      "kind": "feeds",
+      "confidence": "confirmed",
+      "reason": "Ingestion writes captured sources into the knowledge store.",
+      "evidence": [
+        "alpaca/wiki/ingest/drain.py"
+      ]
+    },
+    {
+      "source": "claims",
+      "target": "tasks",
+      "kind": "governs",
+      "confidence": "confirmed",
+      "reason": "Task assignments use recorded worker claims.",
+      "evidence": [
+        "alpaca/ops.py"
+      ]
+    },
+    {
+      "source": "authority",
+      "target": "phases",
+      "kind": "governs",
+      "confidence": "confirmed",
+      "reason": "Phase advancement checks the recorded autonomy level.",
+      "evidence": [
+        "alpaca/phase/phase_gate.py"
+      ]
+    }
+  ]
+}
