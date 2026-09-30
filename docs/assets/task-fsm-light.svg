@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="470" viewBox="0 0 1200 470" text-rendering="optimizeLegibility" role="img" aria-labelledby="title">
+<title id="title">Task state machine</title>
+<rect width="1200" height="470" fill="#ffffff"/>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8Z" fill="#386cbe"/></marker></defs>
+<text x="40" y="35" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="700" text-anchor="start" fill="#253041">Task state machine</text>
+<path d="M220 208.0H240.0V208.0H260" fill="none" stroke="#386cbe" stroke-width="1.8" marker-end="url(#arrow)"/>
+<path d="M440 208.0H460.0V208.0H480" fill="none" stroke="#386cbe" stroke-width="1.8" marker-end="url(#arrow)"/>
+<rect x="436.5" y="183.0" width="47" height="18" fill="#ffffff"/>
+<text x="460.0" y="196.0" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="400" text-anchor="middle" fill="#586579">claim</text>
+<path d="M660 208.0H680.0V208.0H700" fill="none" stroke="#386cbe" stroke-width="1.8" marker-end="url(#arrow)"/>
+<rect x="656.5" y="183.0" width="47" height="18" fill="#ffffff"/>
+<text x="680.0" y="196.0" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="400" text-anchor="middle" fill="#586579">done?</text>
+<path d="M880 208.0H900.0V208.0H920" fill="none" stroke="#386cbe" stroke-width="1.8" marker-end="url(#arrow)"/>
+<rect x="880.0" y="183.0" width="40" height="18" fill="#ffffff"/>
+<text x="900.0" y="196.0" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="400" text-anchor="middle" fill="#586579">PASS</text>
+<path d="M790.0 170V119H570.0V170" fill="none" stroke="#386cbe" stroke-width="1.8" stroke-dasharray="5 5" marker-end="url(#arrow)"/>
+<rect x="660.0" y="96" width="40" height="18" fill="#ffffff"/>
+<text x="680.0" y="109" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="400" text-anchor="middle" fill="#586579">FAIL</text>
+<path d="M570.0 170V82H350.0V170" fill="none" stroke="#386cbe" stroke-width="1.8" stroke-dasharray="5 5" marker-end="url(#arrow)"/>
+<rect x="419.0" y="59" width="82" height="18" fill="#ffffff"/>
+<text x="460.0" y="72" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="400" text-anchor="middle" fill="#586579">lease ends</text>
+<path d="M570.0 246V293.0H510.0V340" fill="none" stroke="#386cbe" stroke-width="1.8" stroke-dasharray="5 5" marker-end="url(#arrow)"/>
+<rect x="543.5" y="271.0" width="47" height="18" fill="#ffffff"/>
+<text x="567.0" y="284.0" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="400" text-anchor="middle" fill="#586579">block</text>
+<path d="M420 378.0H350.0V246" fill="none" stroke="#386cbe" stroke-width="1.8" stroke-dasharray="5 5" marker-end="url(#arrow)"/>
+<rect x="323.0" y="388.0" width="54" height="18" fill="#ffffff"/>
+<text x="350.0" y="401.0" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="400" text-anchor="middle" fill="#586579">reopen</text>
+<path d="M1010.0 246V293.0H1010.0V340" fill="none" stroke="#386cbe" stroke-width="1.8" stroke-dasharray="5 5" marker-end="url(#arrow)"/>
+<rect x="1003.0" y="271.0" width="68" height="18" fill="#ffffff"/>
+<text x="1037.0" y="284.0" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="400" text-anchor="middle" fill="#586579">op close</text>
+<rect x="40" y="170" width="180" height="76" rx="9" fill="#f3f5f8" stroke="#b1c1d7" stroke-width="1.5"/>
+<text x="130.0" y="205.0" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" text-anchor="middle" fill="#253041">Added</text>
+<text x="130.0" y="227.0" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="400" text-anchor="middle" fill="#586579">task add</text>
+<rect x="260" y="170" width="180" height="76" rx="9" fill="#f3f5f8" stroke="#b1c1d7" stroke-width="1.5"/>
+<text x="350.0" y="205.0" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" text-anchor="middle" fill="#253041">Open</text>
+<text x="350.0" y="227.0" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="400" text-anchor="middle" fill="#586579">on the board</text>
+<rect x="480" y="170" width="180" height="76" rx="9" fill="#f3f5f8" stroke="#b1c1d7" stroke-width="1.5"/>
+<text x="570.0" y="205.0" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" text-anchor="middle" fill="#253041">Doing</text>
+<text x="570.0" y="227.0" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="400" text-anchor="middle" fill="#586579">leased</text>
+<rect x="700" y="170" width="180" height="76" rx="9" fill="#eaf1fc" stroke="#386cbe" stroke-width="1.5"/>
+<text x="790.0" y="205.0" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" text-anchor="middle" fill="#253041">Proof gate</text>
+<text x="790.0" y="227.0" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="400" text-anchor="middle" fill="#586579">sealed?</text>
+<rect x="920" y="170" width="180" height="76" rx="9" fill="#eaf1fc" stroke="#386cbe" stroke-width="1.5"/>
+<text x="1010.0" y="205.0" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" text-anchor="middle" fill="#253041">Done</text>
+<text x="1010.0" y="227.0" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="400" text-anchor="middle" fill="#586579">proof on record</text>
+<rect x="420" y="340" width="180" height="76" rx="9" fill="#f3f5f8" stroke="#b1c1d7" stroke-width="1.5"/>
+<text x="510.0" y="375.0" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" text-anchor="middle" fill="#253041">Blocked</text>
+<text x="510.0" y="397.0" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="400" text-anchor="middle" fill="#586579">needs input</text>
+<rect x="920" y="340" width="180" height="76" rx="9" fill="#f3f5f8" stroke="#b1c1d7" stroke-width="1.5"/>
+<text x="1010.0" y="375.0" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" text-anchor="middle" fill="#253041">Op closed</text>
+<text x="1010.0" y="397.0" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="400" text-anchor="middle" fill="#586579">every task done</text>
+</svg>
