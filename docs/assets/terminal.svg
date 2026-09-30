@@ -1,31 +1,31 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1100" height="480" viewBox="0 0 1100 480" role="img" aria-labelledby="title desc">
   <title id="title">Done is a claim. Proof closes the task.</title>
   <desc id="desc">A claimed task cannot close without proof. The agent writes and seals its report, then closes the task with that report. Illustrative excerpt of Alpaca CLI output.</desc>
-  <rect x="1" y="1" width="1098" height="478" rx="18" fill="#15251f" stroke="#31483c" stroke-width="2"/>
-  <path d="M1 55H1099" stroke="#31483c"/>
-  <g fill="#526358"><circle cx="28" cy="28" r="5"/><circle cx="47" cy="28" r="5"/><circle cx="66" cy="28" r="5"/></g>
+  <rect width="1100" height="480" fill="#0d1117"/>
+  <path d="M1 55H1099" stroke="#30363d"/>
+  <g fill="#596579"><circle cx="28" cy="28" r="5"/><circle cx="47" cy="28" r="5"/><circle cx="66" cy="28" r="5"/></g>
   <g font-family="Arial, Helvetica, sans-serif">
-    <text x="96" y="33" fill="#b3c2b5" font-size="14">alpaca / the proof gate</text>
-    <text x="1066" y="33" fill="#829888" font-size="12" text-anchor="end" letter-spacing="1.5">ONE TASK. ONE RECORD.</text>
+    <text x="96" y="33" fill="#b7c3d0" font-size="14">alpaca / the proof gate</text>
+    <text x="1066" y="33" fill="#9da7b3" font-size="12" text-anchor="end" letter-spacing="1.5">ONE TASK. ONE RECORD.</text>
   </g>
   <g font-family="DejaVu Sans Mono, monospace" font-size="18">
     <g id="attempt">
-      <text x="32" y="98" fill="#829888" font-size="14">01  TRY TO CLOSE WITHOUT PROOF</text>
-      <text x="32" y="133" fill="#edf1e7"><tspan fill="#a6c69c">$ </tspan>bin/alpaca task move t-001 done</text>
-      <text x="32" y="165" fill="#edac8c">FAIL <tspan fill="#c1cabc"> done needs --proof local:&lt;report&gt;</tspan></text>
+      <text x="32" y="98" fill="#9da7b3" font-size="14">01  TRY TO CLOSE WITHOUT PROOF</text>
+      <text x="32" y="133" fill="#e6edf3"><tspan fill="#79b8ff">$ </tspan>bin/alpaca task move t-001 done</text>
+      <text x="32" y="165" fill="#ffb48a">FAIL <tspan fill="#b7c3d0"> done needs --proof local:&lt;report&gt;</tspan></text>
     </g>
-    <path d="M32 188H1068" stroke="#31483c"/>
+    <path d="M32 188H1068" stroke="#30363d"/>
     <g id="seal">
-      <text x="32" y="225" fill="#829888" font-size="14">02  WRITE THE REPORT, THEN SEAL IT</text>
-      <text x="32" y="260" fill="#edf1e7"><tspan fill="#a6c69c">$ </tspan>bin/alpaca proof seal t-001</text>
-      <text x="32" y="292" fill="#a6c69c">PASS <tspan fill="#c1cabc"> .alpaca/proofs/op-001/t-001.md sealed</tspan></text>
+      <text x="32" y="225" fill="#9da7b3" font-size="14">02  WRITE THE REPORT, THEN SEAL IT</text>
+      <text x="32" y="260" fill="#e6edf3"><tspan fill="#79b8ff">$ </tspan>bin/alpaca proof seal t-001</text>
+      <text x="32" y="292" fill="#79b8ff">PASS <tspan fill="#b7c3d0"> .alpaca/proofs/op-001/t-001.md sealed</tspan></text>
     </g>
-    <path d="M32 316H1068" stroke="#31483c"/>
+    <path d="M32 316H1068" stroke="#30363d"/>
     <g id="close">
-      <text x="32" y="352" fill="#829888" font-size="14">03  CLOSE WITH THE SEALED REPORT</text>
-      <text x="32" y="387" fill="#edf1e7" font-size="17"><tspan fill="#a6c69c">$ </tspan>bin/alpaca task move t-001 done --proof local:.alpaca/proofs/op-001/t-001.md</text>
-      <text x="32" y="423" fill="#a6c69c">t-001 -&gt; done</text>
+      <text x="32" y="352" fill="#9da7b3" font-size="14">03  CLOSE WITH THE SEALED REPORT</text>
+      <text x="32" y="387" fill="#e6edf3" font-size="17"><tspan fill="#79b8ff">$ </tspan>bin/alpaca task move t-001 done --proof local:.alpaca/proofs/op-001/t-001.md</text>
+      <text x="32" y="423" fill="#79b8ff">t-001 -&gt; done</text>
     </g>
   </g>
-  <g id="progress"><rect x="32" y="453" width="1036" height="3" rx="1.5" fill="#a6c69c"/></g>
+  <g id="progress"><rect x="32" y="453" width="1036" height="3" rx="1.5" fill="#79b8ff"/></g>
 </svg>
