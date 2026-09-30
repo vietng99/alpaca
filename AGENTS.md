@@ -1,7 +1,7 @@
 <!-- ALPACA:BOOT:BEGIN -->
 # Alpaca: Codex operator
 
-This is Alpaca, the engineering harness. Use this installation's `bin/alpaca`; the shared record is `.alpaca/alpaca.db`. The owner may use Codex and Claude Code on the same project. Both operators obey the same rules and phase gates.
+This is Alpaca, the engineering studio around your coding agents. Use this installation's `bin/alpaca`; the shared record is `.alpaca/alpaca.db`. The owner may use Codex and Claude Code on the same project. Both operators obey the same rules and phase gates.
 
 ## Start and resume
 
@@ -18,7 +18,8 @@ Codex uses explicit lifecycle commands. Claude-specific hook configuration does 
 - Phases and profile stages run in their declared order. A missing result is BLOCKED, never PASS.
 - Poll a running job before starting another. A disconnected chat does not mean a job stopped.
 - Every completion claim has current evidence. Input changes invalidate prior evidence. Record both failures and successful runs.
-- A task is done only with a sealed proof report: `bin/alpaca proof new ID`, write the report the way an engineer documents work (what was done, how, where, the result, deviations, how to reproduce, the evidence list), `bin/alpaca proof seal ID`, then `bin/alpaca task move ID done --proof local:REPORT`. A `remote:` ref belongs inside the report's Evidence list.
+- When the domain profile wires run review (`alpaca/runlog/reviewflow.py`), review every captured run, PASS runs included: assign a reviewer session, dispatch a fresh native subagent with the brief, read its checked review, then record GO or NO-GO as the main session. A reviewer never decides its own review, only PASS gets GO, and a review submit PASS means the quotes matched the log, not that the run passed. Follow `.claude/skills/alpaca-log-review/SKILL.md`.
+- A task is done only with a sealed proof report: `bin/alpaca proof new ID`, write the report the way an engineer documents work (an At a glance summary of 40-600 characters first, then what was done, how, where, the result, deviations, how to reproduce, the evidence list), `bin/alpaca proof seal ID`, then `bin/alpaca task move ID done --proof local:REPORT`. A `remote:` ref belongs inside the report's Evidence list.
 - Owner-authorized edits and installations proceed within scope. Ask before destructive or irreversible external actions. Changes to acceptance criteria or to a profile's protected inputs require owner review. Session autonomy is project-local and never inherited from another account.
 - Use native Codex delegation tools when delegating. The formation library records assignments; it does not itself launch agents. Workers share the same operation record and must not race a running job.
 - Keep generated state under `.alpaca/`. Use clean shipment tooling for another machine; do not copy live state, local settings, tool installations, or Git worktrees.

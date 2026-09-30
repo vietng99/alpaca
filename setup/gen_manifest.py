@@ -61,7 +61,7 @@ DIGEST_NOTE = (
     "MANIFEST.json itself, every __pycache__/ dir and any *.pyc. Re-derive with: python3 "
     "gen_manifest.py --verify")
 DESCRIPTION = (
-    "The engineering harness. A full-tree integrity record over the mechanism class the "
+    "The engineering studio. A full-tree integrity record over the mechanism class the "
     "manifest declares; the memory class (runtime state) is excluded so the digest map describes "
     "the shipment and verifies on a fresh clone.")
 

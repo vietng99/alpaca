@@ -3,9 +3,11 @@
 The owner's direction: a proof is not a path, it is the report an engineer hands in. This proves
 the whole of that, positive and negative on every control:
 
-  * `alpaca proof new` scaffolds the seven written sections plus Appendix A, with the header and
-    the mechanical extract already filled from the record, and refuses to clobber a written
-    report without `--force`;
+  * `alpaca proof new` scaffolds the At a glance summary, the seven written sections plus
+    Appendix A, with the header and the mechanical extract already filled from the record,
+    records the report format, and refuses to clobber a written report without `--force`;
+  * a format 2 report needs a 40 to 600 character At a glance section; a format 1 report,
+    written before that section existed, still seals without one;
   * `alpaca proof seal` refuses a missing, placeholder or thin section, an Evidence list with no
     pointer, an Evidence list with only a `remote:` ref, and any pointer that does not resolve
     (local, event, receipt, job; a receipt or job resolves only through the domain profile),
@@ -141,6 +143,62 @@ def test_scaffold_serves_a_checklist_row_too(project):
     assert cli.main(["proof", "new", "r-1"]) == cli.PASS
     text = util.read_text(_report(project, "r-1"))
     assert "- id: r-1 (row)" in text and _headings(text) == list(proof.SECTIONS)
+
+
+# =========================================================================== At a glance (format 2)
+def test_a_new_report_opens_with_at_a_glance_and_records_its_format(project):
+    conn = _setup(project)
+    assert cli.main(["proof", "new", "t-001"]) == cli.PASS
+    text = util.read_text(_report(project))
+    assert _headings(text)[:2] == [proof.SUMMARY, proof.CONTEXT]
+    assert proof.FORMAT_LINE in proof.split_sections(text)[proof.CONTEXT]
+    assert [e["data"]["format"] for e in db.events(conn, kind="proof-scaffold")] == [2]
+    assert proof.report_format(conn, "t-001", text) == 2
+    assert any("section 'At a glance' still holds" in p for p in _seal_problems(project))
+
+
+def test_a_failed_render_records_no_format_and_the_window_leaves_scaffolds_out(project, monkeypatch):
+    conn = _setup(project)
+    real = proof.render
+    monkeypatch.setattr(proof, "render", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("hook broke")))
+    with pytest.raises(RuntimeError):
+        proof.scaffold(conn, project, "t-001")
+    assert db.events(conn, kind=proof.SCAFFOLD_KIND) == []
+    monkeypatch.setattr(proof, "render", real)
+    proof.scaffold(conn, project, "t-001", session="writer")
+    assert [e["kind"] for e in proof.window(conn, "t-001")["events"]].count(proof.SCAFFOLD_KIND) == 0
+    assert "writer" not in proof.window(conn, "t-001")["sessions"]
+
+
+def test_a_format_2_summary_is_required_and_short(project):
+    _setup(project)
+    text = util.read_text(proofkit.write_report(project, "t-001"))
+    util.write_text(_report(project), text.replace(proofkit.SUMMARY, "It worked.", 1))
+    assert any("'At a glance' holds 9 non-space" in p and "40 to 600" in p for p in _seal_problems(project))
+    util.write_text(_report(project), text.replace(proofkit.SUMMARY, "word " * 200, 1))
+    assert any("'At a glance' holds 800 non-space" in p for p in _seal_problems(project))
+    # dropping the section and the format line does not make it a format 1 report: the record
+    # kept the format proof new wrote
+    head, rest = text.split("## %s\n\n" % proof.CONTEXT, 1)
+    util.write_text(_report(project), head.split("## %s" % proof.SUMMARY, 1)[0]
+                    + rest.replace(proof.FORMAT_LINE + "\n", "", 1))
+    assert any("section 'At a glance' is missing" in p for p in _seal_problems(project))
+    util.write_text(_report(project), text)
+    conn = db.connect(project)
+    proof.seal(conn, project, "t-001")
+    assert len(db.events(conn, kind=proof.KIND)) == 1
+
+
+def test_a_format_1_report_still_seals_without_a_summary(project):
+    conn = _setup(project)
+    text = proof.render(conn, project, "t-001")          # pure: records no format
+    head, rest = text.split("## %s\n\n" % proof.CONTEXT, 1)
+    legacy = head.split("## %s" % proof.SUMMARY, 1)[0] + rest.replace(proof.FORMAT_LINE + "\n", "", 1)
+    legacy = proofkit.fill(legacy, ["%s - the run output" % proofkit.evidence_file(project, "t-001")])
+    util.write_text(_report(project), legacy)
+    assert proof.SUMMARY not in _headings(legacy) and proof.report_format(conn, "t-001", legacy) == 1
+    proof.seal(conn, project, "t-001")
+    assert len(db.events(conn, kind=proof.KIND)) == 1
 
 
 # =========================================================================== proof seal refusals

@@ -52,7 +52,7 @@ FRONT = (
 TABLE: dict[str, dict] = {
     "session": {"keys": ("session", "operator", "context"), "group": "front"},
     # front page (FRONT above marks these front; the group label mirrors that)
-    "status": {"keys": ("root", "version", "events", "last_event", "onboarded",
+    "status": {"keys": ("root", "version", "channel", "events", "last_event", "onboarded",
                          "sessions", "ops_open", "tasks_open", "op_index"), "group": "front"},
     "op": {"keys": ("verdict", "op", "status"), "group": "front"},
     "task": {"keys": ("verdict", "task", "status"), "group": "front"},

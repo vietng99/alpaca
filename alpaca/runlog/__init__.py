@@ -5,6 +5,8 @@
   * `quotes`     - `check` verifies a review's quotes against the log bytes and its sha256;
   * `reviews`    - `submit` keeps a checked review write-once and records it, `mark` appends an
     engineer's confirm or dispute per finding, `reviews` reads them back with integrity;
+  * `reviewflow` - an independent reviewer per run and the main session's GO or NO-GO: `assign`,
+    `submit`, `decide`, the `require_go` and `require_retry` gates, `pending` and `glance`;
   * `junit`      - `parse_junit` turns a JUnit XML report into tests and measurements, null
     never zero;
   * `textwindow` - `read_window` and `whole_chars` read a growing log one byte window at a time,

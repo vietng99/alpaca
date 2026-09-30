@@ -6,7 +6,7 @@
 name: Alpaca
 project_id: alpaca-template
 template: true
-what: The engineering harness, before onboarding.
+what: The engineering studio, before onboarding.
 people: []
 tier: public
 existing_repo: false

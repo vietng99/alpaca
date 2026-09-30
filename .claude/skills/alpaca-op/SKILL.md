@@ -29,7 +29,7 @@ This skill drives an op through the board and keeps every claim tied to a proof.
 - `task add` requires `--title`: a short name of at most 60 characters, e.g. "login page first release". The
   statement is the full description with the pass criteria. Rename with `alpaca task title <id> "<title>"`.
 - A task is done only with a sealed proof report. Run `alpaca proof new <id>`, write the report the
-  way an engineer documents work (what was done, how, where, the result, deviations, how to
+  way an engineer documents work (a 40-600 character At a glance summary first, then what was done, how, where, the result, deviations, how to
   reproduce, and the evidence list), run `alpaca proof seal <id>`, then
   `alpaca task move <id> done --proof local:<report>`. A `remote:` ref belongs inside the report's
   Evidence list; alone it does not close a task. No sealed report, not done: absence blocks.

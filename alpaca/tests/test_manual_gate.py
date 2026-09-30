@@ -31,6 +31,7 @@ HOOKS = (
     ("SessionStart", "session_start"),
     ("UserPromptSubmit", "user_prompt"),
     ("PreToolUse", "pre_tool"),
+    ("PreToolUse", "git_guard"),
     ("PostToolUse", "post_tool"),
     ("Stop", "stop"),
     ("SubagentStop", "subagent_stop"),

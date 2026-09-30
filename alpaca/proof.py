@@ -65,6 +65,8 @@ from alpaca.gates import verdict as vc
 
 #: the record event one seal appends.
 KIND = "proof-report"
+#: the record event `proof new` appends: the report format it wrote.
+SCAFFOLD_KIND = "proof-scaffold"
 
 #: the placeholder line a scaffolded section carries until a person replaces it.
 TODO_MARK = "TODO(agent):"
@@ -76,10 +78,20 @@ NARRATIVE = ("What I did", "How I did it", "Where", "Result", "Deviations and is
 EVIDENCE = "Evidence"
 #: the tool-filled section. A person does not write this one.
 APPENDIX = "Appendix A. Mechanical extract"
-#: every section a seal demands.
+#: the short summary a format 2 report opens with, for a reader who reads nothing else.
+SUMMARY = "At a glance"
+#: the heading over the scaffold's header lines in a format 2 report.
+CONTEXT = "Report context"
+#: every section a seal demands of a format 1 report (written before the summary existed).
 REQUIRED = NARRATIVE + (EVIDENCE,)
+#: every section a seal demands of a format 2 report.
+REQUIRED_V2 = (SUMMARY,) + REQUIRED
 #: the whole heading order, as `proof new` writes it.
-SECTIONS = NARRATIVE + (EVIDENCE, APPENDIX)
+SECTIONS = (SUMMARY, CONTEXT) + NARRATIVE + (EVIDENCE, APPENDIX)
+#: the header line that marks a format 2 report; a `proof-scaffold` event records it as well.
+FORMAT_LINE = "- proof-format: 2"
+#: the At a glance bounds, in non-space characters outside code fences and HTML comments.
+SUMMARY_CHARS = (40, 600)
 
 #: the floor for a narrative section, counted in non-space characters OUTSIDE code fences and
 #: HTML comments. Below this the section is a gesture at an answer rather than one, and a pasted
@@ -201,8 +213,9 @@ def referencing_events(conn, ident) -> list:
 
 def window(conn, ident) -> dict:
     """{"first", "now", "sessions"}: the first event that references the id, the clock now, and
-    every session that wrote one of those events, in first-seen order."""
-    evs = referencing_events(conn, ident)
+    every session that wrote one of those events, in first-seen order. The report's own scaffold
+    events are bookkeeping about the report, not work, and stay out."""
+    evs = [e for e in referencing_events(conn, ident) if e.get("kind") != SCAFFOLD_KIND]
     sessions = []
     for e in evs:
         sid = e.get("session")
@@ -380,6 +393,9 @@ def _run_file(root, kind, ident):
 
 # --------------------------------------------------------------------------- the scaffold
 _PROMPT = {
+    SUMMARY: ("40 to 600 non-space characters an engineer reads first: what changed, the observed "
+              "result and anything still unresolved. For a run, list the run, its review and the "
+              "main decision under Evidence"),
     "What I did": "one paragraph, the change as a reader who was not here would need it",
     "How I did it": "the route you took: the commands, the edits, the order they ran in",
     "Where": "the files, paths, hosts and jobs this touched, named exactly",
@@ -400,6 +416,7 @@ def _header(conn, root, subj, win) -> list:
     return [
         "# Proof report %s" % subj["id"],
         "",
+        FORMAT_LINE,
         "- id: %s (%s)" % (subj["id"], subj["kind"]),
         "- statement: %s" % (subj.get("statement") or "(none recorded)"),
         "- op: %s" % (subj.get("op") or "(none)"),
@@ -410,12 +427,13 @@ def _header(conn, root, subj, win) -> list:
         "- project: %s" % os.path.basename(os.path.abspath(root)),
         "- git: %s" % git_line,
         "",
-        "Sections one to seven are written by the person or agent who did the work. Appendix A is "
+        "The %s section and the sections from %s to %s are written by the person or agent who "
+        "did the work. Appendix A is "
         "filled by `alpaca proof new` and is not hand-edited. `alpaca proof seal %s` refuses this "
         "report while any section still carries its %s line, holds under %d non-space characters "
         "outside code fences and HTML comments (paste the log by all means, but write the section "
         "too), cites this report as its own evidence, or lists no evidence pointer that can be "
-        "resolved." % (subj["id"], TODO_MARK, MIN_CHARS),
+        "resolved." % (SUMMARY, NARRATIVE[0], EVIDENCE, subj["id"], TODO_MARK, MIN_CHARS),
         "",
         "Sealing copies every `local:` evidence file into `%s/`, so the work can move on without "
         "the report losing what it stood on. A later check reads the file in the tree first and "
@@ -509,7 +527,9 @@ def render(conn, root, ident) -> str:
     """The scaffolded report as text. Pure: writes nothing."""
     subj = subject(conn, ident)
     win = window(conn, ident)
-    lines = _header(conn, root, subj, win)
+    header = _header(conn, root, subj, win)
+    lines = [header[0], "", "## %s" % SUMMARY, "", "%s %s" % (TODO_MARK, _PROMPT[SUMMARY]), "",
+             "## %s" % CONTEXT, ""] + header[2:]
     for name in NARRATIVE + (EVIDENCE,):
         lines += ["## %s" % name, "", "%s %s" % (TODO_MARK, _PROMPT[name]), ""]
     lines += appendix(conn, root, subj, win)
@@ -525,6 +545,10 @@ def scaffold(conn, root, ident, *, force=False, session=None) -> dict:
     if existed and not force:
         raise Refusal(["%s already exists; pass --force to overwrite it" % _rel(root, path)])
     util.write_text(path, render(conn, root, ident))
+    # The record keeps the format too, so deleting the format line from the report does not turn
+    # it back into a report a seal reads as format 1. A render that fails records nothing.
+    db.append_event(conn, session=session or "cli", actor="agent", kind=SCAFFOLD_KIND,
+                    op=subj.get("op"), ref=subj["id"], data={"format": 2, "path": _rel(root, path)})
     return {"path": path, "rel": _rel(root, path), "op": subj.get("op"), "id": subj["id"],
             "overwrote": existed}
 
@@ -832,6 +856,25 @@ def failed_jobs_in_window(root, first, now) -> list:
     return out
 
 
+def report_format(conn, ident, text) -> int:
+    """2 when the report carries the format 2 header line or `proof new` recorded format 2 for
+    this id; else 1, a report written before the At a glance section existed."""
+    head = []
+    for line, inside in fence_scan(text):
+        m = None if inside else _HEADING.match(line)
+        if m and m.group(1).strip() not in (SUMMARY, CONTEXT):
+            break
+        head.append(line)
+    if FORMAT_LINE in (line.strip() for line in head):
+        return 2
+    row = conn.execute("SELECT data FROM events WHERE kind=? AND ref=? ORDER BY id DESC LIMIT 1",
+                       (SCAFFOLD_KIND, ident)).fetchone()
+    try:
+        return 2 if row and json.loads(row["data"]).get("format") == 2 else 1
+    except (TypeError, ValueError):
+        return 1
+
+
 def inspect(conn, root, ident) -> dict:
     """Read the report and collect every reason a seal would refuse it. Writes nothing.
 
@@ -847,7 +890,8 @@ def inspect(conn, root, ident) -> dict:
     text = util.read_text(path)
     found = split_sections(text)
     sizes = {}
-    for name in REQUIRED:
+    v2 = report_format(conn, subj["id"], text) >= 2
+    for name in (REQUIRED_V2 if v2 else REQUIRED):
         if name not in found:
             problems.append("section %r is missing" % name)
             continue
@@ -859,6 +903,10 @@ def inspect(conn, root, ident) -> dict:
             problems.append("section %r holds %d non-space characters outside code fences and "
                             "HTML comments, under the %d floor; a pasted log is not the section"
                             % (name, sizes[name], MIN_CHARS))
+    if v2 and SUMMARY in sizes and not SUMMARY_CHARS[0] <= sizes[SUMMARY] <= SUMMARY_CHARS[1]:
+        problems.append("section %r holds %d non-space characters outside code fences and HTML "
+                        "comments; it needs %d to %d, a short summary a reader can take in at once"
+                        % ((SUMMARY, sizes[SUMMARY]) + SUMMARY_CHARS))
     for name in found:
         sizes.setdefault(name, prose_len(found[name]))
 

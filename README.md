@@ -22,7 +22,7 @@
 
 # Start with an idea. Finish with proof.
 
-**Alpaca is an engineering harness for Claude Code and Codex.** Your agent takes a rough idea through a spec, a runbook, tracked work and checked results. Alpaca keeps the artifacts, decisions and evidence in one local record, so progress survives the session and completion can be inspected.
+**Alpaca is the engineering studio around your coding agents.** Claude Code and Codex keep working where you already use them: the terminal, the desktop app or your IDE. Alpaca gives them the method, from a rough idea through a spec, a runbook, tracked work and checked results. It keeps the artifacts, decisions and evidence in one local record, so progress survives the session and completion can be inspected, and its hub shows the work live on your machine.
 
 ## From idea to proof
 
@@ -123,6 +123,7 @@ The agent writes the report an engineer would hand over:
 
 | Section | What the reader can check |
 | --- | --- |
+| **At a glance** | In 40 to 600 characters: what changed, the observed result and what is still open |
 | **What I did** | The requirement addressed and the change made |
 | **How I did it** | The approach, commands and settings used |
 | **Where** | The files, stages and outputs involved |
@@ -367,7 +368,7 @@ Alpaca is domain-neutral. Set a `profile:` in `project.yaml` to bring your own s
 Also in the box:
 
 - **Formations** for work that needs more than one agent: `solo`, `builder-verifier`, `fan-out`, `bug-loop`, `nuclear`, `napalm`.
-- **Claude Code skills**, ready in any clone: `/alpaca-first-chat`, `/alpaca-onboard`, `/alpaca-op`, `/alpaca-from-notes`, `/alpaca-interview`, `/alpaca-runbook-forge`.
+- **Claude Code skills**, ready in any clone: `/alpaca-first-chat`, `/alpaca-onboard`, `/alpaca-op`, `/alpaca-from-notes`, `/alpaca-interview`, `/alpaca-runbook-forge`, `/alpaca-log-review`.
 
 ## Autodrive levels
 
@@ -415,7 +416,7 @@ Claude Code has native lifecycle hooks. Codex follows AGENTS.md and uses explici
 - `.alpaca/`: fresh per-installation runtime created on use; never shipped.
 - `MANUAL.md` and `docs/manual.html`: command reference and phone-readable manual.
 - `doctrine/`, `MAP.md`, `contracts/`, `formations/`: the rules, the boot router, and the work shapes.
-- `.claude/skills/alpaca-*`: Alpaca's own skills (`/alpaca-first-chat`, `/alpaca-onboard`, `/alpaca-op`, `/alpaca-from-notes`, `/alpaca-interview`, `/alpaca-runbook-forge`). They are project skills, so Claude Code offers them in any clone with nothing to install.
+- `.claude/skills/alpaca-*`: Alpaca's own skills (`/alpaca-first-chat`, `/alpaca-onboard`, `/alpaca-op`, `/alpaca-from-notes`, `/alpaca-interview`, `/alpaca-runbook-forge`, `/alpaca-log-review`). They are project skills, so Claude Code offers them in any clone with nothing to install.
 - `plugin/alpaca/`: optional bundled skills (load with `claude --plugin-dir ./plugin/alpaca`, see `docs/operators.md`).
 - `docs/runbook-format.md`, `templates/runbook-example/` and `/alpaca-runbook-forge`: the runbook format (a domain's stages, checks, knobs, retry rules and owner gates), a worked example, and the skill that writes a runbook from a spec. `alpaca runbook check` checks one.
 - `alpaca intake <spec> <runbook>`: turns a spec-kit or OpenSpec spec and its runbook into the op's checklist rows (one per success criterion, edge case or scenario, each with its bar), one task contract per stage and per owner gate (none for a recovery stage), and the profile stages; after a spec or runbook change it supersedes only the rows whose criterion or bar changed. `--dry-run` shows the plan. See `docs/intake.md`.

@@ -1072,6 +1072,7 @@ def make_handler(live, root, remote=False):
             one = lambda key, default="": (query.get(key) or [default])[0]
             web = Path(__file__).parent / "web"
             assets = {"hub.css": "text/css; charset=utf-8", "hub.js": "text/javascript; charset=utf-8",
+                      "document.js": "text/javascript; charset=utf-8",
                       "analytics.js": "text/javascript; charset=utf-8", "analytics.css": "text/css; charset=utf-8",
                       "cockpit.js": "text/javascript; charset=utf-8", "cockpit.css": "text/css; charset=utf-8",
                       "mission.js": "text/javascript; charset=utf-8", "mission.css": "text/css; charset=utf-8",

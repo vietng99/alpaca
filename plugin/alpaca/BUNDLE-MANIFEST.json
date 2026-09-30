@@ -262,7 +262,7 @@
         {
           "upstream_path": "autodrive/SKILL.md",
           "bundle_path": "plugin/alpaca/skills/autodrive/SKILL.md",
-          "sha256": "ab9b3580420f2603ee128e32ae24afddd0e9a001c0e50aa6a7dea3a665426007",
+          "sha256": "b0f4a5032bb2bfa8a7c3f722b01e489e65fe2bb63995507e0c886fad1b667ae8",
           "vendored": true,
           "role": "entry-point",
           "upstream_sha256": "da664320ea3c4fec7f46679a472bbc618656e92089f7de45d81849ec50f9bb81",

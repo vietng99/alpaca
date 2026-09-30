@@ -196,3 +196,5 @@ a.rl-cell:hover,a.rl-cell:focus-visible{outline:2px solid var(--focus);outline-o
  .rl-meta{padding:12px 12px 0}
 }
 @media(prefers-reduced-motion:reduce){.rl-col,.rl-item,.rl-step{transition:none}}
+/* At a glance sits above the stage contract and the full review, which folds under it. */
+.rl-glance{padding:2px 0 10px;overflow-wrap:anywhere}.rl-glance h3{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:4px 0 8px}.rl-glance .rl-summary{font-size:15px;line-height:1.55;max-width:85ch;margin:0 0 8px}.rl-facts{display:grid;grid-template-columns:max-content 1fr;gap:4px 12px;margin:0 0 8px;font-size:13px}.rl-facts dt{color:var(--muted)}.rl-facts dd{margin:0;color:var(--text)}.rl-full>summary{cursor:pointer;padding:10px 0 4px;font-weight:600;color:var(--text)}.rl-full[open]>.rl-review-head{margin-top:12px}

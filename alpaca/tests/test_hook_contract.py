@@ -31,6 +31,7 @@ HOOKS = [
     "alpaca.hooks.session_start",
     "alpaca.hooks.user_prompt",
     "alpaca.hooks.pre_tool",
+    "alpaca.hooks.git_guard",
     "alpaca.hooks.post_tool",
     "alpaca.hooks.stop",
     "alpaca.hooks.subagent_stop",

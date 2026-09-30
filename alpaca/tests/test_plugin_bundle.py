@@ -271,7 +271,7 @@ def test_plugin_json_is_valid():
 
 def test_alpaca_native_skills_ship():
     for name in ("alpaca-first-chat", "alpaca-onboard", "alpaca-op", "alpaca-runbook-forge",
-                 "alpaca-from-notes", "alpaca-interview"):
+                 "alpaca-from-notes", "alpaca-interview", "alpaca-log-review"):
         p = os.path.join(REPO, ".claude", "skills", name, "SKILL.md")
         # positive: each Alpaca-native skill ships a SKILL.md.
         assert os.path.isfile(p), "Alpaca-native skill missing: %s" % name

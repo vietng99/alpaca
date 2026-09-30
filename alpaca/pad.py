@@ -1,4 +1,5 @@
 """RESUME.md: rendered from the record every time. Never hand-edited."""
+import json
 import os
 from alpaca import db, ops, project, sessions_view, token, util
 from alpaca import render as _render                # aliased: this module defines its own `render`
@@ -27,6 +28,152 @@ def next_action(root, *, conn=None, expire=True) -> str:
     if o:
         return "%s has no open tasks: add one (bin/alpaca task add %s \"...\" --title \"...\") or close it (bin/alpaca op close %s --basis ...)" % (o["id"], o["id"], o["id"])
     return "no open op: pick one from intents/queue.md and run bin/alpaca op new \"<intent>\" --done-when \"...\""
+
+# ------------------------------------------------------------------------------ resume points
+# op-009 t-130. Two ops can park work at once (op-008 and op-009 did), and the single Next action
+# line names only the first open task on the whole record. The Resume points section gives each
+# live op its own entry: the task it resumes at, the handoff its last session left, and that
+# session's checkpoint note. Every link from an event to an op is one the record states; nothing
+# is inferred from message text.
+
+#: the message kind (alpaca/messages.py KINDS) a session leaves for the next one.
+HANDOFF_KIND = "handoff"
+#: the event kind `alpaca session checkpoint` records (alpaca/operator.py, pre_compact.handle).
+CHECKPOINT_KIND = "session-checkpoint"
+#: the claim event kind (alpaca/claims.py CLAIM_KIND); a takeover is recorded under it too.
+CLAIM_KIND = "claim"
+#: how many characters of a message body, a checkpoint note or a task title an entry shows.
+RESUME_TEXT_MAX = 160
+#: how many characters of an op intent an entry shows.
+RESUME_INTENT_MAX = 80
+
+
+def _one_line(value, limit) -> str:
+    """`value` on one line for the pad: every run of whitespace (line breaks included) becomes one
+    space, a longer text is cut to `limit` characters ending in '...', and the result crosses the
+    render boundary (M4.9) so a pipe or backslash in it cannot break the line."""
+    text = " ".join(str(value or "").split())
+    if len(text) > limit:
+        text = text[:max(limit - 3, 0)].rstrip() + "..."
+    return _render.cell(text)
+
+
+def _data(raw) -> dict:
+    """An event's data column as a dict; {} when it is absent or not a JSON object."""
+    if isinstance(raw, dict):
+        return raw
+    try:
+        out = json.loads(raw) if raw else {}
+    except (TypeError, ValueError):
+        return {}
+    return out if isinstance(out, dict) else {}
+
+
+def _row_op(conn, ref, cache):
+    """The op the record files task or obligation row `ref` under, or None when `ref` names
+    neither. Used only for a claim event whose own op column is empty."""
+    if not ref:
+        return None
+    if ref not in cache:
+        found = None
+        for table in ("rows", "tasks"):
+            r = conn.execute("SELECT op FROM %s WHERE id=?" % table, (ref,)).fetchone()
+            if r is not None and r[0]:
+                found = r[0]
+                break
+        cache[ref] = found
+    return cache[ref]
+
+
+def resume_points(conn, op_ids, view=None) -> list:
+    """One resume point per op in `op_ids`, in that order:
+    {op, intent, next, handoff, checkpoint}.
+
+    - `next` is the op's first open or doing task by id (ops.first_open_task), or None.
+    - `handoff` is the newest `msg` event of message kind `handoff` whose ref is the op (the event's
+      op column counts when its ref names no op), or None. A handoff that names no op, and a
+      message of any other kind, belongs to no op.
+    - `checkpoint` is the newest `session-checkpoint` event whose session's latest claim BEFORE it
+      is on a task or row of the op, or None. A checkpoint event carries no op of its own
+      (pre_compact.handle writes only its trigger and note), so the op is the one the session held
+      when it wrote the note: a session that worked on two ops files each note under the op it was
+      on at the time, never under both. A checkpoint written before the session's first claim, or
+      by a synthetic service writer (sessions_view.SERVICE_IDS), belongs to no op.
+
+    One ordered pass over the claim, checkpoint and message events (idx_events_kind) serves every
+    op. Read-only: the lease sweep stays with the caller.
+    """
+    op_ids = [o for o in op_ids if o]
+    wanted = set(op_ids)
+    known = {r[0] for r in conn.execute("SELECT id FROM ops")}
+    held = {}                                # session -> op of its latest claim so far
+    handoff, checkpoint = {}, {}
+    cache = {}
+    for r in conn.execute("SELECT id, ts, session, actor, kind, op, ref, data FROM events "
+                          "WHERE kind IN (?, ?, ?) ORDER BY id",
+                          (CLAIM_KIND, CHECKPOINT_KIND, "msg")):
+        kind, sid = r["kind"], r["session"]
+        if kind == CLAIM_KIND:
+            op = r["op"] or _row_op(conn, r["ref"], cache)
+            if op:
+                held[sid] = op
+        elif kind == CHECKPOINT_KIND:
+            if sessions_view.class_of(view or {}, sid) == sessions_view.SERVICE:
+                continue
+            op = held.get(sid)
+            if op in wanted:
+                checkpoint[op] = {"event": r["id"], "ts": r["ts"], "session": sid,
+                                  "note": _data(r["data"]).get("note") or ""}
+        else:
+            data = _data(r["data"])
+            if data.get("kind") != HANDOFF_KIND:
+                continue
+            op = r["ref"] if r["ref"] in known else (r["op"] if r["op"] in known else None)
+            if op in wanted:
+                handoff[op] = {"event": r["id"], "ts": r["ts"], "from": r["actor"],
+                               "to": data.get("to"), "body": data.get("body") or ""}
+    intents = {r[0]: r[1] for r in conn.execute("SELECT id, intent FROM ops")}
+    return [{"op": o, "intent": intents.get(o), "next": ops.first_open_task(conn, o),
+             "handoff": handoff.get(o), "checkpoint": checkpoint.get(o)} for o in op_ids]
+
+
+def resume_point_lines(conn, op_ids, view=None) -> list:
+    """The `## Resume points` section of the pad: one entry per op in `op_ids`, each naming its
+    next task, its handoff and its checkpoint (with event ids), and the recall line for the session
+    that wrote the checkpoint. An op with nothing parked still gets its entry, saying so."""
+    lines = ["## Resume points", ""]
+    points = resume_points(conn, op_ids, view=view)
+    if points:
+        lines.append("One entry per open op: the task it resumes at and what its last session "
+                     "left. Pick the entry of the op you are resuming.")
+        lines.append("")
+    for p in points:
+        lines.append("- %s  %s" % (p["op"], _one_line(p["intent"], RESUME_INTENT_MAX) or "-"))
+        t = p["next"]
+        if t:
+            lines.append("  - next: %s [%s] %s (%s)" % (
+                t["id"], t["status"], _one_line(t.get("title") or t["statement"], RESUME_TEXT_MAX),
+                ("claimed by %s" % _render.cell(t["claimant"])) if t["claimant"] else "unclaimed"))
+        else:
+            lines.append("  - next: (no open task)")
+        h = p["handoff"]
+        if h:
+            lines.append("  - handoff: event %d at %s from %s: %s" % (
+                h["event"], h["ts"], _render.cell(h["from"] or "-"),
+                _one_line(h["body"], RESUME_TEXT_MAX)))
+        else:
+            lines.append("  - handoff: (no handoff)")
+        c = p["checkpoint"]
+        if c:
+            lines.append("  - checkpoint: event %d at %s session %s: %s" % (
+                c["event"], c["ts"], _render.cell(c["session"][:8]),
+                _one_line(c["note"], RESUME_TEXT_MAX) or "(empty note)"))
+            lines.append("  - resume: bin/alpaca recall %s" % _render.cell(c["session"]))
+        else:
+            lines.append("  - checkpoint: (no checkpoint)")
+    if not points:
+        lines.append("(no open op)")
+    return lines
 
 def render(root) -> str:
     conn = db.connect(root)
@@ -75,6 +222,23 @@ def render(root) -> str:
         lines.append("(no session beat in the last %d minutes of record time)"
                      % (sessions_view.ACTIVE_WINDOW_S // 60))
     lines += ["", "## Next action", "", next_action(root, conn=conn), ""]
+    # How far each live op has got: folded once here, read by Resume points and by Progress below.
+    # The board fold is guarded so its failure never turns a RESUME write into a failure.
+    try:
+        from alpaca import board
+        cards = board.view(conn)["cards"]
+    except Exception:
+        cards = []
+    progress = sessions_view.op_progress(conn, cards=cards, now_ts=now_ts)
+    # op-009 t-130: one resume point per live op, so a new session can tell which op it resumes
+    # when more than one op parks work. Built whole before it is added, and guarded so a failure
+    # in it never turns a RESUME write into a failure.
+    try:
+        points = resume_point_lines(conn, [p["id"] for p in progress if p["status"] == "open"],
+                                    view=view)
+        lines += points + [""]
+    except Exception:
+        pass
     block = token.pad_lines(conn, root)
     if block:
         lines += block + [""]
@@ -97,14 +261,8 @@ def render(root) -> str:
             lines += halt_block + [""]
     except Exception:
         pass
-    # How far each live op has got, in one line: its tracker tasks and its obligation rows.
-    # Guarded so a board fold failure never turns a RESUME write into a failure.
-    try:
-        from alpaca import board
-        cards = board.view(conn)["cards"]
-    except Exception:
-        cards = []
-    progress = sessions_view.op_progress(conn, cards=cards, now_ts=now_ts)
+    # How far each live op has got, in one line: its tracker tasks and its obligation rows
+    # (`progress` is folded above, before Resume points).
     lines += ["## Progress", ""]
     for p in progress:
         lines.append("%-16s %-7s tasks %d/%d  rows %d/%d (blocked %d)" % (
