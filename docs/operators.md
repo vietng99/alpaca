@@ -125,11 +125,35 @@ invalid session operation, exit 64 is command usage, and exit 67 is an internal
 failure. Keep the JSON result and command exit status together when assessing a
 lifecycle step.
 
+## Run review and the main decision
+
+When a domain profile wires `alpaca.runlog.reviewflow` (see `docs/observability-operations.md`,
+"Review every run, then decide"), every run it captures is reviewed, PASS runs included, and
+the main session decides. Claude Code and Codex follow the same loop, in
+`.claude/skills/alpaca-log-review/SKILL.md`:
+
+1. After a run finishes, and on every resume, list the runs waiting for review or a decision.
+2. Assign the run to a reviewer session id distinct from your own. The assignment records a
+   30 minute lease and returns a brief; it launches nothing.
+3. Dispatch a fresh native subagent with that brief: the Agent or Task tool in Claude Code, the
+   agent tool in Codex. It reads the log, submits a quote-checked review bound to the
+   assignment and returns the review id. It does not run or fix the work and does not decide.
+4. Read the review, starting with its At a glance block, and record GO or NO-GO with an
+   evidence-based rationale. GO needs a recorded PASS and an intact assigned review that
+   supports it; NO-GO holds the run for investigation.
+5. The profile's runner advances only on a current GO. A PASS run that captures no log needs
+   no review; a run with no log that did not pass never advances.
+
+A review whose submit passed has quotes that match the log; it is not the run passing and not
+permission to advance. Review state and decisions live in the record, so a disconnected chat
+loses nothing; do not assign a second reviewer while a lease is live. No background model
+process reviews on its own: the review waits for an active session.
+
 ## Alpaca's own skills
 
 `.claude/skills/` holds Alpaca's own skills: `alpaca-first-chat` (the first chat before
-onboarding), `alpaca-onboard`, `alpaca-op`, `alpaca-from-notes`, `alpaca-interview` and
-`alpaca-runbook-forge`. They are
+onboarding), `alpaca-onboard`, `alpaca-op`, `alpaca-from-notes`, `alpaca-interview`,
+`alpaca-runbook-forge` and `alpaca-log-review`. They are
 Claude Code project skills and mechanism paths in `ALPACA-MANIFEST`, so a clone, a copy, a release
 and `alpaca upgrade` all carry them and Claude Code offers each as a `/command` with nothing to
 install. The rest of `.claude/skills/` (the spec-kit and OpenSpec skills `alpaca spec init` writes,

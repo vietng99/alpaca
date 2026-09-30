@@ -1,6 +1,6 @@
 # Alpaca design
 
-Alpaca is the engineering harness: a project-local record, the rules that govern work on it, and the operator adapters that let Claude Code and Codex share it. It is domain-neutral. Domain work plugs in as a profile.
+Alpaca is the engineering studio around your coding agents: a project-local record, the rules that govern work on it, and the operator adapters that let Claude Code and Codex share it. It is domain-neutral. Domain work plugs in as a profile.
 
 ## Product boundary
 
@@ -16,7 +16,7 @@ Claude Code uses native lifecycle hooks in .claude/settings.json. Codex uses AGE
 
 ## Tasks, evidence and proof
 
-A task closes only with a sealed proof report: `alpaca proof new` scaffolds it, the author writes what was done, how, where, the result, deviations, how to reproduce and the evidence list, and `alpaca proof seal` hashes it onto the record. A task contract (input, expected output, done bar and fail cases) can restate what a task must deliver; it never replaces the proof. Every completion claim needs current evidence, and input changes invalidate prior evidence. Failed and interrupted attempts stay visible.
+A task closes only with a sealed proof report: `alpaca proof new` scaffolds it, the author writes a 40-600 character At a glance summary, then what was done, how, where, the result, deviations, how to reproduce and the evidence list, and `alpaca proof seal` hashes it onto the record. A task contract (input, expected output, done bar and fail cases) can restate what a task must deliver; it never replaces the proof. Every completion claim needs current evidence, and input changes invalidate prior evidence. Failed and interrupted attempts stay visible.
 
 ## Domain profiles
 

@@ -67,6 +67,7 @@ def smoke(root):
         evidence.write_text('Fresh bootstrap, onboarding and doctor succeeded. This file is generated only after those commands return zero.\n')
         text = proof.read_text()
         parts = {
+            'At a glance': 'Release smoke: a fresh installation bootstrapped, onboarded, passed doctor and completed a task with this sealed proof.',
             'What I did': 'Exercised the installed CLI from a fresh release copy through onboarding, doctor, operation and task creation.',
             'How I did it': 'Ran bootstrap with the current matrix interpreter and required every lifecycle command to return zero.',
             'Where': 'All commands run in a disposable installation below the release gate runtime directory.',

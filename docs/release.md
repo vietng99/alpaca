@@ -119,3 +119,16 @@ Do not put the token in workflow files, project configuration, receipts, logs or
 ## Alpaca's own configuration
 
 The example gates cover full pytest, full boot checks, manifest integrity, a fresh bootstrap/onboard/doctor/operation/task/proof cycle, regenerated manual HTML, ASCII shipped HTML and README local links. The built-in gates always cover two-build equality, leak checks and a fresh clone. The clean distribution templates under `templates/release` must remain instance-free. Hosted test results and local receipts are separate evidence: a local PASS does not claim a GitHub run occurred, and a hosted test run does not claim a release check.
+
+## Version numbers
+
+`bin/alpaca --version` (and the `version` and `channel` keys of `alpaca status --json`) tell a development tree from a release tree:
+
+| Tree | Reports | Example |
+|---|---|---|
+| Release (built by `alpaca release build`) | the bare number | `1.0.0` |
+| Development checkout, harness code committed | pre-release plus the commit | `1.0.0-dev+g03ae15d0f9fc` |
+| Development checkout, uncommitted changes under `alpaca/` or `bin/` | the same, marked dirty | `1.0.0-dev+g03ae15d0f9fc.dirty` |
+| Development tree with no git | pre-release only | `1.0.0-dev` |
+
+The number lives in one place, `VERSION` in `alpaca/__init__.py`. It names the release the development tree is heading to, so the dev form sorts before it under SemVer. The channel lives in `alpaca/_channel.py` (`CHANNEL = "dev"`); the release overlay `alpaca/_channel.py: templates/release/channel.py` in `project.yaml` swaps in `CHANNEL = "release"` at build time, so no one edits the channel by hand. To cut a new release, bump `VERSION` in a development commit (for example `1.0.0` to `1.1.0`), approve that commit, then build, check and publish as above. Changes to the record under `.alpaca/` never mark a version dirty.

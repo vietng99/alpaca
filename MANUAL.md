@@ -1,6 +1,6 @@
 # Alpaca operations
 
-The engineering harness. It is ready to use after bootstrap and onboarding. Domain work plugs in as a profile named by the `profile:` key in `project.yaml`; the value is a dotted module path importable from the project root, and the profile supplies that domain's stages, acceptance cards, extra verbs and web pages. A project without the key runs the generic harness; `alpaca doctor` reports a profile that fails to import. Harness verification and a profile's domain acceptance are separate results.
+The engineering studio around your coding agents. It is ready to use after bootstrap and onboarding. Domain work plugs in as a profile named by the `profile:` key in `project.yaml`; the value is a dotted module path importable from the project root, and the profile supplies that domain's stages, acceptance cards, extra verbs and web pages. A project without the key runs the generic harness; `alpaca doctor` reports a profile that fails to import. Harness verification and a profile's domain acceptance are separate results.
 
 ## Alpaca-specific commands
 
@@ -209,6 +209,7 @@ swallowed and the session continues.
 | PostToolUse | `alpaca.hooks.post_tool` | Records a heartbeat of tool activity against the right project, and the whole call and its response to the pool. |
 | Stop | `alpaca.hooks.stop` | Runs the plain-writing lint over the turn before it lands, and keeps the local transcript copy current. |
 | SubagentStop | `alpaca.hooks.subagent_stop` | Records that a subagent finished and copies its transcript into the project. |
+| PreToolUse (Bash) | `alpaca.hooks.git_guard` | Denies git commands that rewrite working files in the shared main tree (`git stash` other than list and show, `git reset --hard`, `git checkout -- <path>`, `git restore <path>`, `git clean -f`), because other sessions and the live record work there. The same commands run in a linked worktree. |
 | SessionEnd | `alpaca.hooks.session_end` | Drains the session into the record, snapshots the transcript and rebuilds the projections. |
 | PreCompact | `alpaca.hooks.pre_compact` | Snapshots the working context before the transcript is compacted. |
 

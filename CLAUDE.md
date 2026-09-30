@@ -1,7 +1,7 @@
 <!-- ALPACA:BOOT:BEGIN -->
 # Alpaca boot
 
-This project runs under Alpaca, the engineering harness. The record of every session, op, task,
+This project runs under Alpaca, the engineering studio around your coding agents. The record of every session, op, task,
 and message is `.alpaca/alpaca.db`; `alpaca` is its only writer. Read `RESUME.md` first on any start or
 resume: the SessionStart hook prints it into this chat.
 
@@ -9,8 +9,9 @@ alpaca means bin/alpaca from the project root (or python3 -m alpaca).
 
 Rules that hold in every session:
 1. The record is append-only. A task is done only with a sealed proof report: `alpaca proof new <id>`,
-   write the report the way an engineer documents work (what was done, how, where, the result,
-   deviations, how to reproduce, the evidence list), `alpaca proof seal <id>`, then
+   write the report the way an engineer documents work (an At a glance summary of 40-600
+   characters first, then what was done, how, where, the result, deviations, how to reproduce,
+   the evidence list), `alpaca proof seal <id>`, then
    `alpaca task move <id> done --proof local:<report>`. A `remote:` ref belongs inside the
    report's Evidence list; alone it does not close a task.
 2. Every claim you make carries a pointer to a file, a command output, or a record row.
@@ -27,6 +28,11 @@ Rules that hold in every session:
    raising your own level is not.
 
 7. Organize every new task into a named feature/workstream and work area when creating it; record actual prerequisites (or independence) and exclusive resources explicitly. Use mapped `task add`; update relationships with `task map` as the plan changes. See `docs/operations-hub.md` under "Maintaining a useful checklist" for commands. Do not use phases as feature groups or infer dependencies from task numbers.
+8. When the domain profile wires run review (`alpaca/runlog/reviewflow.py`), review every captured
+   run, PASS runs included: assign a reviewer session, dispatch a fresh subagent with the brief
+   (Agent/Task tool), read its checked review, then record GO or NO-GO as the main session. A
+   reviewer never decides its own review, only PASS gets GO, and a review submit PASS means the
+   quotes matched the log, not that the run passed. Follow `.claude/skills/alpaca-log-review/SKILL.md`.
 
 Verbs: `alpaca status | doctor | verify | onboard | op new/close/list | task add/claim/move/list |
 proof new/seal/check | msg post/read | analytics build | recall <sid>`. Autodrive level comes from the project-local session record.

@@ -51,10 +51,19 @@ def _event(root, session, kind, ref, data, *, actor=ACTOR, op=None):
 
 
 def submit(root, ref, review, *, log, folder, kind, ref_key="receipt", session=None,
-           actor=ACTOR, op=None):
-    """Check and keep one review write-once; returns where it lives and its id."""
+           actor=ACTOR, op=None, context=None):
+    """Check and keep one review write-once; returns where it lives and its id.
+
+    `context` adds caller facts to the kept file (for example the assignment a review answers,
+    `alpaca.runlog.reviewflow`); it may not carry any field a review or its reading holds.
+    """
     root, folder = _inside(root, folder)
     kept = quotes.check(_log(log, ref), review, ref=ref, ref_key=ref_key)
+    clash = sorted(set(context or {}) & (set(kept) | set(quotes.FIELDS)
+                                         | {ref_key, "id", "submitted_at", "intact", "path"}))
+    if clash:
+        raise ValueError("context may not replace checked fields: %s" % ", ".join(clash))
+    kept.update(context or {})
     body = json.dumps(kept, indent=1, sort_keys=True, ensure_ascii=True) + "\n"
     ident = hashlib.sha256(body.encode()).hexdigest()[:16]
     folder.mkdir(parents=True, exist_ok=True)
@@ -137,5 +146,6 @@ def reviews(root, ref, *, folder, kind, mark_kind, ref_key="receipt"):
             m = marks.get((ident, f["id"]))
             f["mark"] = {k: m[k] for k in ("mark", "by", "note", "ts")} if m else None
         out.append(data)
+    out.reverse()  # record order breaks a tie between reviews kept in the same second
     out.sort(key=lambda r: r.get("submitted_at") or "", reverse=True)
     return {ref_key: ref, "reviews": out}

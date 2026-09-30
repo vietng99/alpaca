@@ -53,10 +53,10 @@ export function runDashboard(r,active,stageName,{evidence='',session=''}={}){
  return `<section class="panel rl-run"><div class="panel-head"><div><span class="eyebrow">RUN ${esc(short(r.id,14))}</span><h2>${esc(active?.design||r.design||'Flow run')} / ${esc(stageName(a.stage||r.stage))}</h2><p class="rl-reason tone-${tone(a.verdict)}"><b class="rl-verdict">${esc(a.verdict)}</b>${esc(a.reason||r.reason||'No explanation recorded')}</p></div><div class="rl-head-actions">${session}<a class="text-link" href="${esc(href('runs'))}">Close run ${icon('arrow')}</a></div></div>
 ${steps}
 <div class="rl-meta"><span>Started <b>${esc(when(a.started_at||r.started_at))}</b></span><span>Duration <b>${esc(span(a.elapsed_s??r.elapsed_s))}</b></span><span>Receipt <b class="mono">${esc(short(a.receipt_id||r.receipt_id||'none',14))}</b></span></div>
+<div id="rl-review"></div>
 <div id="rl-contract" class="rl-contract-wrap"></div>
 <div id="rl-kpis" class="rl-kpis"><div class="rl-kpi tone-quiet"><span>Log scan</span><strong><span class="spinner"></span></strong><small>Reading the captured output</small></div></div>
 <div id="rl-callout"></div>
-<div id="rl-review"></div>
 <div id="rl-map"></div>
 <div class="rl-body"><aside class="rl-findings" id="rl-findings" aria-label="Lines to check"></aside>
 <div class="log-shell rl-shell"><div class="log-toolbar"><span>${icon('code')} Stage output</span><button data-action="log-follow" id="log-follow">Pause following</button><button data-action="log-start">From beginning</button><button data-action="log-flagged" id="log-flagged" aria-pressed="false">Flagged lines only</button><input id="log-search" type="search" placeholder="Filter lines..." aria-label="Filter captured log lines"><button data-action="log-save">Save log</button></div><div id="log-output" class="rl-log" tabindex="0" role="log" aria-label="Captured stage output">Loading captured output...</div><div class="log-status" id="log-status">Connecting to receipt log</div></div></div>
@@ -147,23 +147,36 @@ export function reviewLines(data){
  for(const f of data?.reviews?.[0]?.findings||[])for(let i=f.line;i<=f.end_line;i++)if(!m.has(i))m.set(i,f.id);
  return m;
 }
+// At a glance: result, why, review state, main decision, next check and the evidence line, read
+// from the profile's workflow payload (alpaca/runlog/reviewflow.py state) and the newest checked
+// review. It shows recorded facts only: without an accepted review, why is the recorded reason.
+const REVIEW_STATE={pending:'Review pending',reviewing:'Reviewing',reviewed:'Reviewed',failed:'Review failed',stale:'Review stale',waiting:'Waiting for the run','not-applicable':'No log to review'};
+export function glanceHtml(data){
+ const r=data?.reviews?.[0],w=data?.workflow||{},status=w.review_state||(r?'reviewed':'pending');
+ const trusted=!!r&&r.intact!==false&&status==='reviewed',d=w.decision||{};
+ const why=trusted?(r.quick_summary||r.summary):(w.reason||(r&&r.intact===false?'The kept review no longer matches the record.':''));
+ const primary=trusted?(r.findings||[]).find(f=>f.id===r.primary_finding):null;
+ const chip=status==='failed'||status==='stale'?'attention':status==='reviewed'?'good':'quiet';
+ return `<div class="rl-glance"><span class="eyebrow">At a glance</span><h3>${w.result?`<span class="rl-outcome tone-${tone(w.result)}">${esc(w.result)}</span>`:''}<span class="rl-mark tone-${chip}">${esc(REVIEW_STATE[status]||status)}</span></h3><p class="rl-summary">${esc(short(why||'No review yet. The main session assigns an independent reviewer, then records GO or NO-GO.',360))}</p><dl class="rl-facts"><dt>Main decision</dt><dd><b>${esc(d.value||'Awaiting decision')}</b>${d.rationale?` ${esc(d.rationale)}`:''}</dd>${trusted&&r.next_check?`<dt>Next check</dt><dd>${esc(r.next_check)}</dd>`:''}${w.next_action?`<dt>Next action</dt><dd>${esc(w.next_action)}</dd>`:''}</dl>${primary?`<button type="button" class="rl-line" data-line="${primary.line}">Evidence: line ${primary.line}${primary.end_line>primary.line?'&ndash;'+primary.end_line:''}</button>`:''}${w.disputed?`<p class="rl-tamper">${w.disputed} finding${w.disputed===1?'':'s'} disputed. Resolve before GO.</p>`:''}</div>`;
+}
 export function renderReview(data,receipt){
  const box=document.getElementById('rl-review');if(!box)return;
  const r=data?.reviews?.[0];
+ const glance=r||data?.workflow?glanceHtml(data):'';
  // The review commands belong to the profile; its review payload names them (packet_command,
  // mark_command with {receipt} and {finding} placeholders). Without them no command is shown.
  const fill=t=>String(t||'').replaceAll('{receipt}',receipt).replaceAll('{finding}',r?.id||'');
  const cmd=fill(data?.packet_command);
- if(!r){box.innerHTML=`<section class="rl-review rl-review-empty">${icon('file')}<div><h3>No agent review of this log yet</h3><p>An agent reads the flagged lines and explains them; every claim quotes the log and is checked before it is kept.${cmd?' Ask an agent to run:':''}</p>${cmd?`<code>${esc(cmd)}</code>`:''}</div></section>`;return;}
+ if(!r){box.innerHTML=`${glance?`<section class="rl-review">${glance}</section>`:''}<section class="rl-review rl-review-empty">${icon('file')}<div><h3>No agent review of this log yet</h3><p>An agent reads the flagged lines and explains them; every claim quotes the log and is checked before it is kept.${cmd?' Ask an agent to run:':''}</p>${cmd?`<code>${esc(cmd)}</code>`:''}</div></section>`;return;}
  const [t,label]=OUTCOME[r.outcome]||['quiet',r.outcome];
  const fs=r.findings||[],done=fs.filter(f=>f.mark).length,ok=fs.filter(f=>f.mark?.mark==='confirmed').length,bad=fs.filter(f=>f.mark?.mark==='disputed').length;
  const markChip=f=>!f.mark?'<span class="rl-mark tone-quiet">Not checked</span>':`<span class="rl-mark tone-${f.mark.mark==='confirmed'?'good':'danger'}" title="${esc((f.mark.note||'')+' '+(f.mark.ts||''))}">${esc(f.mark.mark==='confirmed'?'Confirmed':'Disputed')} by ${esc(f.mark.by)}</span>`;
- box.innerHTML=`<section class="rl-review"><div class="rl-review-head"><div><span class="eyebrow">AGENT REVIEW &middot; ${esc(r.reviewer||'agent')} &middot; ${esc(String(r.submitted_at||'').slice(0,16).replace('T',' '))}</span><h3><span class="rl-outcome tone-${t}">${esc(label)}</span></h3></div><div class="rl-progress" title="${ok} confirmed, ${bad} disputed, ${fs.length-done} not checked"><div class="rl-progress-bar"><b class="tone-good" style="flex:${ok}"></b><b class="tone-danger" style="flex:${bad}"></b><b class="tone-quiet" style="flex:${fs.length-done}"></b></div><small>${done} of ${fs.length} findings checked by an engineer</small></div></div>
+ box.innerHTML=`<section class="rl-review">${glance}<details class="rl-full"><summary>Full review and evidence (${fs.length} finding${fs.length===1?'':'s'})</summary><div class="rl-review-head"><div><span class="eyebrow">AGENT REVIEW &middot; ${esc(r.reviewer||'agent')} &middot; ${esc(String(r.submitted_at||'').slice(0,16).replace('T',' '))}</span><h3><span class="rl-outcome tone-${t}">${esc(label)}</span></h3></div><div class="rl-progress" title="${ok} confirmed, ${bad} disputed, ${fs.length-done} not checked"><div class="rl-progress-bar"><b class="tone-good" style="flex:${ok}"></b><b class="tone-danger" style="flex:${bad}"></b><b class="tone-quiet" style="flex:${fs.length-done}"></b></div><small>${done} of ${fs.length} findings checked by an engineer</small></div></div>
 <p class="rl-summary">${esc(r.summary)}</p>
 ${r.intact===false?'<p class="rl-tamper">The kept review file no longer matches the hash in the record. Do not rely on it.</p>':`<p class="rl-intact">${icon('check')} Every quote was matched against log sha256 ${esc(String(r.log_sha256).slice(0,12))} before the review was kept.</p>`}
 <ol class="rl-rfind">${fs.map(f=>`<li class="sev-${esc(f.severity)}"><div class="rl-rf-top"><button type="button" class="rl-line" data-line="${f.line}">line ${f.line}${f.end_line>f.line?'&ndash;'+f.end_line:''}</button><span class="rl-rf-id">${esc(f.id)}</span>${markChip(f)}</div><blockquote><code>${esc(f.quote)}</code></blockquote><p>${esc(f.meaning)}</p>${f.check?`<p class="rl-check"><b>Check:</b> ${esc(f.check)}</p>`:''}</li>`).join('')}</ol>
 ${data?.mark_command?`<details class="rl-howto"><summary>Confirm or dispute a finding</summary><p>Marks are appended to the record from a terminal; the newest mark per finding is shown.</p><code>${esc(fill(data.mark_command))}</code></details>`:''}
-${data.reviews.length>1?`<p class="rl-more">${data.reviews.length-1} earlier review${data.reviews.length>2?'s':''} kept for this log.</p>`:''}</section>`;
+${data.reviews.length>1?`<p class="rl-more">${data.reviews.length-1} earlier review${data.reviews.length>2?'s':''} kept for this log.</p>`:''}</details></section>`;
 }
 
 // ---- Stage contract: input, expected output, done bar, fail cases for this receipt.

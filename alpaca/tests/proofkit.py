@@ -24,6 +24,10 @@ from alpaca import db, proof, util
 FILLER = ("I changed the module, wired the change into the caller and ran the suite over it. "
           "The values below are the ones that run printed, read back from the record.")
 
+#: the At a glance summary a format 2 report opens with: 40 to 600 non-space characters.
+SUMMARY = ("The module change was run against the suite. Every check passed and nothing is left "
+           "unresolved.")
+
 #: where `evidence_file` writes, relative to the project root.
 EVIDENCE_DIR = "proofwork"
 
@@ -76,15 +80,18 @@ def report_file(root, ident, *, conn=None) -> str:
 
 
 def fill(text, evidence_lines, filler=None) -> str:
-    """Replace every `TODO(agent):` line: the Evidence one becomes the pointer list, the rest
-    become prose. Everything else in the scaffold, header and appendix included, is kept."""
-    out, in_evidence = [], False
+    """Replace every `TODO(agent):` line: the Evidence one becomes the pointer list, the At a
+    glance one the short summary, the rest prose. Everything else in the scaffold, header and appendix included, is kept."""
+    out, in_evidence, in_summary = [], False, False
     for line in text.splitlines():
         if line.startswith("## "):
             in_evidence = line[3:].strip() == proof.EVIDENCE
+            in_summary = line[3:].strip() == proof.SUMMARY
         if line.strip().startswith(proof.TODO_MARK):
             if in_evidence:
                 out.extend("- %s" % p for p in evidence_lines)
+            elif in_summary:
+                out.append(SUMMARY)
             else:
                 out.append(filler or FILLER)
             continue

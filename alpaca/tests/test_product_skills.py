@@ -19,7 +19,7 @@ from alpaca import manifest
 from alpaca.tests.conftest import REPO
 
 SKILLS = ("alpaca-first-chat", "alpaca-onboard", "alpaca-op", "alpaca-runbook-forge",
-          "alpaca-from-notes", "alpaca-interview")
+          "alpaca-from-notes", "alpaca-interview", "alpaca-log-review")
 CLAUDE_SKILLS = os.path.join(REPO, ".claude", "skills")
 
 

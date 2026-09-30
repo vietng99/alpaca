@@ -62,7 +62,9 @@ def status_dict(root):
     conn = db.connect(root)
     n = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
     last = db.last_event(conn)
-    d = {"root": root, "version": VERSION, "events": n,
+    from alpaca import version
+    v = version.info()
+    d = {"root": root, "version": v["version"], "channel": v["channel"], "events": n,
          "last_event": {"ts": last["ts"], "kind": last["kind"]} if last else None,
          "onboarded": db.meta_get(conn, "onboarded") is not None,
          "sessions": conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0],
@@ -282,6 +284,7 @@ def cmd_day(args):
 def build_parser():
     p = argparse.ArgumentParser(prog="alpaca", add_help=True)
     p.add_argument("--session", default=None, help="session id (hooks pass it)")
+    p.add_argument("--version", action="store_true", help="print this Alpaca's version (dev or release) and exit")
     sub = p.add_subparsers(dest="verb")
     sub.add_parser("init"); sub.add_parser("verify")
     s = sub.add_parser("status"); s.add_argument("--json", action="store_true")
@@ -331,6 +334,11 @@ def build_parser():
     return p, sub
 
 def main(argv=None) -> int:
+    # `alpaca --version` answers before any verb module loads, so it works in a broken tree too.
+    if list(sys.argv[1:] if argv is None else argv) == ["--version"]:
+        from alpaca import version
+        print("alpaca %s" % version.string())
+        return PASS
     parser, sub = build_parser()
     for mod in VERB_MODULES:
         try:
@@ -363,6 +371,10 @@ def main(argv=None) -> int:
         args = parser.parse_args(argv)
     except SystemExit as e:
         return USAGE if e.code not in (0,) else PASS
+    if getattr(args, "version", False) and not args.verb:
+        from alpaca import version
+        print("alpaca %s" % version.string())
+        return PASS
     if not args.verb or args.verb not in COMMANDS:
         parser.print_usage(sys.stderr)
         return USAGE

@@ -217,6 +217,62 @@ def test_stop_hook_blocks_at_l6_without_a_done_marker(project):
     assert p2.returncode == 0 and p2.stdout.strip() == ""
 
 
+def _limit_transcript(path, *, resumed=False):
+    """A transcript whose last turn ended on the usage limit (Claude Code's synthetic record)."""
+    rows = [{"type": "user", "message": {"role": "user", "content": "run the whole op"}},
+            {"type": "assistant", "message": {"role": "assistant",
+                                              "content": [{"type": "text", "text": "working"}]}},
+            {"type": "assistant", "isApiErrorMessage": True, "error": "rate_limit",
+             "apiErrorStatus": 429,
+             "message": {"role": "assistant", "model": "<synthetic>",
+                         "content": [{"type": "text", "text": "You've hit your session limit"}]}},
+            {"type": "system", "subtype": "informational",
+             "content": "Usage limit reached - continuing automatically at reset"}]
+    if resumed:
+        rows.append({"type": "user", "message": {"role": "user", "content": "limit reset, continue"}})
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(json.dumps(r) for r in rows) + "\n")
+    return str(path)
+
+
+def test_stop_hook_never_refuses_a_usage_limit_stop(project, tmp_path):
+    """At L6 with no done marker, a stop caused by the usage limit is released and recorded: the
+    limit parks the run so it can resume after the reset. A later user turn clears it."""
+    from alpaca import cli
+    cli.main(["init"])
+    conn = db.connect(project)
+    level.set(conn, "s1", 6, "run the whole op")
+    tp = _limit_transcript(tmp_path / "limit.jsonl")
+    p = _hook("alpaca.hooks.stop", {"session_id": "s1", "stop_hook_active": False,
+                                   "transcript_path": tp}, project)
+    assert p.returncode == 0 and p.stdout.strip() == ""
+    assert db.events(db.connect(project), kind="limit-stop")
+    # the final reply alone is enough when the payload carries it (Codex spelling included)
+    p2 = _hook("alpaca.hooks.stop", {"session_id": "s1", "stop_hook_active": False,
+                                    "last_assistant_message": "You\u2019ve hit your usage limit."},
+               project)
+    assert p2.returncode == 0 and p2.stdout.strip() == ""
+    # once the owner's next turn starts, the limit no longer applies and L6 refuses again
+    tp3 = _limit_transcript(tmp_path / "resumed.jsonl", resumed=True)
+    p3 = _hook("alpaca.hooks.stop", {"session_id": "s1", "stop_hook_active": False,
+                                    "transcript_path": tp3}, project)
+    assert json.loads(p3.stdout).get("decision") == "block"
+
+
+def test_limit_stop_reads_the_codex_usage_limit_record(tmp_path):
+    """Codex marks the limit with codex_error_info on the turn-end event."""
+    from alpaca.hooks import stop
+    path = tmp_path / "rollout.jsonl"
+    rows = [{"type": "event_msg", "payload": {"type": "task_started"}},
+            {"type": "event_msg", "payload": {"type": "task_complete", "error": {
+                "message": "You have hit your usage limit.",
+                "codex_error_info": "usage_limit_exceeded"}}}]
+    path.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    assert stop.limit_stop({"transcript_path": str(path)})
+    assert not stop.limit_stop({"transcript_path": str(tmp_path / "missing.jsonl")})
+    assert not stop.limit_stop({"last_assistant_message": "done; the session limit is fine"})
+
+
 def test_stop_hook_is_silent_below_full_autodrive(project):
     """The pre-existing contract: an ordinary stop records the turn end and prints nothing."""
     from alpaca import cli

@@ -9,13 +9,66 @@ M3.4: at the full-autodrive level the Stop hook refuses a top-level stop while a
 genuinely absent, and NOT while a thread is halted -- a halt is a bounded terminal
 state, already surfaced by the stuck report, so forcing the run onward past it would be the
 unbounded loop the retry bound exists to prevent. The refusal is a `{"decision": "block"}` line
-on stdout; the hook still exits 0 (fail-open)."""
+on stdout; the hook still exits 0 (fail-open).
+
+A stop caused by the account usage limit is never refused, at any level: the limit ends the turn
+to protect the run, the harness parks the session and continues it after the reset, and the
+resumed turn hands off from the last checkpoint. Refusing that stop only retries against a closed
+limit and breaks the resume. The hook records a `limit-stop` event instead."""
 import json
+import re
 import sys
 
 from alpaca.hooks import common
 
 EVERY = 10
+
+#: the synthetic final reply a harness writes when the account hits its usage limit.
+LIMIT_REPLY = re.compile(r"\AYou.ve hit your .*limit|\AClaude AI usage limit reached")
+#: how much of the transcript tail to read; the limit record is the last turn-end entry.
+TAIL_BYTES = 256 * 1024
+
+
+def limit_stop(payload):
+    """Whether this stop is the account usage limit ending the turn. Structural checks only: the
+    synthetic limit text as the whole final reply, or the transcript's last turn-end record
+    carrying the limit error (Claude Code `"error": "rate_limit"` / 429 on a synthetic API-error
+    message, Codex `usage_limit_exceeded`). A later user turn clears it. Never raises."""
+    reply = payload.get("last_assistant_message")
+    if isinstance(reply, str) and LIMIT_REPLY.match(reply):
+        return True
+    tp = payload.get("transcript_path") or payload.get("transcriptPath")
+    if not tp:
+        return False
+    try:
+        with open(tp, "rb") as fh:
+            fh.seek(0, 2)
+            fh.seek(max(0, fh.tell() - TAIL_BYTES))
+            lines = fh.read().decode("utf-8", "replace").splitlines()
+    except (OSError, TypeError, ValueError):
+        return False
+    hit = False
+    for line in lines:
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        kind = obj.get("type")
+        if kind == "user":
+            hit = False
+        elif kind == "assistant":
+            hit = bool(obj.get("isApiErrorMessage")) and (
+                obj.get("error") == "rate_limit" or obj.get("apiErrorStatus") == 429)
+        elif kind == "event_msg" and isinstance(obj.get("payload"), dict):
+            event = obj["payload"]
+            if event.get("type") in ("task_started", "user_message"):
+                hit = False
+            error = event.get("error") if isinstance(event.get("error"), dict) else event
+            if error.get("codex_error_info") == "usage_limit_exceeded":
+                hit = True
+    return hit
 
 
 def _reply_text(payload, root, sid):
@@ -62,11 +115,15 @@ def handle(payload):
     conn = db.connect(root)
     db.append_event(conn, session=sid, actor="alpaca", kind="turn-end", data={})
     pad.write(root)
+    # A usage-limit stop is never refused (see the module docstring): record it and let it end.
+    limited = limit_stop(payload)
+    if limited:
+        db.append_event(conn, session=sid, actor="alpaca", kind="limit-stop", data={})
     # M3.4: refuse a top-level stop only while a done marker is genuinely absent (and not while a
     # thread is halted). stop_hook_active guards against re-blocking an already-active stop loop.
     blocked = False
     result = {}
-    if not payload.get("stop_hook_active"):
+    if not limited and not payload.get("stop_hook_active"):
         try:
             from alpaca.posture import loops
             refuse, reason = loops.stop_should_refuse(conn, sid, root=root)
@@ -79,7 +136,7 @@ def handle(payload):
     # M3.11: the Stop hook runs the ONE lint over the final reply. A hit blocks once (the
     # stop_hook_active guard caps it at one rewrite per turn) with the matches and a rewrite
     # instruction. No rule configured, or no reply to read, is a no-op. At most one block line.
-    if not blocked and not payload.get("stop_hook_active"):
+    if not blocked and not limited and not payload.get("stop_hook_active"):
         try:
             from alpaca.gates import literal_guard
             rules = literal_guard.load_rules(root)

@@ -11,8 +11,8 @@ from alpaca import util
 
 
 _TASK_KINDS = ("task-add", "task-move", "task-claim", "claim", "claim-release", "lease-expired")
-_SECTIONS = {"what i did": "what", "what was done": "what", "how i did it": "how",
-             "how it was done": "how", "result": "result", "results": "result"}
+_SECTIONS = {"at a glance": "summary", "what i did": "what", "what was done": "what",
+             "how i did it": "how", "how it was done": "how", "result": "result", "results": "result"}
 
 
 def number(ident):
@@ -119,7 +119,7 @@ def tasks(conn, report_reader=None):
 def report_sections(text, path, seal=None, read_truncated=False):
     """Extract bounded authored sections, ignoring comments and headings inside code."""
     text = re.sub(r"<!--.*?(?:-->|\Z)", "", text, flags=re.S)
-    sections = {key: [] for key in ("what", "how", "result")}
+    sections = {key: [] for key in ("summary", "what", "how", "result")}
     active, fence = None, None
     for line in text.splitlines():
         marker = re.match(r"^\s{0,3}(`{3,}|~{3,})(.*)$", line)

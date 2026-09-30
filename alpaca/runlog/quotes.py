@@ -1,7 +1,11 @@
 """A review of one captured log, checked against the log bytes before it is kept.
 
 An agent reads a log (or a packet cut from it), then writes a review: a summary and findings,
-each finding naming a line range and quoting text from it. `check` accepts the review only when
+each finding naming a line range and quoting text from it. Optional `quick_summary` (the result
+and its reason in one or two sentences), `next_check` (the first useful check) and
+`primary_finding` (the id of the finding that best shows the result) head the review for an
+engineer who reads only its first lines. An empty log may have no findings; a log with any text
+needs at least one. `check` accepts the review only when
 the log still has the sha256 the agent read and every quote appears inside its named lines, so
 an engineer can check each claim against the source by jumping to the line. Every finding that
 does not hold is named in one ValueError; one bad finding rejects the whole review.
@@ -18,6 +22,12 @@ SEVERITIES = ("error", "warning", "info")
 OUTCOMES = ("matches-verdict", "disagrees-with-verdict", "inconclusive")
 MAX_FINDINGS = 50
 MAX_SPAN = 30          # a finding covers at most this many lines past its first
+#: optional short fields an engineer reads first: the result and its reason in one or two
+#: sentences, and the first useful check. (name, least, most) characters.
+SHORT_FIELDS = (("quick_summary", 20, 360), ("next_check", 4, 600))
+#: every field `check` may keep, besides the reference key.
+FIELDS = ("log_sha256", "log_lines", "reviewer", "summary", "outcome", "findings", "primary_finding") + \
+    tuple(name for name, _, _ in SHORT_FIELDS)
 
 
 def log_path(logdir, name, suffix=".log"):
@@ -55,8 +65,9 @@ def check(log, review, *, ref, ref_key="receipt"):
     if outcome not in OUTCOMES:
         raise ValueError("outcome must be one of " + ", ".join(OUTCOMES))
     findings = review.get("findings")
-    if not isinstance(findings, list) or not 1 <= len(findings) <= MAX_FINDINGS:
-        raise ValueError("findings must be a list of 1 to %d items" % MAX_FINDINGS)
+    least = 1 if raw.strip() else 0     # an empty log has nothing to quote
+    if not isinstance(findings, list) or not least <= len(findings) <= MAX_FINDINGS:
+        raise ValueError("findings must be a list of %d to %d items" % (least, MAX_FINDINGS))
     kept, problems = [], []
     for i, f in enumerate(findings, 1):
         try:
@@ -82,6 +93,14 @@ def check(log, review, *, ref, ref_key="receipt"):
             problems.append("finding %d: %s" % (i, exc))
     if problems:
         raise ValueError("review rejected; " + "; ".join(problems))
-    return {ref_key: ref, "log_sha256": sha, "log_lines": len(lines) - (1 if lines and lines[-1] == "" else 0),
-            "reviewer": _text(review.get("reviewer") or "unnamed agent", "reviewer", 1, 120),
-            "summary": _text(review.get("summary"), "summary", 20, 3000), "outcome": outcome, "findings": kept}
+    out = {ref_key: ref, "log_sha256": sha, "log_lines": len(lines) - (1 if lines and lines[-1] == "" else 0),
+           "reviewer": _text(review.get("reviewer") or "unnamed agent", "reviewer", 1, 120),
+           "summary": _text(review.get("summary"), "summary", 20, 3000), "outcome": outcome, "findings": kept}
+    for field, lo, hi in SHORT_FIELDS:
+        if review.get(field) is not None:
+            out[field] = _text(review[field], field, lo, hi)
+    if review.get("primary_finding") is not None:
+        if not isinstance(review["primary_finding"], str) or review["primary_finding"] not in {f["id"] for f in kept}:
+            raise ValueError("primary_finding must name a kept finding id (f1, f2, ...)")
+        out["primary_finding"] = review["primary_finding"]
+    return out

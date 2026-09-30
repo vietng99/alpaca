@@ -68,6 +68,50 @@ reads a kept file that no longer matches its recorded sha256 as not intact.
 each window on a whole UTF-8 character. Alpaca core runs no job of its own, so without a profile
 that wires them none of these files is written.
 
+A review may also carry `quick_summary` (20 to 360 characters: the result and why),
+`next_check` (4 to 600: the first useful check) and `primary_finding` (the id of the finding
+that best shows the result). An empty log may be reviewed with zero findings.
+
+### Review every run, then decide
+
+`alpaca.runlog.reviewflow` turns those reviews into a loop for every captured run, PASS runs
+included. The main session assigns the run to a reviewer session with a lease, launches a
+fresh native subagent with the returned brief, reads the checked review and records GO or
+NO-GO. The run's recorded result, the review state and the main decision stay three separate
+fields:
+
+| Layer | Values | Owner |
+|---|---|---|
+| Result | PASS, FAIL, BLOCKED, INTERRUPTED | the profile's grader |
+| Review | waiting, pending, reviewing, reviewed, failed, stale, not-applicable | the reviewer subagent |
+| Decision | GO, NO-GO | the main session |
+
+A reviewer cannot decide its own review, a result other than PASS never gets GO, a disputed
+finding withdraws GO, and a changed log, review file or run record makes the review stale and
+clears the decision. Three refused submits fail an assignment; a missing log is a failed review
+that can still be held with NO-GO. Every assignment, refusal, failure and decision is an
+append-only snapshot event; an OS lock per reference serializes changes. The module never
+launches an agent and runs no model; a run waits until an active session reviews it.
+
+A profile adopts the loop in four places:
+
+1. Build one `reviewflow.Flow`: the log resolver, the review folder per reference, a lock
+   folder, three event kinds (kept review, mark, workflow), `subject(ref)` returning the run as
+   recorded (`result`, `reason`, and `reviewable: False` for a run that captures no log), `refs()`
+   for `pending`, and optionally `go_check` (refuse GO when the run is no longer the current
+   evidence) and `validate` (extra review fields the profile requires).
+2. Expose verbs through the profile's `verbs()` hook for `pending`, `assign`, `submit`,
+   `renew`, `fail`, `takeover`, `decide` and a text view that starts with
+   `reviewflow.glance_lines`.
+3. Call `reviewflow.require_go` before the runner advances past a run and
+   `reviewflow.require_retry` before it reruns one. A batch that pauses for review keeps its
+   cursor and releases its locks while it waits.
+4. Add `workflow: reviewflow.state(...)` to the review payload a profile route serves; the run
+   log panel then opens with an At a glance block (result, why, review state, decision, next
+   check, evidence line) above the stage contract, and folds the full review under it.
+
+The operator steps are in `.claude/skills/alpaca-log-review/SKILL.md` and `docs/operators.md`.
+
 `bin/alpaca artifact catalog` inventories existing archives and recovers only source bytes
 matching their historical hashes. Changed or missing originals remain distinct from
 retained objects. New approved results are preserved in the content-addressed object
