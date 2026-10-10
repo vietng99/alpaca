@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 import posixpath
 import re
+import subprocess
 
 
 #: The host-local file that is never part of a shipment: the operator's own settings, gitignored
@@ -73,6 +74,33 @@ def _memory_paths(root):
         if section == "memory":
             out.add(line.rstrip("/"))
     return out
+
+
+def _git(root, *args):
+    """git at root with no inherited GIT_* variable (a hook's GIT_DIR never redirects it), no
+    replace refs and no system config."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env.update(GIT_NO_REPLACE_OBJECTS="1", GIT_CONFIG_NOSYSTEM="1")
+    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, env=env)
+
+
+def is_repository_root(root):
+    """True when root is the top of a git work tree."""
+    top = _git(root, "rev-parse", "--show-toplevel")
+    return top.returncode == 0 and os.path.realpath(top.stdout.decode("utf-8").strip()) == os.path.realpath(str(root))
+
+
+def committed_paths(root, rev="HEAD"):
+    """The file paths of the source commit's tree: the only paths a shipment may carry.
+
+    Shared by the release build (alpaca/release/build.py) and setup/ship.py, so both ship the same
+    set. A gitignored, untracked, or staged but uncommitted file (the research reproducer store under
+    contracts/research/, a scratch file, a `git add -f` past an ignore rule) is not in the commit and
+    never ships."""
+    listed = _git(root, "ls-tree", "-r", "-z", "--full-tree", rev)
+    if listed.returncode != 0:
+        raise ValueError("no source commit to ship from: git ls-tree %s failed" % rev)
+    return {entry.split(b"\t", 1)[1].decode("utf-8") for entry in listed.stdout.split(b"\0") if entry}
 
 
 def forbidden_for_root(root):

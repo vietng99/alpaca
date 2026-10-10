@@ -82,3 +82,22 @@ def persist(db: DB, answer: Answer, *, qtype: str, query_hash: str, dag: dict,
         db.conn.rollback()
         raise
     return aid
+
+
+def record_outcome(db: DB, *, query_hash: str, answer_id: str | None, outcome: str,
+                   reason: str | None, clock: Clock = now_iso) -> int:
+    """Append one answer_outcomes row (schema 4, architecture.md 3.1 and 6.1): the caller-facing
+    outcome of a query, linked to the door's answers row when the door ran (None for a pre-door
+    outcome). Audit only: outside accepted_digest, never read on the answer path."""
+    from ..store.db import assert_rebuild_access
+    assert_rebuild_access(db.cfg)
+    db.conn.execute("BEGIN IMMEDIATE")
+    try:
+        cur = db.conn.execute(
+            "INSERT INTO answer_outcomes(query_hash,answer_id,outcome,reason,recorded_at) "
+            "VALUES(?,?,?,?,?)", (query_hash, answer_id, outcome, reason, clock()))
+        db.conn.commit()
+    except BaseException:
+        db.conn.rollback()
+        raise
+    return int(cur.lastrowid)

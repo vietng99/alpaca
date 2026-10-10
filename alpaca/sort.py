@@ -29,7 +29,9 @@ CREATE TABLE IF NOT EXISTS sort_assertion (
 
 
 def _parse_meta(text: str) -> dict:
-    """Read the `key: value` header paragraph a drained note carries as its first block."""
+    """Read the `key: value` header paragraph a drained note carries as its first block. Each value
+    is read back with `drain.header_value`, so an escaped value (`json:"..."`) gives the text it was
+    rendered from (t-070 round 3, check round 2 F-2)."""
     meta = {}
     for line in (text or "").splitlines():
         if ":" not in line:
@@ -38,7 +40,7 @@ def _parse_meta(text: str) -> dict:
         key = key.strip()
         if not key or " " in key:
             break
-        meta[key] = value.strip()
+        meta[key] = drain.header_value(value.strip())
     return meta
 
 
@@ -70,7 +72,15 @@ def run(root: str, day: str | None = None) -> dict:
 
     Returns {"ops": {op: {"paired": [...], "unpaired": [...]}}, "assertions": [...],
              "paired": n, "unpaired": n}. Idempotent: re-running replaces the same assertion rows.
+
+    The pass reads the store's notes and names them, so it goes through the serving gate of the other
+    store readers (t-070 round 3, check round 2 F-2): while the record holds a withdrawal,
+    retraction or correction the store has not processed (a missing store included), it raises
+    `service.StoreBehindRecord` and reads nothing; `wiki recover` applies the acts. A note a
+    processed withdrawal took out has no active block, so it is never read.
     """
+    from alpaca.wiki import service
+    service._serving_gate(root)
     vault = drain.wiki_vault_dir(root)
     empty = {"ops": {}, "assertions": [], "paired": 0, "unpaired": 0}
     if not os.path.isfile(os.path.join(vault, "rune.db")):
@@ -162,7 +172,15 @@ def cmd_sort(args) -> int:
             "alpaca sort refuses to mechanise the judgment: it surfaces intents and results for a "
             "reading and writes assertions, it is not an automatic classifier over a whole backlog")
     root = paths.root()
-    result = run(root, day=getattr(args, "day", None))
+    from alpaca.wiki import service
+    try:
+        result = run(root, day=getattr(args, "day", None))
+    except service.StoreBehindRecord as held:
+        return vc.emit_verdict(
+            "alpaca-sort", vc.BLOCKED,
+            "unavailable: %s; the store has not processed the record's removal acts through event "
+            "%s; run %s" % (held.detail["reason"], held.detail["record_through"],
+                            held.detail["recovery"]))
     if getattr(args, "json", False):
         import json
         print(json.dumps(result, indent=1))

@@ -1,6 +1,9 @@
 """The live server keeps its port through reloads and does not refold analytics on every poll."""
 import os
 import socket
+import json
+import threading
+import urllib.request
 
 import pytest
 
@@ -11,6 +14,85 @@ def _free_port():
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+@pytest.mark.parametrize('path', ['/hub/overview.json', '/hub/research.json'])
+def test_usage_index_pauses_between_sessions_for_page_request(project, monkeypatch, path):
+    from alpaca import db, hub
+    from alpaca.analytics import metrics_index
+    from alpaca.research import view
+    for sid in ('first', 'second'):
+        conn = db.connect(project)
+        db.upsert(conn, 'sessions', 'sid', {'sid': sid, 'started': '2026-09-22T00:00:00Z'})
+        conn.close()
+    live = serve.Live(project)
+    live.data_rev = 'fixture'
+    live.data_json = json.dumps({'sessions': [{'sid': sid, 'class': 'work'}
+                                            for sid in ('first', 'second')]})
+    first_done, next_started = threading.Event(), threading.Event()
+    resume_index, page_started, release_page = threading.Event(), threading.Event(), threading.Event()
+    original_analysis = metrics_index._analysis_row
+
+    def analysis(root, sid):
+        if sid == 'second':
+            next_started.set()
+        result = original_analysis(root, sid)
+        if sid == 'first':
+            first_done.set()
+            assert resume_index.wait(5)
+        return result
+
+    monkeypatch.setattr(metrics_index, '_analysis_row', analysis)
+    module, name = (hub, 'overview') if path.endswith('overview.json') else (view, 'runs')
+    original_page = getattr(module, name)
+
+    def page(root):
+        page_started.set()
+        assert release_page.wait(5)
+        return original_page(root)
+
+    monkeypatch.setattr(module, name, page)
+    httpd = serve._Server(('127.0.0.1', 0), serve.make_handler(live, project))
+    httpd.daemon_threads = True
+    server = threading.Thread(target=httpd.serve_forever, daemon=True)
+    server.start()
+    results, failures = {}, []
+
+    def index_job():
+        try:
+            results['index'] = live.analytics_index()
+        except Exception as exc:
+            failures.append(exc)
+
+    def page_job():
+        try:
+            with urllib.request.urlopen('http://127.0.0.1:%d%s' % (httpd.server_port, path), timeout=5) as response:
+                results['page'] = response.status
+                response.read()
+        except Exception as exc:
+            failures.append(exc)
+
+    index_thread = threading.Thread(target=index_job, daemon=True)
+    page_thread = threading.Thread(target=page_job, daemon=True)
+    try:
+        index_thread.start()
+        assert first_done.wait(5)
+        page_thread.start()
+        assert page_started.wait(5)
+        resume_index.set()
+        assert not next_started.wait(.2), 'usage rebuild competes with the active page request'
+    finally:
+        resume_index.set()
+        release_page.set()
+        index_thread.join(5)
+        if page_thread.ident is not None:
+            page_thread.join(5)
+        httpd.shutdown()
+        httpd.server_close()
+    assert not failures
+    assert results['page'] == 200
+    assert next_started.is_set()
+    assert len(json.loads(results['index'][0])['sessions']) == 2
 
 
 def test_reload_hands_the_listening_socket_to_the_successor(monkeypatch):
@@ -30,6 +112,30 @@ def test_reload_hands_the_listening_socket_to_the_successor(monkeypatch):
         client.close()
     finally:
         first.socket.close()
+
+
+def test_failed_foreground_read_releases_analytics_priority(project):
+    live = serve.Live(project)
+    with pytest.raises(ValueError):
+        with live.foreground_read('/hub/overview.json'):
+            raise ValueError('failed page read')
+    assert live._foreground_reads == 0, 'failed page read left usage analytics paused'
+    resumed = threading.Event()
+    worker = threading.Thread(target=lambda: (live.yield_analytics(), resumed.set()), daemon=True)
+    worker.start()
+    # a paused analytics waits out yield_analytics' 2 s bound; a free one returns at once
+    assert resumed.wait(1.5), 'failed page read left usage analytics paused'
+    worker.join(1)
+
+
+def test_stalled_foreground_read_cannot_pause_analytics_indefinitely(project):
+    live = serve.Live(project)
+    resumed = threading.Event()
+    with live.foreground_read('/hub/research.json'):
+        worker = threading.Thread(target=lambda: (live.yield_analytics(), resumed.set()), daemon=True)
+        worker.start()
+        assert resumed.wait(4), 'a stuck page reader permanently stopped usage analytics'
+    worker.join(1)
 
 
 def test_backlog_is_larger_than_the_stdlib_default():

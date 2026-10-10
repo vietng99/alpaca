@@ -124,6 +124,38 @@ def test_completion_without_seal_and_changed_report_do_not_unlock(record):
     assert nodes['t-002']['state'] == 'waiting'
 
 
+def test_projection_reads_seals_once_and_rechecks_changed_evidence(record, monkeypatch):
+    """Adding completed tasks must not multiply full proof-history reads."""
+    from alpaca import proof
+    root, conn = record
+    save(conn)
+    finish(root, conn, 't-001')
+    finish(root, conn, 't-005')
+    reads = []
+    original = proof.seal_index
+
+    def counted(connection):
+        reads.append(1)
+        return original(connection)
+
+    monkeypatch.setattr(proof, 'seal_index', counted)
+    nodes = projected(root, conn)[1]
+    assert nodes['t-001']['evidence'] == nodes['t-005']['evidence'] == 'valid'
+    assert len(reads) <= 1
+
+    # A shared index lasts only for this projection. Bytes and newer seals are
+    # checked afresh, so this optimization cannot keep a stale ready verdict.
+    evidence = proofkit.evidence_path(str(root), 't-001')
+    kept = proofkit.kept_path(str(root), 't-001', conn=conn)
+    Path(evidence).write_text('changed original')
+    Path(kept).write_text('changed kept copy')
+    nodes = projected(root, conn)[1]
+    assert nodes['t-001']['evidence'] == 'invalid'
+    assert nodes['t-002']['state'] == 'waiting'
+    finish(root, conn, 't-001')
+    assert projected(root, conn)[1]['t-002']['state'] == 'ready'
+
+
 def test_current_stage_gate_and_explicit_hold(record):
     root, conn = record
     data = plan(); data['tasks'][0]['requires_stages'] = ['environment']

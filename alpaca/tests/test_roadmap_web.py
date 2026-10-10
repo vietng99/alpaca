@@ -67,7 +67,9 @@ try {
   assert('recorded_edges_only', root.querySelectorAll('[data-rm-edge]').length === 5);
   assert('map_needs_no_horizontal_scroll',[...root.querySelectorAll('.rm-scroll,.rm-canvas,.rm-track')].every(e=>e.scrollWidth<=e.clientWidth+1));
   const cards=[...root.querySelectorAll('[data-rm-group="build"] [data-rm-node]')];
-  assert('compact_task_height',cards.every(e=>e.getBoundingClientRect().height<=70));
+  // A claimed card carries the claiming chat on a line of its own under the task id.
+  assert('compact_task_height',cards.every(e=>e.getBoundingClientRect().height<=(e.querySelector('.rm-claim-line')?88:70)));
+  assert('claim_sits_under_the_id',cards.filter(e=>e.querySelector('.rm-claim-line')).every(e=>!e.querySelector('.rm-node-top .rm-claim')&&e.querySelector('.rm-claim-line').getBoundingClientRect().top>=e.querySelector('.rm-node-top').getBoundingClientRect().bottom-1));
   const edge=id=>getComputedStyle(root.querySelector(`[data-rm-node="${id}"]`)).borderLeftColor;
   const working=root.querySelector('.rm-node.rm-working'),notWorking=root.querySelector('.rm-node:not(.rm-working)');
   assert('status_color_per_task',working&&notWorking&&edge(working.dataset.rmNode)!==edge(notWorking.dataset.rmNode)&&getComputedStyle(working).borderLeftWidth==='4px');

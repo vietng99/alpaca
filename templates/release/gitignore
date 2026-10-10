@@ -14,6 +14,9 @@ data.json
 .claude/worktrees/
 # Release output: never committed, never shipped.
 dist/
+# The research reproducer store: human-owned and never tracked (FR-006). The loop runner refuses
+# to start while any path under it is tracked.
+/contracts/research/
 # Runtime caches.
 __pycache__/
 *.pyc

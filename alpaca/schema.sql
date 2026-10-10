@@ -71,6 +71,13 @@ CREATE INDEX IF NOT EXISTS idx_run_gate ON run (gate);
 CREATE INDEX IF NOT EXISTS idx_events_kind ON events (kind);
 
 CREATE INDEX IF NOT EXISTS idx_events_session_id ON events(session, id);
+-- Run/task history lookups must not scan unrelated event payloads.
+CREATE INDEX IF NOT EXISTS idx_events_ref_id ON events(ref, id);
+-- Select scope without parsing unrelated payloads. Raw stores remain tamperable;
+-- the malformed subset is indexed separately so scoped reads still reject it.
+CREATE INDEX IF NOT EXISTS idx_events_scope_id ON events (
+  CASE WHEN json_valid(data) THEN json_extract(data, '$.scope') ELSE NULL END, id);
+CREATE INDEX IF NOT EXISTS idx_events_invalid_json_id ON events(id) WHERE NOT json_valid(data);
 
 -- Additive observability catalog. Raw payloads stay in authorized source files.
 CREATE TABLE IF NOT EXISTS schema_migration (

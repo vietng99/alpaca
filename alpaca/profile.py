@@ -60,8 +60,11 @@ class Profile:
         """How the domain's record events are read. A dict with optional lists:
         "service_sessions" (synthetic writer ids, never counted as sittings),
         "side_effect_kinds" (kinds a closing session writes as a side effect, not work) and
-        "observation_prefixes" (kind prefixes whose data the wiki keeps as untrusted JSON).
-        Used by alpaca/sessions_view.py, alpaca/hub.py (history work filter) and alpaca/wiki/ingest/drain.py."""
+        "observation_prefixes" (kind prefixes whose data the wiki keeps as untrusted JSON) and
+        "review_flow_kinds" (the `workflow_kind` of each alpaca/runlog/reviewflow.py Flow the domain
+        wires: Arthur reads a live assignment as a log review running and a NO-GO decision).
+        Used by alpaca/sessions_view.py, alpaca/hub.py (history work filter, Arthur) and
+        alpaca/wiki/ingest/drain.py."""
         return {}
 
     def summarize(self, event):
@@ -113,9 +116,11 @@ class Profile:
         """Project paths the domain owns, as lists of project-relative paths:
         "documents" (report roots the hub library catalogs, as runbooks),
         "tools" (tool installations: never backed up, shown only in the library's tool view),
-        "backup" (runtime directories a backup copies), and
-        "archives" (glob patterns of archive manifests the artifact catalog imports).
-        Used by alpaca/hub.py, alpaca/backup.py, alpaca/artifacts.py and alpaca/observability/maintenance.py."""
+        "backup" (runtime directories a backup copies),
+        "archives" (glob patterns of archive manifests the artifact catalog imports), and
+        "text_exts" (file extensions such as ".sv" the Studio's file browser also reads as text).
+        Used by alpaca/hub.py, alpaca/backup.py, alpaca/artifacts.py, alpaca/serve.py and
+        alpaca/observability/maintenance.py."""
         return {}
 
     # ---------------------------------------------------------------------------- projections
@@ -167,11 +172,15 @@ class Profile:
         return ""
 
     def web(self):
-        """What the web pages show for the domain: {"pages": [...], "cards": [...],
-        "stage_names": {...}, "assets": {...}}. "pages" turns on optional hub pages ("runs",
-        "live"); "cards" lists cockpit cards {"id", "title", "module"} whose module is one of
-        "assets" (published name -> absolute file path, served at /hub/assets/profile/<name>).
-        Used by alpaca/hub.py (overview: the "profile" block) and alpaca/serve.py (the assets)."""
+        """What the web pages show for the domain: {"pages": [...], "cards": [...], "css": [...],
+        "stage_names": {...}, "assets": {...}}. "assets" maps a published name to an absolute file
+        path, served at /hub/assets/profile/<name>. A "pages" string turns on a built-in slot page
+        ("runs", "live"; each shows only when routes() serves the page's registry profile_routes);
+        a "pages" object adds the project's own page {"id", "label", "module", "css", "icon", "nav",
+        "needs"} whose module (and css) is one of "assets" (docs/studio.md 4.0). "cards" lists
+        cockpit cards {"id", "title", "module", "css"}. "css" names stylesheets of the project's
+        own, linked after theme.css with every page and card stylesheet. Used by alpaca/hub.py
+        (overview: the "profile" block) and alpaca/serve.py (the assets and the stylesheet links)."""
         return {}
 
 
@@ -479,25 +488,97 @@ def current():
         return EMPTY
 
 
+#: The Studio page registry (alpaca/web/pages.json): a project page may not take a built-in page's
+#: id, nor an address the hub rewrites ("lib", "mission"), and a gated built-in page names the profile
+#: routes it reads ("profile_routes").
+REGISTRY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "pages.json")
+RESERVED_PAGES = ("lib", "mission")
+
+
+def _builtin_pages():
+    """{id: registry entry} of the Studio's built-in pages."""
+    import json
+    try:
+        with open(REGISTRY, encoding="utf-8") as fh:
+            return {str(p["id"]): p for p in json.load(fh)["pages"]}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+
+
+def _as_list(value):
+    return [value] if isinstance(value, str) else list(value) if isinstance(value, (list, tuple)) else []
+
+
+def _route_paths(prof):
+    """The paths the profile's routes() names, read past the guard so the note serve.py keeps
+    against `routes` (a route that collides with a generic one) stays in place."""
+    raw = prof._raw if isinstance(prof, _Guarded) else prof
+    try:
+        routes = raw.routes()
+    except Exception:
+        return set()
+    return {str(path) for path in routes} if isinstance(routes, dict) else set()
+
+
 def web_meta(root):
     """The profile block of the hub overview: the web() meta with every key present, plus the
     name, the stages and any profile problem ("error": the load error, "hook_errors": per hook).
+    "pages" lists the built-in slot pages turned on, "slot_pages" the project's own pages and
+    "styles" the project's stylesheets (served URLs, in link order). A page entry that cannot be
+    used (an id a built-in page or another entry holds, a module that is not an asset, a built-in
+    page whose profile routes are not served) is left out and noted against the `web` hook.
     Always JSON-safe; empty lists for the empty profile."""
+    import math
+    import re
     prof = load(root)
     meta = prof.web()
     meta = meta if isinstance(meta, dict) else {}
     stages = prof.stages()
     stages = [str(s) for s in stages] if isinstance(stages, (list, tuple)) else []
     assets = meta.get("assets") if isinstance(meta.get("assets"), dict) else {}
-    cards = []
+    served = lambda name: "/hub/assets/profile/" + name if isinstance(name, str) and name in assets else None
+    cards, styles, own, ignored = [], [], [], []
     for card in meta.get("cards") if isinstance(meta.get("cards"), (list, tuple)) else []:
         if isinstance(card, dict) and card.get("id") and card.get("module") in assets:
             cards.append({"id": str(card["id"]), "title": str(card.get("title") or card["id"]),
                           "module": "/hub/assets/profile/" + str(card["module"])})
+            styles += [served(c) for c in _as_list(card.get("css")) if served(c)]
     names = meta.get("stage_names") if isinstance(meta.get("stage_names"), dict) else {}
     pages = meta.get("pages") if isinstance(meta.get("pages"), (list, tuple)) else []
+    builtin, turned_on = _builtin_pages(), []
+    routes = _route_paths(prof) if any(isinstance(p, str) for p in pages) else set()
+    for entry in pages:
+        if isinstance(entry, str):
+            spec = builtin.get(entry)
+            if not spec or spec.get("gate") != "profile" or entry in turned_on:
+                continue
+            missing = [r for r in spec.get("profile_routes", []) if r not in routes]
+            if missing:
+                ignored.append("%s (the profile serves no %s)" % (entry, ", ".join(missing)))
+            else:
+                turned_on.append(entry)
+            continue
+        if not isinstance(entry, dict):
+            continue
+        pid, module = str(entry.get("id") or ""), served(entry.get("module"))
+        if pid in builtin or pid in RESERVED_PAGES or any(p["id"] == pid for p in own):
+            ignored.append("%s (the id is taken)" % pid)
+        elif not re.match(r"[a-z][a-z0-9-]{0,39}\Z", pid):
+            ignored.append("%r (an id is lower-case letters, digits and dashes)" % pid)
+        elif module is None:
+            ignored.append("%s (its module is not one of the assets)" % pid)
+        else:
+            nav = entry.get("nav")
+            own.append({"id": pid, "label": str(entry.get("label") or pid), "icon": str(entry.get("icon") or "file"),
+                        "nav": nav if isinstance(nav, (int, float)) and not isinstance(nav, bool)
+                        and math.isfinite(nav) else 100 + len(own),
+                        "module": module, "needs": [str(n) for n in _as_list(entry.get("needs"))]})
+            styles += [served(c) for c in _as_list(entry.get("css")) if served(c)]
+    styles += [served(c) for c in _as_list(meta.get("css")) if served(c)]
+    if ignored:
+        note(root, "web", "ignored page(s): %s" % "; ".join(ignored))
     block = {"name": str(getattr(prof, "name", "") or ""),
-             "pages": [str(p) for p in pages if p in ("runs", "live")],
+             "pages": turned_on, "slot_pages": own, "styles": list(dict.fromkeys(styles)),
              "cards": cards, "stages": stages,
              "stage_names": {str(k): str(v) for k, v in names.items()}}
     problem, hooks = error(root), errors(root)

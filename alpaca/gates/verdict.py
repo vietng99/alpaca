@@ -127,6 +127,22 @@ def _record_run(gate: str, code: int, reason: str, evidence) -> None:
         pass
 
 
+FALLBACK_ERROR_TEXT = "the error text is withheld (the secret screen could not be loaded)"
+
+
+def error_reason(exc: BaseException) -> str:
+    """The verdict reason for a caught exception: "Type: text" with the text through the one secret
+    screen (`alpaca.analytics.detail.screen`). A half-failed upgrade may not import that module, or
+    the screen may itself fail; the reason is then the exception type and a fixed message, never the
+    exception's own text (t-429)."""
+    name = type(exc).__name__
+    try:
+        from alpaca.analytics.detail import screen
+        return "%s: %s" % (name, screen(str(exc)))
+    except Exception:
+        return "%s: %s" % (name, FALLBACK_ERROR_TEXT)
+
+
 def emit_verdict(gate: str, code: int, reason: str, evidence: list | None = None) -> int:
     """Print the one canonical line, write a `run` row into the record, and return the code.
 

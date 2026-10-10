@@ -122,7 +122,7 @@ def issue(conn, code, *, source_id=None, detail='', identity=None):
     key = _id(source_id, code, identity)
     conn.execute('INSERT INTO obs_issue VALUES (?,?,?,?,?,?,1,NULL) '
                  'ON CONFLICT(issue_id) DO UPDATE SET last_seen=excluded.last_seen, '
-                 'occurrences=occurrences+1, resolved_at=NULL',
+                 'detail=excluded.detail, occurrences=occurrences+1, resolved_at=NULL',
                  (key, source_id, code, str(detail)[:500], now, now))
 
 
@@ -321,9 +321,10 @@ def _collect_source(conn, source, budget, root):
 
 @contextlib.contextmanager
 def collector_lock(root):
-    folder = Path(root) / '.alpaca/observability'
-    folder.mkdir(parents=True, exist_ok=True, mode=0o700)
-    fd = os.open(folder/'collector.lock', os.O_CREAT | os.O_RDWR | getattr(os,'O_NOFOLLOW',0), 0o600)
+    from alpaca import _nofollow
+    # no link followed at any level below .alpaca (t-424): a linked .alpaca/observability, or a linked
+    # collector.lock, is refused rather than followed to a file outside the project
+    fd = _nofollow.open_file_below(root, ('observability',), 'collector.lock', os.O_CREAT | os.O_RDWR, 0o600)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         yield
@@ -379,11 +380,145 @@ def _process_identity(pid):
         return None
 
 
-def _run(root, *, max_records=1000, consumers=True):
+#: The kernel's table of held file locks (Linux); `collector_alive` reads it instead of taking a lock.
+_PROC_LOCKS = '/proc/locks'
+#: Full scans of /proc/locks before `_flock_holder` reports no holder (t-334, review2 M1). The kernel
+#: serves the table one page (about 4 KB) per read call and walks it again from its position on
+#: the next call, so a lock taken or released by another process between two calls shifts the list
+#: and one scan can skip the holder's line. A miss now needs that race on every scan.
+_PROC_LOCKS_SCANS = 3
+#: Bytes asked for per read call; the kernel returns at most a page, the loop reads to EOF.
+_PROC_LOCKS_CHUNK = 1 << 16
+
+
+def _read_proc_locks():
+    """The whole lock table as text, read call after call until EOF; None when it cannot be read."""
+    parts = []
+    try:
+        with open(_PROC_LOCKS, 'rb', buffering=0) as fh:
+            while True:
+                part = fh.read(_PROC_LOCKS_CHUNK)
+                if not part:
+                    break
+                parts.append(part)
+    except OSError:
+        return None
+    return b''.join(parts).decode('ascii', 'replace')
+
+
+def _flock_holder(info):
+    """The pid holding an exclusive flock on the file whose `os.stat` is `info`, read from
+    /proc/locks (`<n>: FLOCK  ADVISORY  WRITE <pid> <major>:<minor>:<inode> 0 EOF`, device numbers
+    in hex; a `->` line is a waiter, not a holder). None when no process holds one or the table
+    cannot be read. Takes no lock and never waits: each scan reads the table to EOF, and a scan that
+    finds no holder is repeated, up to `_PROC_LOCKS_SCANS` scans in all."""
+    want = (os.major(info.st_dev), os.minor(info.st_dev), info.st_ino)
+    for _ in range(_PROC_LOCKS_SCANS):
+        text = _read_proc_locks()
+        if text is None:
+            return None
+        holder = _holder_in(text.splitlines(), want)
+        if holder is not None:
+            return holder
+    return None
+
+
+def _holder_in(lines, want):
+    """The pid of the FLOCK WRITE holder of `want` (major, minor, inode) in /proc/locks `lines`."""
+    for line in lines:
+        fields = line.split()
+        if len(fields) < 6 or fields[1] != 'FLOCK' or fields[3] != 'WRITE':
+            continue
+        try:
+            major, minor, inode = fields[5].split(':')
+            if (int(major, 16), int(minor, 16), int(inode)) == want:
+                return int(fields[4])
+        except ValueError:
+            continue
+    return None
+
+
+def collector_alive(root):
+    """Whether this project's `collect watch` collector is running now, so a hook can leave wiki
+    capture to it (merge of op-008 into main, review B2). True only when this root's
+    `collector.lock` is held (read from /proc/locks: the lock is never taken here, so a collector
+    starting at this moment is never refused it) by the very process the record's `obs:collector`
+    row names, in watch mode, with the process identity (boot id and start time) the row recorded,
+    which is how `status` tells a live collector from a reused pid. A copy of the record whose row
+    names another root's collector, a `collect once` run, a dead collector's row: all False.
+
+    Bounded and non-blocking: one stat, one read of /proc/locks and, only when the lock is held,
+    one read-only query of the record with no busy wait. Anything missing, unreadable or busy
+    gives False, so the caller falls back to doing the work itself."""
+    try:
+        info = os.stat(Path(root)/'.alpaca/observability/collector.lock', follow_symlinks=False)
+    except (OSError, ValueError):
+        return False
+    if not stat.S_ISREG(info.st_mode):
+        return False
+    holder = _flock_holder(info)
+    if holder is None:
+        return False
+    from alpaca import paths
+    try:
+        uri = Path(paths.db_path(str(root))).absolute().as_uri() + '?mode=ro'
+        conn = sqlite3.connect(uri, uri=True, timeout=0, isolation_level=None)
+        try:
+            row = conn.execute("SELECT value FROM meta WHERE key='obs:collector'").fetchone()
+        finally:
+            conn.close()
+        collector = json.loads(row[0]) if row else None
+    except (sqlite3.Error, OSError, ValueError, TypeError):
+        return False
+    if not isinstance(collector, dict) or collector.get('mode') != 'watch':
+        return False
+    identity = collector.get('process_identity')
+    return (collector.get('pid') == holder and bool(identity)
+            and _process_identity(holder) == identity)
+
+
+def capture_path(root):
+    """Who captures the wiki now (A-8, t-070 RC4). The hooks leave capture to the collector while the
+    observability flag is on or while this project's watch collector is alive; with the flag on and
+    no collector alive, nobody captures. `warning` is then `capture_runner.NO_COLLECTOR`, which
+    `bin/alpaca doctor` (`checks`) and `wiki status` report. Reads only: no lock, no flag change."""
+    from alpaca.capture_runner import NO_COLLECTOR
+    on = enabled(root)
+    alive = collector_alive(root)
+    return {'observability_enabled': on, 'collector_alive': alive,
+            'captured_by': 'collector' if alive else ('nobody' if on else 'hooks'),
+            'warning': NO_COLLECTOR if on and not alive else None}
+
+
+def checks(root, conn):
+    """The doctor finding for `capture_path` (alpaca/doctor.py CHECK_MODULES), as (name, level,
+    detail): a warning while the flag is on and no collector is alive."""
+    path = capture_path(root)
+    if path['warning']:
+        return [('collector', 'warn', path['warning'] + ': the hooks leave wiki capture to the collector, '
+                 'so no event is captured until one runs (bin/alpaca collect watch)')]
+    if path['collector_alive']:
+        return [('collector', 'ok', 'collector alive: it captures the wiki')]
+    return [('collector', 'ok', 'observability off and no collector: the hooks capture the wiki')]
+
+
+def _run(root, *, max_records=1000, consumers=True, source_batch=200, event_batch=200, preservation_batch=8, stop_requested=None, retry_consumers=(), warm=None):
+    """One collector pass. `warm` (default: in watch mode, `ALPACA_COLLECTOR_WATCH`, as the heartbeat's
+    `mode`) first starts or polls the wiki lane's echo index read (`consumers.warm_wiki`, t-462), so a
+    long-lived collector never reads it inside a capture's budget; `collect once` is one pass in a
+    process of its own and reads it inside its capture, as before."""
+    if warm is None:
+        warm = bool(os.environ.get('ALPACA_COLLECTOR_WATCH'))
     max_records = max(1,min(int(max_records),100000))
+    source_batch = max(1,min(int(source_batch),10000))
+    event_batch = max(1,min(int(event_batch),10000))
+    preservation_batch = max(1,min(int(preservation_batch),256))
     conn = db.connect(root)
     result = {'records':0, 'errors':0, 'sources':0}
     try:
+        if consumers and warm:
+            from .consumers import warm_wiki
+            result['wiki_lane'] = warm_wiki(root)
         with db.transaction(conn):
             if not db.meta_get(conn,'obs:project-id'):
                 db.meta_set(conn,'obs:project-id',str(uuid.uuid4()))
@@ -405,7 +540,7 @@ def _run(root, *, max_records=1000, consumers=True):
             if result['records'] >= max_records:
                 break
             try:
-                result['records'] += _collect_source(conn,source,min(200,max_records-result['records']) if len(sources)>1 else max_records,root)
+                result['records'] += _collect_source(conn,source,min(source_batch,max_records-result['records']) if len(sources)>1 else max_records,root)
                 if retry:
                     db.meta_set(conn,'obs:retry:'+source['source_id'],'{}')
             except (OSError,sqlite3.Error,RuntimeError,ValueError) as exc:
@@ -419,17 +554,19 @@ def _run(root, *, max_records=1000, consumers=True):
             db.meta_set(conn,'obs:collector',json.dumps({'pid':os.getpid(),'process_identity':_process_identity(os.getpid()),'heartbeat':util.now_iso(), 'last_result':result, 'mode':'watch' if os.environ.get('ALPACA_COLLECTOR_WATCH') else 'once'}))
         if consumers:
             from .consumers import consume, snapshot_observations, run_snapshot_jobs
-            result['consumers'] = consume(root,conn,max_records=min(max_records,200))
+            result['consumers'] = consume(root,conn,max_records=min(max_records,event_batch),retry_consumers=retry_consumers)
             result['consumers']['source-snapshot-requests'] = snapshot_observations(root,conn,max_records=max_records)
-            result['preservation'] = run_snapshot_jobs(root,conn)
+            result['preservation'] = run_snapshot_jobs(root,conn,limit=preservation_batch,stop_requested=stop_requested)
         return result
     finally:
         conn.close()
 
 
-def run_once(root, *, max_records=1000, consumers=True):
+def run_once(root, *, max_records=1000, consumers=True, source_batch=200, event_batch=200, preservation_batch=8, retry_consumers=()):
     with collector_lock(root):
-        return _run(root,max_records=max_records,consumers=consumers)
+        return _run(root,max_records=max_records,consumers=consumers,
+                    source_batch=source_batch,event_batch=event_batch,preservation_batch=preservation_batch,retry_consumers=retry_consumers,
+                    warm=False)
 
 
 def status(root, now=None):

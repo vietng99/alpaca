@@ -132,11 +132,27 @@ def _clean(value) -> str:
     return "" if value is None else str(value)
 
 
+def _clean_options(options):
+    if isinstance(options, (str, bytes)) or not hasattr(options, "__iter__"):
+        return []
+    return [str(o).strip() for o in options if str(o).strip()]
+
+
+def preview_id(kind, context, options, choice, consequence, pointer="") -> str:
+    """The id `record` will give a decision with these fields, so the owner can be asked about it
+    before it is written (`alpaca owner ask decision`, `alpaca decide --quote`)."""
+    return _decision_id(_clean(kind).strip(), _clean(context).strip(), _clean_options(options),
+                        _clean(choice).strip(), _clean(consequence).strip(), _clean(pointer).strip())
+
+
 def record(conn, kind, context, options, choice, consequence, pointer="",
-           *, actor="agent", session=None, root=None) -> dict:
+           *, actor="agent", session=None, root=None, owner_word=None) -> dict:
     """Append one decision. Validates the four page fields and, for an owner kind, the verbatim
     journal pointer; then lands the event, the current-state row, the page row and the page
-    file together (alpaca is the sole writer, one transaction). Returns the decision record."""
+    file together (alpaca is the sole writer, one transaction). Returns the decision record.
+
+    `owner_word` is the row alpaca.ownerword.human_write returned for this decision's id; it rides
+    on the event so `ownerword.decision_is_owner` can tell an owner-proved decision from a token."""
     kind = _clean(kind).strip()
     context = _clean(context).strip()
     choice = _clean(choice).strip()
@@ -170,6 +186,8 @@ def record(conn, kind, context, options, choice, consequence, pointer="",
     rec = {"id": did, "kind": kind, "context": context, "options": opts,
            "choice": choice, "consequence": consequence, "pointer": pointer, "ts": ts}
     page_md = _render_page(rec)
+    if owner_word is not None:
+        rec["owner_word"] = owner_word
 
     with db.transaction(conn):
         db.append_event(conn, session=session or "cli", actor=actor or "agent",
@@ -250,9 +268,24 @@ def _cmd_decide(args):
     from alpaca import cli
     conn = db.connect(cli._root())
     sid = args.session or "cli"
+    word = None
+    if getattr(args, "quote", None):
+        # the decision is owner-proved only through --quote: the owner's message answers the id
+        # `owner ask decision` printed (design 1.3); without --quote the write is as before
+        from alpaca import ownerword
+        did = preview_id(args.kind, args.context, args.option or [], args.choice,
+                         args.consequence, args.pointer or "")
+        try:
+            ownerword.ensure_grandfathered(conn, cli._root())
+            word = ownerword.human_write(conn, sid, args.by, subject=did, answer="yes",
+                                         quote=args.quote, root=cli._root(),
+                                         since=ownerword.ask_ts(conn, did))
+        except ownerword.OwnerWordRefusal as e:
+            return vc.emit_verdict("alpaca-decide", e.code, "%s: %s" % (e.reason, e.detail))
     try:
         rec = record(conn, args.kind, args.context, args.option or [], args.choice,
-                     args.consequence, args.pointer or "", actor=args.by, session=sid)
+                     args.consequence, args.pointer or "", actor=args.by, session=sid,
+                     owner_word=word)
     except DecisionRefusal as e:
         return vc.emit_verdict("alpaca-decide", e.verdict, "%s: %s" % (e.reason, e.detail))
     return vc.emit_verdict(
@@ -274,6 +307,9 @@ def _parser(sub):
     d.add_argument("--pointer", default="",
                    help="the verbatim journal pointer (required for an owner decision)")
     d.add_argument("--by", default="agent", help="the decider token (self-asserted)")
+    d.add_argument("--quote", default=None,
+                   help="with --by owner|human: the owner's message answering the decision id "
+                        "(`alpaca owner ask decision` prints it); records it as owner-proved")
 
 
 def _register():

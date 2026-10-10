@@ -5,13 +5,18 @@ A human-review budget with a conservation law and curation by exception. The rul
 the model is built here against the M2/M3 pieces.
 
 A review card is raised when, and only when, something needs a HUMAN decision. A card is not a
-routine notification: it exists BY EXCEPTION. The four card classes the plan names are the four
-things that stay human decisions at every level (boot rule 3):
+routine notification: it exists BY EXCEPTION. The first four card classes the plan names are the four
+things that stay human decisions at every level (boot rule 3); the fifth is op-019's L5 card:
 
   * `ship`               -- the ship / deploy boundary: publishing outside the box.
   * `irreversible-external` -- an irreversible external action (push a shared remote, spend money).
   * `human-owned-write`  -- a write to the authority surface below L5 (floor.py hands this over).
   * `owner-pause`        -- an owner-only question is open (questions.py hands this over).
+  * `out-of-brief`       -- at L5 a choice nothing the owner signed covers: a door self-check
+                            finding or a `choice --outside` (alpaca/oob.py), or a batch item added
+                            after the run started (alpaca/batch.py); design section 6. Its move is
+                            the owner's accept or reject, proved by the owner's own words
+                            (alpaca.ownerword), never a free-text decision.
 
 Three instruments, all over the record (alpaca is the sole writer):
 
@@ -52,7 +57,12 @@ SHIP = "ship"
 IRREVERSIBLE = "irreversible-external"
 HUMAN_OWNED_WRITE = "human-owned-write"
 OWNER_PAUSE = "owner-pause"
-CARD_KINDS = frozenset({SHIP, IRREVERSIBLE, HUMAN_OWNED_WRITE, OWNER_PAUSE})
+OUT_OF_BRIEF = "out-of-brief"
+CARD_KINDS = frozenset({SHIP, IRREVERSIBLE, HUMAN_OWNED_WRITE, OWNER_PAUSE, OUT_OF_BRIEF})
+
+#: the two decisions an out-of-brief card takes (design D-15: a free-text move would let an owner's no
+#: open the door), and the owner word each one proves: accept is "yes", reject is "no".
+OOB_DECISIONS = {"accept": "yes", "reject": "no"}
 
 #: a card's status. It is either open (needs a decision) or moved (a human decided it).
 OPEN = "open"
@@ -69,6 +79,7 @@ R_NOT_FOUND = "REVIEW-CARD-NOT-FOUND"
 R_ALREADY_MOVED = "REVIEW-CARD-ALREADY-MOVED"
 R_DECISION_EMPTY = "REVIEW-DECISION-EMPTY"
 R_AGENT_MOVE = "REVIEW-MOVE-NOT-A-HUMAN"
+R_OOB_DECISION = "REVIEW-OUT-OF-BRIEF-DECISION"
 
 
 class ReviewRefusal(Exception):
@@ -212,10 +223,16 @@ def is_human(actor) -> bool:
     return str(actor or "").strip() in HUMAN_IDENTITIES
 
 
-def move(conn, card_id, decision, actor, *, session=None) -> dict:
+def move(conn, card_id, decision, actor, *, session=None, quote=None, root=None,
+         environ=None, isatty=None, read=None) -> dict:
     """Resolve a review card. ONLY A HUMAN IDENTITY may move it (Step 1): an agent move is refused
     FAIL, exactly as the questions ledger refuses an owner-class self-decision. An unknown card, an
     already-moved card, or an empty decision is refused. A moved card leaves the open queue.
+
+    An `out-of-brief` card is stricter (design section 6, D-15), and the rule lives here so a code
+    caller is bound as the CLI is: the decision is `accept` or `reject`, and it goes through
+    `ownerword.human_write` (subject the card id, answer yes or no, `quote` the owner's message), so
+    a self-asserted `owner` token with no owner words moves nothing. Other kinds keep the rule above.
     """
     if not is_human(actor):
         raise ReviewRefusal(
@@ -231,9 +248,26 @@ def move(conn, card_id, decision, actor, *, session=None) -> dict:
     if decision is None or not str(decision).strip():
         raise ReviewRefusal(vc.BLOCKED, R_DECISION_EMPTY,
                             "%s: a move carries a non-empty decision" % card_id)
+    word = None
+    if rec.get("kind") == OUT_OF_BRIEF:
+        decision = str(decision).strip().lower()
+        if decision not in OOB_DECISIONS:
+            raise ReviewRefusal(vc.FAIL, R_OOB_DECISION,
+                                "%s is an out-of-brief card: the owner accepts or rejects it "
+                                "(--accept or --reject with --quote), no free-text decision" % card_id)
+        from alpaca import ownerword
+        try:
+            word = ownerword.human_write(conn, session, actor, subject=str(card_id),
+                                         answer=OOB_DECISIONS[decision], quote=quote, root=root,
+                                         since=rec.get("created"), environ=environ, isatty=isatty,
+                                         read=read)
+        except ownerword.OwnerWordRefusal as exc:
+            raise ReviewRefusal(vc.FAIL, exc.reason, exc.detail)
     new = dict(rec)
     new.update(status=MOVED, decision=str(decision).strip(), moved_by=str(actor).strip(),
                moved_at=util.now_iso())
+    if word is not None:
+        new["owner_word"] = word
     return _append(conn, KIND_MOVE, new, actor=actor, session=session)
 
 
@@ -278,7 +312,12 @@ def _cmd_review(args):
         return vc.PASS
     if args.review_verb == "move":
         try:
-            rec = move(conn, args.card_id, args.decision, args.by, session=sid)
+            decision = args.decision or ("accept" if args.accept else "reject" if args.reject else None)
+            if args.accept and args.reject:
+                print("GATE alpaca-review-move: FAIL (--accept and --reject are exclusive)")
+                return vc.FAIL
+            rec = move(conn, args.card_id, decision, args.by, session=sid, quote=args.quote,
+                       root=cli._root())
         except ReviewRefusal as e:
             return vc.emit_verdict("alpaca-review-move", e.verdict, "%s: %s" % (e.reason, e.detail))
         return vc.emit_verdict("alpaca-review-move", vc.PASS,
@@ -297,7 +336,10 @@ def _parser(sub):
     lst.add_argument("--json", action="store_true")
     mv = rv.add_parser("move", help="move a card (only a human identity may move it)")
     mv.add_argument("card_id", help="the review card id")
-    mv.add_argument("decision", help="the decision recorded on the card")
+    mv.add_argument("decision", nargs="?", help="the decision recorded on the card")
+    mv.add_argument("--accept", action="store_true", help="out-of-brief card: the owner accepts")
+    mv.add_argument("--reject", action="store_true", help="out-of-brief card: the owner rejects")
+    mv.add_argument("--quote", help="out-of-brief card: the owner's message, e.g. `rc-001 yes`")
     mv.add_argument("--by", required=True,
                     help="the mover (a human identity: %s)" % ", ".join(sorted(HUMAN_IDENTITIES)))
 

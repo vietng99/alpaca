@@ -16,6 +16,9 @@ the gate that reads them.
     alpaca proof check [<id>] re-hash the report and every sealed evidence file and print one
                              GATE line. PASS when the report still matches and every evidence
                              file either still matches or has its kept copy intact.
+    alpaca proof verify <id>  run or resume the two-agent verification of the latest seal
+                             (alpaca/research/verifier.py); `done` waits for it when the seal is
+                             in the verification scope (alpaca/research/verify_gate.py).
 
 A report cites files that other work goes on editing. Hashing only the path the report named
 would call the report false a week later, when what really happened is that the tree moved on.
@@ -52,11 +55,12 @@ Interfaces:
 """
 from __future__ import annotations
 
+import hashlib
+import itertools
 import json
 import os
 import platform
 import re
-import shutil
 import subprocess
 
 from alpaca import db, paths, util
@@ -717,6 +721,11 @@ def resolve_evidence(conn, root, item, *, report=None, ident=None) -> dict:
             raise Refusal(["evidence %s does not resolve (%s)" % (ptr, e.reason_code)])
         if not _inside_root(root, full):
             raise Refusal(["evidence %s resolves outside the project root" % ptr])
+        if paths.private_runtime(root, full):
+            # checked before a byte is read: the seal neither hashes nor keeps a secret
+            raise Refusal(["evidence %s is a private runtime file (a login, key or secret, a "
+                           "database, a transcript, observability state or the tool pool); a "
+                           "seal never reads or keeps one: cite a redacted extract instead" % ptr])
         mine = _self_citation(root, ptr, os.path.realpath(full), report, ident)
         if mine:
             raise Refusal([mine])
@@ -786,6 +795,91 @@ def _prune_kept(directory, keep_names) -> None:
             _unlink(os.path.join(directory, name))
 
 
+#: the `kept_reason` beside `kept: null` for evidence the seal binds by hash and never copies. The
+#: kept folder sits under `.alpaca/proofs/`, which the dashboard's file browser serves, so a copy
+#: would hand a vault note or a secret to anyone with the browser login (op-008 t-463, R-1, R-2).
+VAULT_NOT_KEPT = ("a Rune2 vault file is never copied out of the vault; the seal keeps its hash "
+                  "and the check reads the file in place")
+PRIVATE_NOT_KEPT = "a private runtime file is never copied; the seal keeps its hash only"
+#: the `kept_reason` for a dot file or a file in a dot folder (`.netrc`, `.npmrc`, `.git/config`,
+#: `.claude/...`), and for a SQLite file by its bytes: the file browser closes each, they are where
+#: credentials live, and the seal's slug dropped the dot, so a copy `NN-netrc` was served
+#: (op008/followups review B-2). Bound by hash only; the check reads the file in place.
+HIDDEN_NOT_KEPT = ("a dot file, a file in a dot folder or a database is never copied; the seal keeps "
+                   "its hash and the check reads the file in place")
+#: the `kept_reason`s of a file bound by hash with no copy, whose check reads the file in place
+#: (a reader that needs the bytes takes them from the tree and checks the sealed hash).
+IN_PLACE_REASONS = (OVER_CAP, VAULT_NOT_KEPT, PRIVATE_NOT_KEPT, HIDDEN_NOT_KEPT)
+#: the folder inside `<id>.evidence/` for copies of files the browser does not serve from their own
+#: place (a closed `.alpaca/` folder such as `research/`, `reports/` or `rune2-development/`,
+#: `analytics/`, a `.tar.gz`): a dot folder, so neither the file browser nor the hub serves it, and
+#: the copy is no more readable than its source (op008/followups review B-2).
+CLOSED_KEPT = ".closed"
+#: the `kept_reason` when the file the copy opened is not the file the seal resolved.
+MOVED_NOT_KEPT = ("the file went, changed, or became a link to a file the seal never copies, "
+                  "between resolving it and copying it")
+
+
+def _not_kept(root, path):
+    """The reason the seal never copies `path`, or None: a vault file, a private runtime file, and
+    a dot file, a file in a dot folder (any part of its real path below the root that starts with
+    a dot, a leading `.alpaca` aside) or a SQLite file by its first bytes (op008/followups review
+    B-2). Where a copy that is made goes is `_served_copy`'s answer."""
+    if paths.in_vault(root, path):
+        return VAULT_NOT_KEPT
+    if paths.private_runtime(root, path):
+        return PRIVATE_NOT_KEPT
+    real = os.path.realpath(path)
+    base = os.path.realpath(root)
+    parts = os.path.relpath(real, base).split(os.sep)
+    runtime = os.path.basename(paths.runtime_dir(base))
+    if any(part.startswith(".") and not (i == 0 and part == runtime) for i, part in enumerate(parts)):
+        return HIDDEN_NOT_KEPT
+    try:                                        # no link followed, and a pipe never waited on
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+                     | getattr(os, "O_CLOEXEC", 0))
+        try:
+            head = os.read(fd, len(paths.SQLITE_MAGIC))
+        finally:
+            os.close(fd)
+        if head == paths.SQLITE_MAGIC:
+            return HIDDEN_NOT_KEPT
+    except OSError:
+        pass                                    # the copy opens it again and checks what it opened
+    return None
+
+
+def _served_copy(root, path) -> bool:
+    """Whether the copy of `path` goes in the served kept folder: only when the dashboard's file
+    browser serves the file itself from where it is (`paths.browser_serves`, the browser's own
+    rule). Any other copy goes in the kept folder's `CLOSED_KEPT` folder, which no reader serves
+    (op008/followups review B-2)."""
+    return paths.browser_serves(root, os.path.realpath(path))
+
+
+def _copy_checked(root, source, part, served=None):
+    """Copy `source` to `part` and return the sha256 of the bytes copied, or None when the file
+    opened is outside the root, in the vault or private, hidden or a database by its bytes, or
+    (for a copy bound for the served kept folder, `served`) a file the browser does not serve
+    (`paths.open_checked` checks the opened file itself, so a folder swapped for a link after
+    `_not_kept` looked is caught too)."""
+    fh = paths.open_checked(source, lambda real: _inside_root(root, real)
+                            and _not_kept(root, real) is None
+                            and (not served or _served_copy(root, real)))
+    if fh is None:
+        return None
+    h = hashlib.sha256()
+    with fh:
+        first = fh.read(1 << 20)
+        if first.startswith(paths.SQLITE_MAGIC):
+            return None                         # a database by the bytes opened (review B-2)
+        with open(part, "wb") as out:
+            for block in itertools.chain((first,), iter(lambda: fh.read(1 << 20), b"")):
+                h.update(block)
+                out.write(block)
+    return h.hexdigest()
+
+
 def keep_evidence(root, subj, evidence) -> dict:
     """Copy every resolvable `local:` evidence file into `<id>.evidence/` and record where.
 
@@ -793,9 +887,18 @@ def keep_evidence(root, subj, evidence) -> dict:
     `kept_reason` when a cap or an unreadable file left it out. Position in the Evidence list
     leads the file name, so a reader matches a copy to the line that cited it without opening
     anything. Each copy is written under a part name and moved into place, so a half-written
-    file is never mistaken for the evidence. Returns {"dir", "kept", "bytes"}."""
+    file is never mistaken for the evidence. Returns {"dir", "kept", "bytes"}.
+
+    A file in the Rune2 vault, a private runtime file, a dot file or a file in a dot folder and a
+    database are never copied (`_not_kept`): the kept folder is served by the dashboard's file
+    browser. Its entry keeps the hash `resolve_evidence` recorded, so the check still verifies it
+    against the file in place. A copy goes in the served folder only when the browser serves the
+    file itself from where it is; any other copy goes in `<id>.evidence/.closed/`, which no reader
+    serves (`_served_copy`, op008/followups review B-2). The copy reads the file
+    it opened, re-checked after the open, and keeps it only when its bytes hash to the sealed
+    value, so a swap between resolving and copying leaves no copy behind."""
     directory = kept_dir(root, subj)
-    written, total = [], 0
+    written, closed, total = [], [], 0
     for pos, item in enumerate(evidence, 1):
         if not isinstance(item, dict):
             continue
@@ -807,17 +910,29 @@ def keep_evidence(root, subj, evidence) -> dict:
             item["kept"] = None
             item["kept_reason"] = "the file went between resolving it and copying it"
             continue
+        withheld = _not_kept(root, target)
+        if withheld:
+            item["kept"] = None
+            item["kept_reason"] = withheld
+            continue
         size = item.get("bytes") or os.path.getsize(target)
         if size > KEPT_FILE_CAP or total + size > KEPT_TOTAL_CAP:
             item["kept"] = None
             item["kept_reason"] = OVER_CAP
             continue
         name = "%02d-%s" % (pos, _slug(os.path.basename(target)))
-        dest = os.path.join(directory, name)
-        part = os.path.join(directory, ".%s.part" % name)
+        served = _served_copy(root, target)
+        into = directory if served else os.path.join(directory, CLOSED_KEPT)
+        dest = os.path.join(into, name)
+        part = os.path.join(into, ".%s.part" % name)
         try:
-            os.makedirs(directory, exist_ok=True)
-            shutil.copyfile(target, part)
+            os.makedirs(into, exist_ok=True)
+            copied = _copy_checked(root, target, part, served=served)
+            if copied is None or (item.get("sha256") and copied != item["sha256"]):
+                _unlink(part)
+                item["kept"] = None
+                item["kept_reason"] = MOVED_NOT_KEPT
+                continue
             os.replace(part, dest)
         except OSError as e:
             _unlink(part)
@@ -825,10 +940,18 @@ def keep_evidence(root, subj, evidence) -> dict:
             item["kept_reason"] = "the copy failed (%s)" % e.__class__.__name__
             continue
         item["kept"] = _rel(root, dest)
-        written.append(name)
+        (written if served else closed).append(name)
         total += size
-    _prune_kept(directory, written)
-    return {"dir": directory, "kept": written, "bytes": total}
+    closed_dir = os.path.join(directory, CLOSED_KEPT)
+    _prune_kept(closed_dir, closed)
+    if not closed:
+        try:
+            os.rmdir(closed_dir)
+        except OSError:
+            pass
+    _prune_kept(directory, written + ["tree.patch", CLOSED_KEPT])
+    return {"dir": directory, "kept": written + [CLOSED_KEPT + "/" + n for n in closed],
+            "bytes": total}
 
 
 def _kept_file(root, kept):
@@ -943,17 +1066,88 @@ def inspect(conn, root, ident) -> dict:
             "problems": problems, "subject": subj, "blocked": blocked}
 
 
-def seal(conn, root, ident, *, session=None) -> dict:
+#: the problems a seal in the two-agent verification scope gets for a How to reproduce section
+#: the verifiers cannot re-run (design/research-engine/verifier.md section 8.1, item 5).
+NO_BLOCK = ("the How to reproduce section holds no fenced command block; a seal in the "
+            "verification scope needs the commands the verifiers re-run")
+READS_ONLY = ("the How to reproduce section only reads or prints files; a seal in the "
+              "verification scope needs a command that re-creates what the claims state")
+
+
+def _verify_stamp(conn, root, ident, text, *, requested):
+    """(verify_scope, problems) for a new seal: the scope it is stamped with (None when it is in
+    no scope) and the How to reproduce problems a seal in scope has."""
+    from alpaca.research import claims as vclaims, pathscan, verify_gate
+    scope = verify_gate.scope_at_seal(conn, root, ident, requested=requested)
+    if scope is None:
+        return None, []
+    blocks = vclaims.fenced_blocks(split_sections(text).get("How to reproduce", ""))
+    if not blocks:
+        return scope, [NO_BLOCK]
+    role = verify_gate.role_of(conn, ident)
+    if pathscan.reads_only(blocks, gates=role in ("attempt", "repair")):
+        return scope, [READS_ONLY]
+    return scope, []
+
+
+def _dropped_order_problems(conn, root, got) -> list:
+    """op-019 t-210: a landing or handoff note the report cites must name every open owner order
+    of the report's op (every op with open orders when the report names none), so a sealed report
+    cannot carry a note that dropped an order."""
+    from alpaca import orders
+    out = []
+    op = (got.get("subject") or {}).get("op")
+    for item in got.get("evidence") or []:
+        if item.get("kind") != "local":
+            continue
+        target = _evidence_file(root, "local", item.get("pointer"))
+        if not target or not orders.is_note_file(target) or not os.path.isfile(target):
+            continue
+        missing = orders.check_note(conn, target, op)
+        if missing:
+            out.append("evidence %s: %s" % (item.get("pointer"),
+                                            orders.dropped_message(missing, "note")))
+    return out
+
+
+def seal(conn, root, ident, *, session=None, verify=False) -> dict:
     """Seal the report: refuse it, or keep the evidence, append one `proof-report` event and
     write the seal copy.
 
     The report bytes are never edited here. A re-seal after an edit appends a NEW event and
-    rebuilds the kept directory; the latest one wins, and both events stay on the record."""
+    rebuilds the kept directory; the latest one wins, and both events stay on the record.
+
+    A seal in the two-agent verification scope (an engine task, a seal asked with `verify`, a
+    task sealed in scope before, or the `proof_verify` policy; design/research-engine/verifier.md
+    section 8.1) also records `verify_scope` and the tree its claims were made on: the checkout's
+    HEAD and the patch of its uncommitted work, kept as `tree.patch`. The seal is never refused
+    for a missing verdict; `done_gate` waits for it."""
+    from alpaca.research import verify_gate
     got = inspect(conn, root, ident)
-    if got["problems"]:
-        raise Refusal(got["problems"], blocked=got.get("blocked", False))
+    problems = list(got["problems"])
+    scope, extra = None, []
+    if not problems:
+        scope, extra = _verify_stamp(conn, root, ident, util.read_text(got["path"]),
+                                     requested=verify)
+        problems.extend(extra)
+    if not problems:
+        problems.extend(_dropped_order_problems(conn, root, got))
+    if problems:
+        raise Refusal(problems, blocked=got.get("blocked", False))
     path, subj = got["path"], got["subject"]
+    # every refusal comes before the first write: the tree patch is taken into memory here and
+    # kept only after the evidence copies, so a refused seal leaves the latest seal's kept
+    # directory as that seal recorded it
+    taken = None
+    role = verify_gate.role_of(conn, ident) if scope else None
+    if scope and role not in ("attempt", "repair"):
+        spec = ("alpaca/",) if role == "report" else (".", ":(exclude).alpaca")
+        try:
+            taken = verify_gate.take_tree(root, pathspec=spec)
+        except ValueError as exc:
+            raise Refusal([str(exc)])
     keep_evidence(root, subj, got["evidence"])
+    tree = None if taken is None else verify_gate.keep_tree(root, kept_dir(root, subj), taken)
     payload = {
         "path": _rel(root, path),
         "sha256": contract.sha256_bytes(path),
@@ -961,6 +1155,9 @@ def seal(conn, root, ident, *, session=None) -> dict:
         "sections": got["sections"],
         "evidence": got["evidence"],
     }
+    if scope:
+        payload["verify_scope"] = scope
+        payload["tree"] = tree
     db.append_event(conn, session=session or "cli", actor="agent", kind=KIND,
                     op=subj.get("op"), ref=subj["id"], data=payload)
     util.write_text(path + ".seal.json", json.dumps(payload, indent=1, sort_keys=True) + "\n")
@@ -1093,7 +1290,7 @@ def next_steps(ident) -> list:
             "alpaca proof seal %s" % ident]
 
 
-def done_gate(conn, root, ident, pointer) -> tuple:
+def done_gate(conn, root, ident, pointer, index=None) -> tuple:
     """(ok, problems). The one question a `done` move asks of a proof.
 
     `--proof` must be `local:<path>`, the pointer must resolve, the latest `proof-report` event
@@ -1114,7 +1311,7 @@ def done_gate(conn, root, ident, pointer) -> tuple:
         full = contract.resolve_pointer(root, pointer)
     except contract.ContractError as e:
         return False, ["--proof %s does not resolve (%s)" % (pointer, e.reason_code)]
-    ev = latest_seal(conn, ident)
+    ev = latest_seal(conn, ident, index)
     if ev is None:
         return False, ["%s carries no proof-report event: the report is not sealed" % ident]
     data = ev["data"] if isinstance(ev.get("data"), dict) else {}
@@ -1129,16 +1326,26 @@ def done_gate(conn, root, ident, pointer) -> tuple:
     ok, problems = verify(conn, root, ident, {ident: ev})
     if not ok:
         return False, problems
+    from alpaca.research import verify_gate          # the two-agent verdict (t-094)
+    ok, problems = verify_gate.check(conn, root, ident, ev)
+    if not ok:
+        return False, problems
     return True, []
 
 
 def refuse_done(gate_name, ident, problems) -> None:
     """Print the refusal the way every `done` boundary prints it: the GATE line, then the three
-    commands. One shape, so a reader meets the same message from task move and from board move."""
+    commands. One shape, so a reader meets the same message from task move and from board move.
+    A refusal for the two-agent verification prints its own three steps."""
     print("GATE %s: FAIL (%s)" % (gate_name, problems[0] if problems else "no sealed proof report"))
     for extra in problems[1:]:
         print("  also: %s" % extra)
-    for i, step in enumerate(next_steps(ident), 1):
+    steps = next_steps(ident)
+    if problems:
+        from alpaca.research import verify_gate
+        if str(problems[0]).startswith(verify_gate.PROBLEM_PREFIX):
+            steps = verify_gate.next_steps(ident, problems[0])
+    for i, step in enumerate(steps, 1):
         print("  %d. %s" % (i, step))
 
 
@@ -1150,7 +1357,24 @@ def checks(root, conn) -> list:
     evidence changed or vanished with no kept copy behind it, and carries the count of done tasks
     still closed by an unsealed legacy proof string. An evidence file that moved on while its
     kept copy stayed intact is counted, not warned about: the work went on, which is what work
-    does, and the proof still has what it stood on. A record with no done task yields nothing."""
+    does, and the proof still has what it stood on. A record with no done task yields nothing.
+
+    A second finding, `proof-verify-policy`, WARNs when `proof_verify` in project.yaml is
+    malformed; the done gate then treats the scope as `all` (verifier.md section 1, item 5)."""
+    out = []
+    try:
+        from alpaca.research import verify_gate
+        pol = verify_gate.policy(root)
+        if pol.get("error"):
+            out.append(("proof-verify-policy", "warn",
+                        "%s; the done gate treats every sealed proof as in scope until it is fixed"
+                        % pol["error"]))
+    except Exception:
+        pass
+    return out + _integrity(root, conn)
+
+
+def _integrity(root, conn) -> list:
     try:
         done = [t for t in db.rows(conn, "tasks", "status='done'")]
     except Exception:
@@ -1205,7 +1429,7 @@ def _cmd_proof(args):
         return cli.PASS
     if verb == "seal":
         try:
-            payload = seal(conn, root, args.id, session=sid)
+            payload = seal(conn, root, args.id, session=sid, verify=bool(getattr(args, "verify", False)))
         except Refusal as r:
             word = "BLOCKED" if r.blocked else "FAIL"
             print("GATE alpaca-proof-seal: %s (%d problem(s))" % (word, len(r.problems)))
@@ -1214,9 +1438,24 @@ def _cmd_proof(args):
             return cli.BLOCKED if r.blocked else cli.FAIL
         print("GATE alpaca-proof-seal: PASS (%s sealed, %d evidence pointer(s))"
               % (payload["path"], len(payload["evidence"])))
-        print("close it with: alpaca task move %s done --proof local:%s"
-              % (args.id, payload["path"]))
+        if payload.get("verify_scope") == "engine":
+            print("the loop runner verifies this seal before done")
+        elif payload.get("verify_scope"):
+            print("verification required: alpaca proof verify %s" % args.id)
+        else:
+            print("close it with: alpaca task move %s done --proof local:%s"
+                  % (args.id, payload["path"]))
         return cli.PASS
+    if verb == "verify":
+        from alpaca.research import agent_marker, verifier
+        marked = agent_marker.current()
+        if marked:
+            # the research guard marks the shell of every subagent call; only the driving session
+            # runs a verification (in-session-runtime.md section 3.4)
+            print("GATE alpaca-proof-verify: BLOCKED (RUN-DRIVER-IS-SUBAGENT: %s)"
+                  % agent_marker.refusal_reason("alpaca proof verify", marked))
+            return vc.BLOCKED
+        return verifier.cli(args, conn, root)
     if verb == "check":
         ids = sealed_ids(conn) if (args.all or not args.id) else [args.id]
         if not ids:
@@ -1239,18 +1478,33 @@ def _cmd_proof(args):
                 print("  - %s" % p)
             for n in notes:
                 print("  %s" % n)
+            _verify_notes(conn, root, ids)
             return cli.FAIL
         print("GATE alpaca-proof-check: PASS (%d report(s), %d hash(es) still match)"
               % (len(ids), files))
         for n in notes:                     # the tree moved on; the proof kept what it stood on
             print("  %s" % n)
+        _verify_notes(conn, root, ids)
         return cli.PASS
-    print("GATE alpaca-proof: BLOCKED (unknown proof verb; use new, seal or check)")
+    print("GATE alpaca-proof: BLOCKED (unknown proof verb; use new, seal, check or verify)")
     return vc.BLOCKED
 
 
+def _verify_notes(conn, root, ids) -> None:
+    """One note line per id in the two-agent verification scope, so a PASS on hashes is never
+    read as a verified proof (verifier.md section 8.5)."""
+    from alpaca.research import verify_gate
+    for ident in ids:
+        try:
+            st = verify_gate.state(conn, root, ident)
+        except Exception:
+            continue
+        if st.get("state") not in (None, "not-in-scope"):
+            print("  %s verification: %s" % (ident, st["state"]))
+
+
 def _parser(sub):
-    p = sub.add_parser("proof", help="the proof report a task hands in: new, seal, check")
+    p = sub.add_parser("proof", help="the proof report a task hands in: new, seal, check, verify")
     pv = p.add_subparsers(dest="proof_verb")
     n = pv.add_parser("new", help="scaffold the report for a task or a checklist row")
     n.add_argument("id")
@@ -1258,9 +1512,17 @@ def _parser(sub):
                    help="overwrite an existing report (it is refused otherwise)")
     s = pv.add_parser("seal", help="resolve and hash the report's evidence, then record the seal")
     s.add_argument("id")
+    s.add_argument("--verify", action="store_true",
+                   help="put this task in the two-agent verification scope and record its tree")
     c = pv.add_parser("check", help="re-hash a sealed report and its evidence")
     c.add_argument("id", nargs="?")
     c.add_argument("--all", action="store_true", help="check every sealed report on the record")
+    v = pv.add_parser("verify", help="run or resume the two-agent verification of the latest seal")
+    v.add_argument("id")
+    v.add_argument("--status", action="store_true", help="print the verification state; writes nothing")
+    v.add_argument("--runtime", choices=("claude", "codex"),
+                   help="the runtime, read only when the environment names none")
+    v.add_argument("--json", action="store_true", help="print one JSON object as well")
 
 
 def _register():

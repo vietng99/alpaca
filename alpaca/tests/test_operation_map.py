@@ -30,6 +30,8 @@ def _overview_op(project, op='op-001'):
 def test_op_pin_and_unpin_are_recorded_and_the_newest_wins(project, capsys):
     root = Path.cwd().parent
     _op(root)
+    assert _overview_op(root)['pinned'] is True  # op new pins the new op's map
+    assert cli.main(['op', 'unpin', 'op-001']) == 0
     assert _overview_op(root)['pinned'] is False
     assert cli.main(['op', 'pin', 'op-001']) == 0
     assert _overview_op(root)['pinned'] is True
@@ -39,6 +41,28 @@ def test_op_pin_and_unpin_are_recorded_and_the_newest_wins(project, capsys):
     assert _overview_op(root)['pinned'] is True
     assert cli.main(['op', 'pin', 'op-404']) == 1
     assert 'no op op-404' in capsys.readouterr().out
+
+
+def test_op_new_records_a_short_title_and_op_title_renames_it(project, capsys):
+    root = Path.cwd().parent
+    cli.main(['init'])
+    assert cli.main(['op', 'new', 'Watchdog: an on-call session that guards destructive git work',
+                     '--title', 'Git watchdog']) == 0
+    assert _overview_op(root)['short_title'] == 'Git watchdog'
+    assert cli.main(['op', 'new', 'Temp and disk hygiene: move the temp rules out', '--no-pin']) == 0
+    second = _overview_op(root, 'op-002')
+    assert second['short_title'] == 'Temp and disk hygiene' and second['pinned'] is False
+    assert 'derived; rename with' in capsys.readouterr().out
+    assert cli.main(['op', 'new', 'A long intent without any colon that runs well past the forty-eight '
+                     'character cut']) == 0
+    third = _overview_op(root, 'op-003')['short_title']
+    assert third.endswith('...') and len(third) <= 51 and not third[:-3].endswith(' ')
+    assert cli.main(['op', 'title', 'op-002', 'Disk hygiene']) == 0
+    assert _overview_op(root, 'op-002')['short_title'] == 'Disk hygiene'
+    assert cli.main(['op', 'title', 'op-404', 'Nope']) == 1
+    assert cli.main(['op', 'title', 'op-001', 'x' * 61]) == 1
+    assert cli.main(['op', 'new', 'Too long a title', '--title', 'y' * 61]) == 1
+    assert _overview_op(root)['short_title'] == 'Git watchdog'
 
 
 def test_phase_state_follows_entry_advance_and_door_refusals(project):

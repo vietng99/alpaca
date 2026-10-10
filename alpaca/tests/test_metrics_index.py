@@ -32,6 +32,19 @@ def test_index_keeps_empty_usage_unknown_and_excludes_probes(project):
     assert result['totals']['measured_sessions'] == 0
 
 
+def test_index_yields_between_conversations_without_changing_totals(project):
+    register(project, 'parent')
+    write(transcripts.local_path(project, 'parent'), 'main-response', 999)
+    write(Path(transcripts.subagents_dir(project, 'parent')) / 'agent-child.jsonl',
+          'child-response', 777)
+    sessions = [{'sid': 'parent', 'class': 'work'}]
+    expected = metrics_index.index(project, sessions)
+    boundaries = []
+    result = metrics_index.index(project, sessions, yield_control=lambda: boundaries.append(1))
+    assert result == expected
+    assert len(boundaries) >= 2  # parent and child remain separate units of work
+
+
 def test_crew_totals_include_each_conversation_once_without_client_cost(project):
     register(project, 'parent')
     write(transcripts.local_path(project, 'parent'), 'main-response', 999)
@@ -43,7 +56,11 @@ def test_crew_totals_include_each_conversation_once_without_client_cost(project)
     assert result['totals']['estimated_cost_usd'] == .0015
     assert result['complete'] is False  # discovered files do not establish a closed child inventory
     main = metrics_index.index(project, [{'sid': 'parent', 'class': 'work'}])
-    assert main['totals']['total_tokens'] == 110
+    # t-143: the index folds the child under its parent. The row's own summary stays the main
+    # conversation; the row's family figures and the totals agree with the crew view.
+    assert main['sessions'][0]['summary']['tokens']['total_tokens'] == 110
+    assert main['totals']['main_total_tokens'] == 110
+    assert main['totals']['total_tokens'] == main['sessions'][0]['family']['total_tokens'] == result['totals']['total_tokens']
     assert main['sessions'][0]['cost']['reported_usd'] == 999
 
 
@@ -100,3 +117,42 @@ def test_index_reuses_rows_for_unchanged_sessions_beyond_the_analysis_cache(proj
     fourth = metrics_index.index(project, sessions)
     assert sorted(calls) == ['a', 'b', 'c']          # a new card reprices every session
     assert fourth['totals']['unpriced_models'] == []
+
+
+def test_large_family_rebuild_does_not_reanalyse_unchanged_children(project, monkeypatch):
+    # The live project has 2741 children. A full sequential rebuild used to evict
+    # the next child's compact row from the 2048-entry cache on every pass.
+    from alpaca.analytics import metrics
+    count = 2741
+    keys = {}
+    calls = []
+    def key(root, sid):
+        return (str(root), sid, None, keys.get(sid, 'v1'))
+    def analyze(root, sid):
+        calls.append(sid)
+        return {'summary': {'responses': 1, 'usage_responses': 1,
+            'costed_responses': 1, 'estimated_cost_usd': .001,
+            'tokens': {'total_tokens': 10}}, 'coverage': {'complete': True},
+            'cost': {}, 'session': {'operator': 'claude'}, 'models': []}
+    monkeypatch.setattr(metrics, 'analysis_key', key)
+    monkeypatch.setattr(metrics, 'analyze', analyze)
+    kids = {'child-%s' % i: {} for i in range(count)}
+    sessions = [{'sid': 'parent', 'class': 'work'}]
+    first = metrics_index.index(project, sessions, families={'parent': kids})
+    assert len(calls) == count + 1
+    assert metrics_index.index(project, sessions, families={'parent': kids}) == first
+    assert len(calls) == count + 1, 'unchanged children must not restart full analysis'
+    keys['child-100'] = 'v2'
+    metrics_index.index(project, sessions, families={'parent': kids})
+    assert calls[count+1:] == ['child-100']
+
+
+def test_compact_rows_have_a_byte_budget(project, monkeypatch):
+    from alpaca.analytics import metrics
+    monkeypatch.setattr(metrics_index, 'MAX_ROW_BYTES', 1024)
+    monkeypatch.setattr(metrics, 'analysis_key', lambda root, sid: (str(root), sid, None, 'v1'))
+    monkeypatch.setattr(metrics, 'analyze', lambda root, sid: {
+        'summary': {'padding': 'x' * 2048}, 'coverage': {}, 'cost': {},
+        'session': {'operator': 'claude'}, 'models': []})
+    metrics_index._analysis_row(project, 'oversized')
+    assert not any(k[:2] == (str(project), 'oversized') for k in metrics_index._ROWS)

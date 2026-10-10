@@ -1,0 +1,106 @@
+# Test fixture: every value the worked improve runbook (worked/improve.yaml) sets, keyed by its indexed field
+# path at the grain of templates/research/improve.yaml. test_research_template.py fills the template
+# with these values and compares the result with worked/improve.yaml.
+id: sortbench-improve
+title: Fewer comparisons and less wall time for sortlib.sort
+description: Agents change src/sortlib/ to cut the comparisons and the wall time of the sort benchmark,
+  while every correctness test of the pack keeps passing.
+spec: improve-spec.md
+owner: the sortlib maintainer
+stages[0].id: build
+stages[0].title: the package compiles
+stages[0].run: python3 -m compileall -q ${WORKTREE}/src/sortlib
+stages[0].timeout: 120
+stages[0].checks:
+- {id: build-exit, type: exit-code}
+stages[1].id: unit
+stages[1].title: the correctness tests, run from the contract copy
+stages[1].needs: [build]
+stages[1].run: python3 ${CONTRACT_DIR}/packs/sortbench/tests/run_tests.py --src ${WORKTREE}/src --json
+  ${EVIDENCE_DIR}/unit.json
+stages[1].timeout: 600
+stages[1].checks:
+- id: unit-pass
+  type: json-field
+  path: ${EVIDENCE_DIR}/unit.json
+  field: failed
+  op: ==
+  value: 0
+  covers: [SC-003, FR-001]
+  source: spec:SC-003
+- id: unit-edge
+  type: json-field
+  path: ${EVIDENCE_DIR}/unit.json
+  field: edge_cases_passed
+  op: ==
+  value: true
+  covers: [EC-001]
+  source: spec:EC-001
+stages[2].id: holdout-bench
+stages[2].title: the benchmark on the held-out input sets, on the final champion only
+stages[2].needs: [build]
+stages[2].run: python3 bench/measure.py --src ${WORKTREE}/src --inputs holdout --json ${EVIDENCE_DIR}/holdout.json
+stages[2].timeout: 900
+stages[2].checks:
+- {id: holdout-ran, type: file-exists, path: '${EVIDENCE_DIR}/holdout.json'}
+research.defaults: pack.yaml
+research.metrics[0].id: compares
+research.metrics[0].description: comparisons the sort makes on the fixed input set
+research.metrics[0].command: python3 ${CONTRACT_DIR}/packs/sortbench/bench/measure.py --src ${WORKTREE}/src
+  --metric compares
+research.metrics[0].parser: markers
+research.metrics[0].unit: comparisons
+research.metrics[0].direction: lower
+research.metrics[0].kind: deterministic
+research.metrics[0].timeout: 300
+research.metrics[0].target: 18000
+research.metrics[0].source: spec:SC-001
+research.metrics[0].artifact: one run of src/sortlib over the fixed inputs in bench/inputs
+research.metrics[0].covers: [SC-001, EC-002]
+research.metrics[1].id: wall_ms
+research.metrics[1].description: wall time of one benchmark pass
+research.metrics[1].command: python3 ${CONTRACT_DIR}/packs/sortbench/bench/measure.py --src ${WORKTREE}/src
+  --metric wall_ms --seed ${SEED} --json ${EVIDENCE_DIR}/wall-${REPEAT}.json
+research.metrics[1].parser: json-field
+research.metrics[1].path: ${EVIDENCE_DIR}/wall-${REPEAT}.json
+research.metrics[1].field: wall_ms
+research.metrics[1].unit: ms
+research.metrics[1].direction: lower
+research.metrics[1].kind: noisy
+research.metrics[1].repeats: 5
+research.metrics[1].min_ok: 3
+research.metrics[1].median: worse
+research.metrics[1].margin: 4
+research.metrics[1].seeds: [11, 12, 13, 14, 15]
+research.metrics[1].timeout: 120
+research.metrics[1].target: 120
+research.metrics[1].source: spec:SC-002
+research.metrics[1].covers: [SC-002]
+research.accept.rule: deficit-pareto
+research.accept.after_targets: stop
+research.paths.editable: [src/sortlib/]
+research.paths.covers: [EC-003]
+research.paths.source: spec:EC-003
+research.gates[0].stage: build
+research.gates[1].stage: unit
+research.stop.rounds: 5
+research.stop.slots: 2
+research.stop.covers: [SC-004]
+research.stop.source: spec:SC-004
+research.proposal[0].field: risk
+research.proposal[0].type: enum
+research.proposal[0].values: [low, medium, high]
+research.proposal[0].description: how likely the change is to break a correctness test
+research.categories[0].id: fewer-compares
+research.categories[0].text: change the algorithm or its cut-over points so it compares less
+research.categories[1].id: small-inputs
+research.categories[1].text: add or tune a path for short runs and small lists
+research.categories[2].id: less-work
+research.categories[2].text: remove copies, allocations and repeated key calls
+research.controls.noop_rounds: 2
+research.controls.random: true
+research.controls.mutate: bench/mutate.py
+research.controls.syntax: build
+research.controls.seed: 100
+research.holdout.stages: [holdout-bench]
+research.holdout.paths: [packs/sortbench/holdout/]

@@ -1,0 +1,122 @@
+# Research contract, improve mode, for the sortbench pack.
+runbook: 3
+id: sortbench-improve
+title: Fewer comparisons and less wall time for sortlib.sort
+description: >-
+  Agents change src/sortlib/ to cut the comparisons and the wall time of the sort benchmark,
+  while every correctness test of the pack keeps passing.
+spec: improve-spec.md
+owner: the sortlib maintainer
+
+stages:
+  - id: build
+    title: the package compiles
+    run: python3 -m compileall -q ${WORKTREE}/src/sortlib
+    timeout: 120
+    checks:
+      - {id: build-exit, type: exit-code}
+  - id: unit
+    title: the correctness tests, run from the contract copy
+    needs: [build]
+    run: >-
+      python3 ${CONTRACT_DIR}/packs/sortbench/tests/run_tests.py
+      --src ${WORKTREE}/src --json ${EVIDENCE_DIR}/unit.json
+    timeout: 600
+    checks:
+      - id: unit-pass
+        type: json-field
+        path: ${EVIDENCE_DIR}/unit.json
+        field: failed
+        op: "=="
+        value: 0
+        covers: [SC-003, FR-001]
+        source: spec:SC-003
+      - id: unit-edge
+        type: json-field
+        path: ${EVIDENCE_DIR}/unit.json
+        field: edge_cases_passed
+        op: "=="
+        value: true
+        covers: [EC-001]
+        source: spec:EC-001
+  - id: holdout-bench
+    title: the benchmark on the held-out input sets, on the final champion only
+    needs: [build]
+    run: python3 bench/measure.py --src ${WORKTREE}/src --inputs holdout --json ${EVIDENCE_DIR}/holdout.json
+    timeout: 900
+    checks:
+      - {id: holdout-ran, type: file-exists, path: "${EVIDENCE_DIR}/holdout.json"}
+
+research:
+  mode: improve
+  defaults: pack.yaml
+  metrics:
+    - id: compares
+      description: comparisons the sort makes on the fixed input set
+      command: >-
+        python3 ${CONTRACT_DIR}/packs/sortbench/bench/measure.py --src ${WORKTREE}/src
+        --metric compares
+      parser: markers
+      unit: comparisons
+      direction: lower
+      kind: deterministic
+      timeout: 300
+      target: 18000
+      artifact: one run of src/sortlib over the fixed inputs in bench/inputs
+      covers: [SC-001, EC-002]
+      source: spec:SC-001
+    - id: wall_ms
+      description: wall time of one benchmark pass
+      command: >-
+        python3 ${CONTRACT_DIR}/packs/sortbench/bench/measure.py --src ${WORKTREE}/src
+        --metric wall_ms --seed ${SEED} --json ${EVIDENCE_DIR}/wall-${REPEAT}.json
+      parser: json-field
+      path: ${EVIDENCE_DIR}/wall-${REPEAT}.json
+      field: wall_ms
+      unit: ms
+      direction: lower
+      kind: noisy
+      repeats: 5
+      # min_ok and margin: interview:research-noise
+      min_ok: 3
+      median: worse
+      margin: 4
+      seeds: [11, 12, 13, 14, 15]
+      timeout: 120
+      target: 120
+      covers: [SC-002]
+      source: spec:SC-002
+  accept:
+    rule: deficit-pareto
+    after_targets: stop
+  paths:
+    editable: [src/sortlib/]
+    covers: [EC-003]
+    source: spec:EC-003
+  gates:
+    - {stage: build}
+    - {stage: unit}
+  stop:
+    rounds: 5
+    # slots: interview:research-stop
+    slots: 2
+    covers: [SC-004]
+    source: spec:SC-004
+  proposal:
+    - field: risk
+      type: enum
+      values: [low, medium, high]
+      description: how likely the change is to break a correctness test
+  categories:
+    - {id: fewer-compares, text: change the algorithm or its cut-over points so it compares less}
+    - {id: small-inputs, text: add or tune a path for short runs and small lists}
+    - {id: less-work, text: "remove copies, allocations and repeated key calls"}
+  controls:
+    noop_rounds: 2
+    random: true
+    mutate: bench/mutate.py
+    syntax: build
+    seed: 100
+  holdout:
+    stages: [holdout-bench]
+    paths: [packs/sortbench/holdout/]

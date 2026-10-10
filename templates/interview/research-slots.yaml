@@ -1,0 +1,190 @@
+# The research slots: what a format 3 research contract needs beyond the twelve default slots.
+#
+# Turn them on in a project with `alpaca interview use research`: it writes `include: [research]`
+# into input/interview/slots.yaml, and `alpaca interview` then lists these fourteen slots after the
+# defaults. Each slot has the shape of the default slots (id, fills, becomes) plus:
+#   fields  the format 3 field paths the slot fills (`research_fields()` in `alpaca/runbook.py`
+#           lists each field with whether each mode requires it; `[]` stands for one item of a
+#           list), written in full;
+#   mode    improve, repair or both: the mode that needs the slot;
+#   waive   for a slot one mode does not need, the reason to give when waiving it in that mode.
+# templates/research/improve.yaml and repair.yaml name the slot beside every field it fills.
+# docs/interview.md is the reference.
+slots:
+  - id: research-mode
+    fills: >-
+      improve or repair, which pack and runbook this contract belongs to, the question the run
+      answers, and the repository and ref the run works on when it is not this project at HEAD
+    becomes: the research block's mode and repository
+    mode: both
+    fields:
+      - research.mode
+      - research.repo.path
+      - research.repo.ref
+  - id: research-metric
+    fills: >-
+      each metric: what it measures, the command that measures it and where it starts, how the
+      number is read (result markers, or a field of a JSON file the command writes, with that file
+      and field), its unit, and whether higher or lower is better
+    becomes: the metrics list
+    mode: improve
+    waive: repair mode has no metric
+    fields:
+      - research.metrics[].id
+      - research.metrics[].description
+      - research.metrics[].command
+      - research.metrics[].workdir
+      - research.metrics[].parser
+      - research.metrics[].path
+      - research.metrics[].field
+      - research.metrics[].unit
+      - research.metrics[].direction
+  - id: research-noise
+    fills: >-
+      whether each metric is deterministic or noisy; for a noisy one the repeats, the fewest
+      successful repeats that still give a score, which middle value scores an even count of
+      repeats, the margin an improvement must beat, and a seed per repeat; how the noise was
+      measured
+    becomes: the metric's noise fields
+    mode: improve
+    waive: no metric; the tests decide
+    fields:
+      - research.metrics[].kind
+      - research.metrics[].repeats
+      - research.metrics[].min_ok
+      - research.metrics[].median
+      - research.metrics[].margin
+      - research.metrics[].seeds
+  - id: research-artifact
+    fills: >-
+      whether every component of each metric is measured on one artifact (one build, one output),
+      and which one
+    becomes: the metric's artifact note; when the answer is no, the pack fixes the metric before sign-off
+    mode: improve
+    waive: repair mode has no metric
+    fields:
+      - research.metrics[].artifact
+  - id: research-targets
+    fills: >-
+      the owner-only target of each metric that has one, with its unit, and where the number comes
+      from (a spec item or an owner decision); or none
+    becomes: each metric's target and its source
+    mode: improve
+    waive: the reproducer is the target
+    fields:
+      - research.metrics[].target
+      - research.metrics[].source
+  - id: research-accept
+    fills: >-
+      the accept rule (strict improvement past the margin, deficit then Pareto with targets, or
+      fail-to-pass and pass-to-pass), and what happens once every target is met: stop, or run all
+      N rounds under strict Pareto
+    becomes: the accept rule
+    mode: both
+    fields:
+      - research.accept.rule
+      - research.accept.after_targets
+  - id: research-editable
+    fills: which paths an attempt may change, as rules from the repository root
+    becomes: the allowlist
+    mode: both
+    fields:
+      - research.paths.editable
+  - id: research-protected
+    fills: >-
+      which paths are the contract (tests, eval configuration, metric scripts) and must never
+      change; which published results and notes agents must not see; where the tests live; which
+      folders outside the repository the eval reads; which ignored outputs the eval may create and
+      the purge keeps; which tools on PATH and which shared checkouts to fingerprint
+    becomes: the protected, hidden, test, read, keep and output lists and the fingerprint lists
+    mode: both
+    fields:
+      - research.paths.protected
+      - research.paths.hidden
+      - research.paths.tests
+      - research.paths.read
+      - research.paths.keep
+      - research.paths.outputs
+      - research.fingerprint.tools
+      - research.fingerprint.shared
+  - id: research-gates
+    fills: >-
+      which stages run in which order as the gate chain, which are heavy and how long a heavy one
+      waits for the machine lock, each stage's timeout and each metric repeat's timeout
+    becomes: the gate list and the timeouts
+    mode: both
+    fields:
+      - research.gates
+      - research.gates[].stage
+      - research.gates[].heavy
+      - research.gates[].lock_timeout
+      - stages[].timeout
+      - research.metrics[].timeout
+  - id: research-stop
+    fills: >-
+      the number of rounds N and slots K; at N the run always halts and asks the owner, and only
+      the owner's grant extends it
+    becomes: the stop rules
+    mode: both
+    fields:
+      - research.stop.rounds
+      - research.stop.slots
+  - id: research-budget
+    fills: >-
+      any cap on the money, tokens or wall time one run may spend (none set means the run is
+      uncapped), and the free disk in GiB it needs where its worktrees land
+    becomes: the run budget and the disk floor
+    mode: both
+    fields:
+      - research.budget.usd
+      - research.budget.tokens
+      - research.budget.wall
+      - research.disk
+  - id: research-proposal
+    fills: >-
+      the fields each proposal must fill beyond the engine's base fields, the hypothesis
+      categories, the pack's lessons file and the longest note line
+    becomes: the pack's proposal fields, the categories and the lessons
+    mode: both
+    fields:
+      - research.proposal
+      - research.categories
+      - research.lessons.file
+      - research.lessons.note_chars
+  - id: research-controls
+    fills: >-
+      the no-op control rounds (at least 2); whether to run the random-edit control and, if so,
+      its mutation script, the gate stage a mutation must pass and its first seed; the stages run
+      on the final champion only and the held-out data paths; if a program generates the
+      held-out data from a seed: which program, its seed option and the visible seeds (they go
+      in a recipe.json under the held-out paths), and a held-out seed of at least 64 random bits
+      that no file an attempt reads states
+    becomes: the controls and the holdout
+    mode: both
+    fields:
+      - research.controls.noop_rounds
+      - research.controls.random
+      - research.controls.mutate
+      - research.controls.syntax
+      - research.controls.seed
+      - research.holdout.stages
+      - research.holdout.paths
+  - id: research-repair
+    fills: >-
+      for each bug case its id, the bug report, the commit it starts from, the reproducing test
+      (supplied in the store with the test names that must go from fail to pass, or written and
+      reviewed by agents) with its timeout and repeats, and suspect files; the pass-to-pass suite
+      with the fewest tests that must pass and its timeout; a prepare stage; the groups of files
+      that must change together
+    becomes: the repair cases, the pass-to-pass suite and the coupled groups
+    mode: repair
+    waive: improve mode
+    fields:
+      - research.repair.cases[].id
+      - research.repair.cases[].bug_report
+      - research.repair.cases[].base
+      - research.repair.cases[].fail_to_pass
+      - research.repair.cases[].suspect_files
+      - research.repair.pass_to_pass
+      - research.repair.prepare
+      - research.coupled

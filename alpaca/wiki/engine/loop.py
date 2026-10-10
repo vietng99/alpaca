@@ -10,12 +10,13 @@ import re
 from dataclasses import dataclass, field
 from time import perf_counter
 
-from ..config import Config
+from ..api import Filters
+from ..config import META_DEFAULTS, RETRIEVAL_PROFILES, Config
 from ..determinism import determinism_hash, sha256_hex
-from ..store.asof import AsOf
+from ..store.asof import AsOf, block_where
 from ..store.db import DB
 from ..store import query as q
-from ..store.textnorm import norm_surface
+from ..store.textnorm import norm_surface, surface_in_question
 from ..types import Answer, CurrencyStamp
 from .oracle import entailment_gate, evaluate
 from .ledger import persist
@@ -27,17 +28,50 @@ from .ledger import persist
 from . import fuse, refine, retrieve
 from .plan import classify
 from ..project.freshness import assert_current_snapshot, assert_fresh
+from ..servable import block_servable, servable   # architecture.md 6.2: door-internal reads
 # The provider registry is deliberately NOT imported here. The engine stays BLIND to providers
 # (M2.16 asserts no module under alpaca/wiki/engine imports a provider module), so the Engine is handed
 # its provider bundle from OUTSIDE alpaca/wiki/engine at the answer-door seam: cfg.providers(). The
 # freshness gate above is NOT a provider, so importing it does not touch that blindness.
 
 
+#: The trace note of a K-pinned read under `hybrid` or `full` (architecture.md 5.2, OB-09).
+VECTOR_ARM_SKIPPED = "vector-arm-skipped-knowledge-time"
+#: The trace note of a read whose PPR arm the demand gate refused: the as-of graph has too few
+#: active edges to walk (architecture.md 8.2, OB-09).
+GRAPH_EMPTY = "graph-empty"
+#: The trace note of a K-pinned read on a store built from the record, by `wiki recover` on an empty
+#: store or by an import (OB-19, architecture.md 10.4): its knowledge time is each event's `ts`, not
+#: the later moment the live store learned it, so a read at K may see what the live store knew only
+#: after K.
+KNOWLEDGE_TIME_FROM_RECORD = "knowledge-time-from-record"
+
+
+def question_pins(question: str, as_of: str | None = None,
+                   knowledge_as_of: str | None = None) -> dict:
+    """The two time pins of a question, from the same plan.classify the door runs (architecture.md
+    5.1): K is pinned when `knowledge_as_of` or "as known at <date>" in the text sets it; T is
+    explicit when plan.resolved_from is not `now` (an argument or a date in the text). The service's
+    pre-door check reads these, so a date in the question counts like the argument."""
+    plan = classify(question, as_of)
+    knowledge = knowledge_as_of or plan.knowledge_time
+    return {"T": plan.as_of, "t_explicit": plan.resolved_from != "now",
+            "resolved_from": plan.resolved_from, "K": knowledge,
+            "k_pinned": knowledge is not None}
+
+
+#: How many ranked block ids the door hands the caller for budgeted context packing (FR-12).
+RANKED_WINDOW = 32
+
+
 @dataclass
 class _Hit:
-    """A minimal cited-block stand-in (block_id + text) for the r1.3 successor-follow re-selection."""
+    """A minimal cited-block stand-in (block_id + text) for the r1.3 successor-follow re-selection.
+    `source_trust` matches the retrieval hits (retrieve.py), which _assemble reads off the chosen
+    block."""
     block_id: str
     text: str
+    source_trust: str = "evidence-only"
 
 
 @dataclass
@@ -58,16 +92,23 @@ class Engine:
         self.db.pour()                         # idempotent; safe if already poured
         # Vector arm OFF under the NARROW default: only a vector/graph profile sets up store.vec, and
         # even then it is reached THROUGH the read door (retrieve.ensure_vector_index), never here.
-        if str(self.cfg.meta.get("retrieval_profile", "narrow")) in ("hybrid", "full"):
+        if str(self.cfg.meta.get("retrieval_profile", META_DEFAULTS["retrieval_profile"])) in (
+                "hybrid", "full"):
             retrieve.ensure_vector_index(self.db)
         self.providers = cfg.providers()
+        # architecture.md 6.2: the compartment of the answer being built. The door-internal reads
+        # (ambiguity gate, successor walk, conflict note) filter with it, as retrieval does
+        # (retrieve.gather is called without all_domains, so its compartment is the plan's domain
+        # or `general`). None outside an answer = any domain.
+        self._compartment: str | None = None
 
     def close(self) -> None:
         self.db.close()
 
     # ---- THE ONE DOOR ---------------------------------------------------
     def answer(self, question: str, as_of: str | None = None,
-               knowledge_as_of: str | None = None, wiki_blind: bool = False) -> Answer:
+               knowledge_as_of: str | None = None, wiki_blind: bool = False,
+               filters: Filters | None = None, pack: bool = False) -> Answer:
         """`knowledge_as_of` (F8) pins the TRANSACTION axis at an explicit knowledge-time K, making
         the audit/delta read reachable through the one door (default None = latest-knowledge)."""
         t0 = perf_counter()
@@ -80,18 +121,35 @@ class Engine:
             assert_current_snapshot(self.cfg)
             assert_fresh(self.cfg)
         plan = classify(question, as_of)
+        self._compartment = plan.domain or "general"
         K = knowledge_as_of or plan.knowledge_time
         asof = AsOf(plan.as_of, K=K)
         currency = CurrencyStamp(as_of=plan.as_of, txn_axis=("latest" if K is None else K),
                                  resolved_from=plan.resolved_from)
         rrf_k = int(self.cfg.meta.get("rrf_k", 60))
         authority_unit = self._authority_unit()
-        retrieval_profile = str(self.cfg.meta.get("retrieval_profile", "narrow"))
-        if retrieval_profile not in ("narrow", "hybrid", "full"):
-            raise ValueError("retrieval_profile must be narrow, hybrid, or full")
+        retrieval_profile = str(self.cfg.meta.get(
+            "retrieval_profile", META_DEFAULTS["retrieval_profile"]))
+        if retrieval_profile not in RETRIEVAL_PROFILES:
+            raise ValueError("retrieval_profile must be narrow, graph, hybrid, or full")
         use_vector = retrieval_profile in ("hybrid", "full")
-        use_graph = retrieval_profile == "full"
+        # architecture.md 8.2: `graph` is narrow plus the PPR arm and, like `full`, lets an edge be
+        # the answer claim (graph_authoritative below); it does no vector work.
+        use_graph = retrieval_profile in ("graph", "full")
+        # architecture.md 5.2: the vector arm and its cache read only active blocks, so a K-pinned
+        # read under `hybrid` or `full` skips it, and the trace says so (OB-09, no silent degrade).
+        trace_notes: list[str] = []
+        if use_vector and K is not None:
+            use_vector = False
+            trace_notes.append(VECTOR_ARM_SKIPPED)
+        if K is not None and self.db.get_meta(self.db.KNOWLEDGE_TIME_KEY) == "record":
+            trace_notes.append(KNOWLEDGE_TIME_FROM_RECORD)        # OB-19: no silent degrade
         steps = refine.schedule(self.cfg.refine_budget)
+        # the read memory of this answer (retrieve.gather): its passes share the reads of the one
+        # store state; the next answer starts empty, so a write between answers is always seen
+        memo: dict = {}
+        # a context pack keeps every claim block of a linked identifier eligible (retrieve.ENTITY_FLOOR_CAP)
+        floor_cap = {"entity_floor_cap": None} if pack else {}
 
         def run(retr):
             ranked = fuse.fuse(retr.hits, retr.channel_lists, self.providers.reranker, question,
@@ -108,7 +166,8 @@ class Engine:
             ores = evaluate(self.db, self.providers.entailer, asof, plan.templates,
                             asm.claims, asm.cited_blocks, asm.used_edge_ids, asm.read_edge_ids,
                             asm.answer_nodes, retr.floor_ids, served,
-                            required_subclaims=required_subclaims)
+                            required_subclaims=required_subclaims,
+                            compartment=self._compartment)
             return ores, asm, [h.block_id for h in ranked]
 
         best = None
@@ -118,7 +177,8 @@ class Engine:
         if plan.qtype == "single-hop-lexical":
             retr = retrieve.gather(self.db, self.providers, question, asof, k=steps[0].k,
                                    skip_ppr=True, domain=plan.domain, mode=plan.mode,
-                                   wiki_blind=wiki_blind, use_vector=use_vector)
+                                   wiki_blind=wiki_blind, use_vector=use_vector, filters=filters,
+                                   memo=memo, **floor_cap)
             ores, asm, final_ids = run(retr)
             if ores.verdict == "grounded" and retr.floor_ids:
                 best, fast = (ores, asm, retr, final_ids), True
@@ -128,7 +188,8 @@ class Engine:
                 retr = retrieve.gather(self.db, self.providers, question, asof,
                                        k=step.k, alpha=step.alpha, domain=plan.domain,
                                        mode=plan.mode, wiki_blind=wiki_blind,
-                                       skip_ppr=not use_graph, use_vector=use_vector)
+                                       skip_ppr=not use_graph, use_vector=use_vector, filters=filters,
+                                       memo=memo, **floor_cap)
                 ores, asm, final_ids = run(retr)
                 best = (ores, asm, retr, final_ids)
                 pass_no = i
@@ -136,6 +197,8 @@ class Engine:
                     break
 
         ores, asm, retr, final_ids = best
+        if retr.graph_empty:
+            trace_notes.append(GRAPH_EMPTY)      # architecture.md 8.2: no silent degrade
         verdict = "abstained" if ores.verdict in ("insufficient", "abstained") else ores.verdict
 
         # ---- retrieval-one-door.1 AMBIGUITY VERDICT --------------------------------------------
@@ -143,7 +206,7 @@ class Engine:
         # each carrying a definition/claim floor block, and the question does not disambiguate, we
         # MUST NOT confidently ground on one arbitrary entity. Keep the frozen Answer contract (three
         # verdicts) but route to abstain and surface both entities in extra['ambiguous_entities'].
-        ambiguous = self._detect_ambiguity(question)
+        ambiguous = self._detect_ambiguity(question, asof)
         if ambiguous:
             verdict = "abstained"
 
@@ -192,6 +255,7 @@ class Engine:
             "final_ids": final_ids[:20], "floor": retr.floor_ids, "linked": retr.linked_nodes,
             "wiki_blind": bool(wiki_blind),
             "retrieval_profile": retrieval_profile,
+            "notes": trace_notes,
         }
         extra = {"qtype": plan.qtype, "mode": plan.mode, "reason": ores.reason,
                  "conflict_note": ores.conflict_note, "fast_path": fast,
@@ -199,7 +263,17 @@ class Engine:
                  "successor_read": ores.completeness.successor_read,
                  "raw_fallthrough": retr.raw_fallthrough,
                  "asof_gated": asof_gated, "determinism_hash": dhash,
-                 "source_trust": asm.source_trust}
+                 "source_trust": asm.source_trust,
+                 # architecture.md 6.1 inputs for outcome.classify_outcome (service.query): the
+                 # served window, the retrieved count and how many matches the servable filter
+                 # removed (a count only: their block ids name private documents).
+                 "served_ids": final_ids[:8], "retrieved": len(retr.hits),
+                 # the ranked window `service.context` packs (FR-12); the caller pops it, so it
+                 # never reaches a query result
+                 "ranked_ids": final_ids[:RANKED_WINDOW],
+                 "excluded": len(retr.excluded_ids or []),
+                 # the notes of this read the caller prints (QueryResult.trace, `context`)
+                 "trace": list(trace_notes)}
         if ambiguous:
             extra["ambiguous_entities"] = ambiguous
             extra["reason"] = "ambiguous entity: query resolves to >=2 distinct canonical entities"
@@ -210,10 +284,12 @@ class Engine:
             extra=extra,
         )
         latency_ms = int((perf_counter() - t0) * 1000)
-        persist(self.db, ans, qtype=plan.qtype, query_hash=sha256_hex(question),
-                dag=ores.dag, channels=channels, model_versions=model_versions,
-                determinism_hash=dhash, fast_path=fast, latency_ms=latency_ms,
-                retrieval_trace=retrieval_trace, asof_gated=asof_gated, stale_serve=stale_serve)
+        answer_id = persist(self.db, ans, qtype=plan.qtype, query_hash=sha256_hex(question),
+                            dag=ores.dag, channels=channels, model_versions=model_versions,
+                            determinism_hash=dhash, fast_path=fast, latency_ms=latency_ms,
+                            retrieval_trace=retrieval_trace, asof_gated=asof_gated,
+                            stale_serve=stale_serve)
+        ans.extra["answer_id"] = answer_id      # audit link for the answer_outcomes row
         return ans
 
     # ---- C12 authority prior knob ----------------------------------------------------------
@@ -245,34 +321,39 @@ class Engine:
         return value
 
     # ---- retrieval-one-door.1 ambiguity detector -------------------------------------------
-    def _detect_ambiguity(self, question: str) -> list[str] | None:
+    def _detect_ambiguity(self, question: str, asof: AsOf) -> list[str] | None:
         """A bare surface in the question that resolves to >=2 distinct canonical entities, each
         carrying a definition/claim floor block, with no disambiguator => ambiguous. Uses the shared
         alias table (the wave-1 km.2 resolver's identity surface); never auto-picks one entity."""
         nq = norm_surface(question)
-        tokens = set(nq.split())
         rows = self.db.conn.execute(
-            "SELECT norm_surface, node_id FROM aliases WHERE status='bound'").fetchall()
+            "SELECT norm_surface, node_id, kind FROM aliases WHERE status='bound'").fetchall()
         by_surface: dict[str, set] = {}
         for r in rows:
             ns = r["norm_surface"]
-            if ns and (ns in nq or ns in tokens):
+            if surface_in_question(ns, nq, r["kind"]):
                 by_surface.setdefault(ns, set()).add(q.resolve_canonical(self.db, r["node_id"]))
         # a LONGER surface present in the question that resolves to exactly one node disambiguates.
         disambiguators = {next(iter(nodes)) for s, nodes in by_surface.items() if len(nodes) == 1}
         for ns in sorted(by_surface):
             nodes = by_surface[ns]
-            qualified = sorted(n for n in nodes if self._has_floor_block(n))
+            qualified = sorted(n for n in nodes if self._has_floor_block(n, asof))
             if len(qualified) >= 2 and not (set(qualified) & disambiguators):
                 return qualified
         return None
 
-    def _has_floor_block(self, node_id: str) -> bool:
-        r = self.db.conn.execute(
-            "SELECT 1 FROM node_blocks nb JOIN blocks b ON b.block_id=nb.block_id "
-            "WHERE nb.node_id=? AND nb.role IN ('definition','claim') AND b.status='active' LIMIT 1",
-            (node_id,)).fetchone()
-        return r is not None
+    def _has_floor_block(self, node_id: str, asof: AsOf) -> bool:
+        """architecture.md 6.2: only a servable floor block counts, so a node whose only floor block
+        is private, excluded or outside the answer's compartment never makes a question ambiguous.
+        The block is read under the as-of clause (architecture.md 5.2), so at a knowledge time K a
+        block retired after K still counts."""
+        visible, params = block_where(asof, "b")
+        rows = self.db.conn.execute(
+            "SELECT nb.block_id FROM node_blocks nb JOIN blocks b ON b.block_id=nb.block_id "
+            f"WHERE nb.node_id=:node AND nb.role IN ('definition','claim') AND {visible}",
+            {**params, "node": node_id}).fetchall()
+        return bool(servable(self.db, [r["block_id"] for r in rows],
+                             compartment=self._compartment))
 
     # ---- knowledge-model.5 as-of gate flags ------------------------------------------------
     def _asof_gate_flags(self, answer_nodes: list[str], used_edge_ids: list[str],
@@ -316,6 +397,12 @@ class Engine:
                     if not succ:
                         break
                     if self._edge_current(succ, asof):
+                        # architecture.md 6.2: a successor anchored in a private, quarantined,
+                        # excluded or other-compartment block is not followed, so its text never
+                        # reaches the answer or `extra`.
+                        if not block_servable(self.db, succ["source_block_id"],
+                                              compartment=self._compartment):
+                            break
                         sb = q.get_block(self.db, succ["source_block_id"])
                         if sb:
                             return succ, _Hit(sb["block_id"], sb["text"])
@@ -430,6 +517,12 @@ class Engine:
                        "source_block_id": chosen_h.block_id, "source_edge_id": chosen_e["edge_id"]}]
             used_edge_ids = [chosen_e["edge_id"]]
             answer_text = f"{chosen_e['subj_node']} {chosen_e['predicate']} {obj}"
+            # The triple is a sentence the cited block may not entail (a record edge's predicate,
+            # `in_op` or `status`, is not a word of its header): the entailment door would drop it and
+            # the answer would abstain where the extractive one grounds. The edge's own quote is
+            # verbatim from its block, so it is the delivered text then (architecture.md 8.2).
+            if self.providers.entailer.entail(answer_text, chosen_h.text)[0] != "supported":
+                answer_text = chosen_e["source_quote"]
         else:
             snippet = chosen_h.text.strip()
             claims = [{"text": snippet[:300], "kind": "prose",

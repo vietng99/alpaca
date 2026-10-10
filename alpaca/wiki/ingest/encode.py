@@ -93,9 +93,50 @@ def _has_relative_time(phrase: str) -> bool:
     return any(k in p for k in _REL_DAYS) or any(z in p for z in _REL_ZERO)
 
 
+def _later_same_state(db: DB, cand: dict, verdict, successive_of: str | None,
+                      rule_id: str | None) -> bool:
+    """True when an ordered-log candidate meets a prior of its own origin and its own rule (the same
+    event kind moving the same thing) that holds the same object of a single-valued predicate and
+    started strictly earlier. Another rule naming the same fact is a second source: it corroborates."""
+    if not (successive_of and rule_id and verdict.prior_edge_id and cand.get("valid_from")):
+        return False
+    prior = db.conn.execute("SELECT valid_from FROM edges WHERE edge_id=?",
+                            (verdict.prior_edge_id,)).fetchone()
+    pred = rec._pred_row(db, cand["predicate"])
+    if prior is None or (pred or {}).get("cardinality", "multi") != "single":
+        return False
+    if not (prior[0] or "") < cand["valid_from"]:
+        return False
+    return db.conn.execute(
+        "SELECT 1 FROM edge_origin WHERE edge_id=? AND origin=? AND rule_id=? AND status='live'",
+        (verdict.prior_edge_id, successive_of, rule_id)).fetchone() is not None
+
+
+def _prior_event_is_later(db: DB, verdict, successive_of: str | None, event_id: int | None) -> bool:
+    """True when the prior edge holds a live ordered-log claim made from a record event with a higher
+    id than this output's event (the record's own total order)."""
+    if not (successive_of and event_id is not None and verdict.prior_edge_id):
+        return False
+    row = db.conn.execute(
+        "SELECT MAX(source_event_id) FROM edge_origin WHERE edge_id=? AND origin=? AND status='live'",
+        (verdict.prior_edge_id, successive_of)).fetchone()
+    return row is not None and row[0] is not None and int(row[0]) > int(event_id)
+
+
 def encode_candidate(db: DB, writer: Writer, cand: dict, block_content_id_val: str,
-                     quarantined: bool = False, block_text: str | None = None) -> dict:
-    """Reconcile one candidate against the graph and place it. Returns an outcome record."""
+                     quarantined: bool = False, block_text: str | None = None,
+                     successive_of: str | None = None, rule_id: str | None = None,
+                     event_id: int | None = None) -> dict:
+    """Reconcile one candidate against the graph and place it. Returns an outcome record.
+
+    `successive_of` names an origin of ordered facts (`edge_origin.origin`, the record rules). A
+    later value of a single-valued predicate whose prior edge holds a live claim of that origin is
+    the next state of the same thing in an ordered log, not a source that disagrees: reconcile still
+    ends the prior's window at the candidate's valid time (a world change) or invalidates it (the
+    same instant), and links the two, but the successor is stored as `novel`, because every reader
+    of a live `contradicts` edge (the overturner query, lucid, health) takes it for an open
+    contention. A prior of any other origin keeps the `contradicts` verdict. `rule_id` names the rule
+    whose output this is: a later same-valued output of that rule is the next state, not a second source."""
     # Fork-A: NFC-normalize identity components at the write boundary before they enter edge_id.
     cand["subj_node"] = nfc(cand["subj_node"])
     cand["predicate"] = nfc(cand["predicate"])
@@ -141,6 +182,17 @@ def encode_candidate(db: DB, writer: Writer, cand: dict, block_content_id_val: s
         moved = writer.reanchor_edge(eid, cand["source_block_id"],
                                      cand.get("source_doc_id"), cand["source_quote"])
         action = "reanchored" if moved else "noop"
+    elif verdict.verdict == "matches" and _later_same_state(db, cand, verdict, successive_of, rule_id):
+        # A later move to the state the log already holds is the next state of the thing, not a
+        # second source for the old one: capture order must not decide the status history. Were it
+        # a corroboration, a move to another state captured afterwards (a session whose events land
+        # later) would end the old edge before this move and drop it from the graph.
+        row["reconcile_verdict"] = "novel"
+        writer.upsert_edge(row)
+        writer.supersede_edge(verdict.prior_edge_id, eid, world_change=True,
+                              world_at=cand.get("valid_from"))
+        action = "world-change"
+        verdict = rec.Verdict("novel", prior_edge_id=verdict.prior_edge_id)
     elif verdict.verdict == "matches":
         bumped = writer.bump_corroboration(verdict.prior_edge_id, cand["source_block_id"])
         action = "corroborated" if bumped else "noop"     # F9: no inflation on a repeat source
@@ -150,11 +202,25 @@ def encode_candidate(db: DB, writer: Writer, cand: dict, block_content_id_val: s
         row["supersedes_edge_id"] = verdict.prior_edge_id # lineage only; both stay active
         writer.upsert_edge(row)
     elif verdict.verdict == "contradicts":
+        if successive_of and verdict.prior_edge_id and db.conn.execute(
+                "SELECT 1 FROM edge_origin WHERE edge_id=? AND origin=? AND status='live'",
+                (verdict.prior_edge_id, successive_of)).fetchone():
+            row["reconcile_verdict"] = "novel"
         writer.upsert_edge(row)
-        if verdict.prior_edge_id and row.get("status") != "quarantined":
+        if (not verdict.world_change and _prior_event_is_later(db, verdict, successive_of, event_id)
+                and row.get("status") != "quarantined"):
+            # Two ordered-log facts at one instant: the record's order (event id) picks the survivor,
+            # not the order they reach the wiki (capture is per session, recovery too). The arriving
+            # fact came earlier in the record than the live prior, so it is the one corrected.
+            writer.supersede_edge(eid, verdict.prior_edge_id, world_change=False)
+            action = "correction"
+        elif verdict.prior_edge_id and row.get("status") != "quarantined":
             writer.supersede_edge(verdict.prior_edge_id, eid, world_change=verdict.world_change,
                                   world_at=cand.get("valid_from"))
-        action = "world-change" if verdict.world_change else "correction"
+            action = "world-change" if verdict.world_change else "correction"
+        else:
+            action = "world-change" if verdict.world_change else "correction"
 
     return {"edge_id": eid, "verdict": verdict.verdict, "action": action,
+            "prior_edge_id": verdict.prior_edge_id,
             "quarantined": row.get("status") == "quarantined"}

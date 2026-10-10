@@ -10,14 +10,17 @@ distribution under MIT. A file not listed here is part of Alpaca under `LICENSE`
 | files | what | upstream | license | license text |
 |---|---|---|---|---|
 | `alpaca/wiki/**` | the embedded wiki engine (bitemporal assertion-log memory store) | the Rune-2 template (no public URL recorded) | MIT, Copyright (c) 2026 Rune-2 template contributors | `alpaca/wiki/LICENSE` |
-| `alpaca/tests/wiki/**` | the wiki engine's tests, adapted to the vendored surface | the Rune-2 template suite | MIT (same notice) | `alpaca/wiki/LICENSE` |
+| `alpaca/tests/wiki/**` | the wiki engine's tests, adapted to the vendored surface | the Rune-2 template suite | MIT, Copyright (c) 2026 Rune-2 template contributors (the same notice) | `alpaca/wiki/LICENSE` |
 | `plugin/alpaca/skills/caveman/**` | the caveman writing skills (seven sub-skills and two helper scripts; `caveman-compress/scripts/check.py` is a local adaptation) | caveman by Julius Brussee | MIT, Copyright (c) 2026 Julius Brussee | `plugin/alpaca/skills/caveman/LICENSE` |
 | `plugin/alpaca/skills/humanizer/**` | the humanizer writing skill | humanizer by Siqi Chen | MIT, Copyright (c) 2025 Siqi Chen | `plugin/alpaca/skills/humanizer/LICENSE` |
 | `plugin/alpaca/skills/eli5/**` | the eli5 explanation skill | eli5 (upstream URL not recorded in the source) | MIT, Copyright (c) 2026 (no holder named in the upstream notice) | `plugin/alpaca/skills/eli5/LICENSE` |
 | `plugin/alpaca/skills/i-have-adhd/**`, `plugin/alpaca/hooks/adhd-always-on.sh` | the i-have-adhd skill and its always-on hook (flattened from `i-have-adhd/hooks/always-on.sh`) | i-have-adhd by Ayoub Ghriss | MIT, Copyright (c) 2026 Ayoub Ghriss | `plugin/alpaca/skills/i-have-adhd/LICENSE` |
+| `alpaca/wiki/ingest/resolve.py` (the name-alike guard: `_trigram_set`, `trigram_similarity`, `_tokens_match`, `_numbers_in`, `_tokens_are_compatible` and their constants, rewritten without the database resolver or spaCy) | adapted pure helpers of the Hindsight entity resolver (HS-EXT-07) | https://github.com/vectorize-io/hindsight, `hindsight-api-slim/hindsight_api/engine/entity_resolver.py` at commit `ccfe85b4851957ac2adf88b4a9ddf9668b2882f1` | MIT, Copyright (c) 2025 Vectorize AI, Inc. | the upstream `LICENSE` at that commit, kept word for word in this file under "License texts kept in this file" below |
 | `alpaca/web/vendor/plex-sans.woff2` | IBM Plex Sans Regular, version 3.005 (self-hosted web font) | https://github.com/IBM/plex | SIL Open Font License 1.1, Copyright 2018 IBM Corp. | `alpaca/web/vendor/OFL.txt` |
 | `alpaca/web/vendor/plex-sans-medium.woff2` | IBM Plex Sans Medium, version 3.005 (self-hosted web font) | https://github.com/IBM/plex | SIL Open Font License 1.1, Copyright 2018 IBM Corp. | `alpaca/web/vendor/OFL.txt` |
 | `alpaca/web/vendor/plex-mono.woff2` | IBM Plex Mono Regular, version 2.005 (self-hosted web font) | https://github.com/IBM/plex | SIL Open Font License 1.1, Copyright 2017 IBM Corp. | `alpaca/web/vendor/OFL.txt` |
+| `alpaca/web/vendor/thinking-orbs.js` | the thinking-orbs 0.3.2 engine behind `<alpaca-orb>` (TypeScript stripped, one ES module) | https://github.com/Jakubantalik/Libraries.dev, `packages/thinking-orbs` at commit `c1e1926abc633232589441cbec44a996af47bf04` | MIT, Copyright (c) 2026 Jakub Antalik | the header of `alpaca/web/vendor/thinking-orbs.js` |
+| `alpaca/web/beam.css` | the border beam glow, the `md` rotate variant ported from generated per-instance CSS to two plain classes | https://github.com/Jakubantalik/Libraries.dev, `packages/border-beam` at commit `9f59769a7f2adecff9aec4a53bd5d4d2817c11e2` | MIT, Copyright (c) 2026 Jakub Antalik | the header of `alpaca/web/beam.css` |
 | `alpaca/web/countries-110m.json` | coastline data for the sign-in globe (TopoJSON, 177 countries plus land) | `countries-110m.json` of the world-atlas npm package 2.0.2, https://github.com/topojson/world-atlas, built from Natural Earth 1:110m Admin 0 country boundaries 4.1.0, https://www.naturalearthdata.com | world-atlas: ISC, Copyright 2013-2019 Michael Bostock; the Natural Earth data: public domain | `alpaca/web/vendor/world-atlas-LICENSE.txt` |
 
 How the three font and one data entries were established: each font file's own name table
@@ -31,6 +34,40 @@ newline.
 
 `plugin/alpaca/BUNDLE-MANIFEST.json` records, for every bundled skill file, its upstream path, its
 sha256 over the bytes in this tree, and its license status.
+
+## License texts kept in this file
+
+A license whose text does not travel as a file beside the code it covers is kept here in full.
+
+### Hindsight entity resolver (MIT)
+
+The license of the code adapted into `alpaca/wiki/ingest/resolve.py` (see the table above): the
+`LICENSE` file of https://github.com/vectorize-io/hindsight at commit
+`ccfe85b4851957ac2adf88b4a9ddf9668b2882f1`, byte for byte.
+
+```text
+MIT License
+
+Copyright (c) 2025 Vectorize AI, Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
 
 ## Spec tools (vendored at pinned versions, `vendor/`)
 
@@ -164,6 +201,21 @@ contributed by the project owner and is part of Alpaca under `LICENSE` (MIT). It
 | `alpaca/web/vault-globe.js` | the globe: coastlines, graticule, starfield, satellites, moon and comet; it marks no place |
 
 The fonts and the coastline data these pages load are third-party files, listed in the table above.
+
+## Arthur, the hub avatar (the owner's artwork)
+
+Arthur, the alpaca drawn in the hub sidebar, is the project owner's own artwork, not a third-party
+work. It ships in every project and release and needs no license line of its own (the owner,
+2026-10-08); by the rule at the top of this file it is part of Alpaca under `LICENSE`. Its files:
+
+| files | what |
+|---|---|
+| `alpaca/web/vendor/arthur/**` | the avatar player (`arthur-core.js`, `arthur-geometry.js`, `arthur-avatar.js`, `arthur-avatar.css`), the gaze atlas, one strip per action and the action manifest, from the owner's Arthur web packages 1 and 2 |
+| `alpaca/web/arthur.js` | the hub code that places Arthur and chooses his pose |
+| `setup/vendor_arthur.py` | the maintainer tool that rebuilds `alpaca/web/vendor/arthur/` from the owner's package |
+
+`alpaca/web/vendor/README.md` records each package's version and sha256, which files are copied
+byte for byte and which are rebuilt from the package's own frames with their pixels unchanged.
 
 ## Dependencies installed at setup (not in this tree)
 

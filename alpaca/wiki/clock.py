@@ -29,3 +29,19 @@ class FixedClock:
 
 
 Clock = Callable[[], str]
+
+
+def to_clock_format(value) -> str | None:
+    """A source time (an ISO-8601 string with any offset, or `Z`) in the store clock's format:
+    UTC, whole seconds, `+00:00`. Valid time is compared as text against T and K, which are in that
+    format, so a record `ts` kept as written (`+07:00`, fractions, `Z`) would order wrongly. None
+    when the value is not a readable time: an unknown time stays null (architecture.md 5.1)."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        moment = datetime.fromisoformat(value.strip())
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(timezone.utc).replace(microsecond=0).isoformat()

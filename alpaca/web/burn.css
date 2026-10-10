@@ -1,0 +1,267 @@
+/* Token and cost board on the Sessions tab (burn.js). Tokens only (theme.css); the heat ramp
+   and the tinted limit band are mixed from --accent, --red and --surface, so both themes follow. */
+.burn-board { margin-bottom: var(--sp-6); min-width: 0; }
+.burn { display: flex; flex-direction: column; gap: var(--sp-5); min-width: 0; }
+.burn-top { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-4); flex-wrap: wrap; }
+.burn-top .eyebrow { display: block; font-size: var(--fs-xs); letter-spacing: .04em; color: var(--muted); font-weight: 500; }
+.burn-stand { margin: var(--sp-1) 0 0; max-width: 80ch; color: var(--muted); font-size: var(--fs-md); line-height: var(--lh-md); }
+.burn-stand b, .burn-head p b { color: var(--text); font-weight: 500; }
+.burn-tabs { margin: 0; border-bottom: 0; }
+.burn-tabs .tab { text-decoration: none; }
+
+.burn-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+.burn-tile, .burn-mini { background: var(--surface); padding: var(--sp-3) var(--sp-4) var(--sp-4); min-width: 0; }
+.burn-k { font-size: var(--fs-xs); line-height: var(--lh-xs); letter-spacing: .04em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+.burn-v { font-size: var(--fs-2xl); line-height: var(--lh-2xl); font-weight: 600; color: var(--text-strong); margin-top: var(--sp-1); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.burn-mini .burn-v { font-size: var(--fs-xl); line-height: var(--lh-xl); }
+.burn-n { font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
+
+.burn-card { padding: var(--sp-4) 0 var(--sp-2); }
+.burn-head { padding: 0 var(--sp-5) var(--sp-3); }
+.burn-head h2 { font-size: var(--fs-lg); line-height: var(--lh-lg); font-weight: 500; margin: 0; }
+.burn-head p { font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--muted); margin: var(--sp-1) 0 0; max-width: 90ch; }
+.burn-foot { font-size: var(--fs-xs); line-height: var(--lh-sm); color: var(--muted); padding: var(--sp-3) var(--sp-5) var(--sp-2); margin: 0; max-width: 100ch; }
+.burn-empty { font-size: var(--fs-xs); color: var(--muted); margin: var(--sp-2) 0; }
+.burn-title { display: block; font-size: var(--fs-xs); line-height: var(--lh-xs); font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.burn-meta { display: block; font-family: var(--font-mono); font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+
+/* Session lanes: a sticky label column beside a track that scrolls inside the card. */
+.burn-scroll { overflow-x: auto; padding-bottom: var(--sp-1); }
+.burn-plot { --lab: 270px; position: relative; width: calc(var(--lab) + var(--track)); min-width: calc(var(--lab) + var(--track)); }
+.burn-row { display: grid; grid-template-columns: var(--lab) var(--track); align-items: center; }
+.burn-lab { position: sticky; left: 0; z-index: 3; background: var(--surface); padding: 0 var(--sp-3) 0 var(--sp-5); border-right: 1px solid var(--line); min-width: 0; height: 100%; display: flex; flex-direction: column; justify-content: center; }
+.burn-track { position: relative; height: 36px; background-image: repeating-linear-gradient(to right, var(--line) 0 1px, transparent 1px calc(var(--cw) * 4)); }
+.burn-track.plain { background-image: none; height: 28px; }
+.burn-lane { cursor: pointer; }
+.burn-lane:hover .burn-lab, .burn-lane:hover { background: var(--surface-hover); }
+.burn-lane:focus { outline: none; }
+.burn-lane:focus-visible .burn-track { outline: 2px solid var(--focus); outline-offset: -2px; }
+.burn-idle { position: absolute; top: 16px; height: 5px; border-radius: 3px; background: var(--line-strong); }
+.burn-cell { position: absolute; top: 10px; height: 17px; width: calc(var(--cw) - 2px); border-radius: 2px; }
+.burn-mark { position: absolute; top: 1px; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 6px solid var(--amber); }
+.burn-mark.refusal { border-top-color: var(--red); }
+.burn-axisrow .burn-lab { border-right-color: var(--line); }
+.burn-axis { position: relative; height: 36px; }
+.burn-t { position: absolute; top: 2px; font-family: var(--font-mono); font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--muted); white-space: nowrap; transform: translateX(-50%); font-variant-numeric: tabular-nums; }
+.burn-t.start { transform: none; }
+.burn-t.end { transform: translateX(-100%); }
+.burn-day { position: absolute; top: 18px; font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--text); font-weight: 500; white-space: nowrap; }
+.burn-tick { position: absolute; bottom: 0; width: 1px; height: 4px; background: var(--control-border); }
+.burn-dayline { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--line-strong); }
+.burn-bandlayer { position: absolute; left: var(--lab); width: var(--track); top: 36px; bottom: 0; z-index: 0; pointer-events: none; }
+.burn-strip { position: relative; height: 20px; }
+.burn-bandcap { position: absolute; top: 1px; font-family: var(--font-mono); font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--red); white-space: nowrap; }
+.burn-band { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--red) 9%, transparent); border-left: 1px solid color-mix(in srgb, var(--red) 45%, transparent); border-right: 1px solid color-mix(in srgb, var(--red) 45%, transparent); }
+.burn-row .burn-track { z-index: 1; }
+.burn-group { display: block; margin-top: var(--sp-2); padding-top: var(--sp-2); border-top: 1px solid var(--line); }
+.burn-gtitle { position: sticky; left: 0; display: inline-block; padding: 0 var(--sp-5) var(--sp-1); font-size: var(--fs-xs); line-height: var(--lh-xs); letter-spacing: .04em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+.burn-bar { position: absolute; height: 16px; border-radius: var(--r-sm); display: flex; align-items: center; justify-content: center; font-size: var(--fs-xs); line-height: 16px; font-family: var(--font-mono); font-style: normal; font-weight: 500; color: var(--text-on-accent); overflow: hidden; cursor: default; }
+.burn-evlane { margin-top: var(--sp-1); border-top: 1px solid var(--line); }
+.burn-ev { position: absolute; bottom: 4px; width: max(4px, calc(var(--cw) - 2px)); border-radius: 2px 2px 0 0; background: var(--amber); }
+.burn-ev.refusal { background: var(--red); }
+
+.burn-legend { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-5); align-items: center; padding: var(--sp-3) var(--sp-5) var(--sp-1); border-top: 1px solid var(--line); margin-top: var(--sp-2); }
+.burn-lg { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--muted); }
+.burn-ramp { display: flex; align-items: center; gap: var(--sp-1); flex-wrap: wrap; }
+.burn-ramp i { width: 18px; height: 11px; border-radius: 2px; display: block; }
+.burn-ramp span { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--muted); margin-right: var(--sp-1); }
+.burn-sw { width: 11px; height: 11px; border-radius: 2px; flex: none; display: inline-block; }
+.burn-sw.refusal { background: var(--red); }
+.burn-sw.retry { background: var(--amber); }
+.burn-sw.band { background: color-mix(in srgb, var(--red) 12%, transparent); border: 1px solid color-mix(in srgb, var(--red) 45%, transparent); }
+
+/* How hard each session pushed, and what it cost. */
+.burn-push { padding: 0 var(--sp-5) var(--sp-1); }
+.burn-brow, .burn-bscale { display: grid; grid-template-columns: minmax(150px, 230px) minmax(0, 1fr) 84px minmax(0, 1fr) 96px; align-items: center; gap: var(--sp-3); }
+.burn-brow { padding: var(--sp-1) 0; border-radius: var(--r-sm); }
+.burn-brow:not(.burn-bhead):hover { background: var(--surface-hover); }
+.burn-bhead { font-size: var(--fs-xs); line-height: var(--lh-xs); letter-spacing: .04em; text-transform: uppercase; color: var(--muted); font-weight: 500; padding-bottom: var(--sp-2); border-bottom: 1px solid var(--line); margin-bottom: var(--sp-1); }
+.burn-bhead .r { text-align: right; }
+.burn-blab { min-width: 0; }
+.burn-btrack { position: relative; height: 16px; background-image: linear-gradient(to right, var(--line) 0 1px, transparent 1px); background-size: 25% 100%; }
+.burn-bbar { display: flex; gap: 2px; height: 16px; }
+.burn-bbar i { display: block; min-width: 2px; border-radius: 2px; cursor: default; }
+.burn-bval { font-family: var(--font-mono); font-size: var(--fs-xs); line-height: var(--lh-xs); text-align: right; font-weight: 500; font-variant-numeric: tabular-nums; }
+.burn-bval small { display: block; font-size: var(--fs-xs); font-weight: 400; color: var(--muted); }
+.burn-bscale { margin-top: var(--sp-1); }
+.burn-bticks { position: relative; height: 18px; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--muted); }
+.burn-bticks span { position: absolute; top: 2px; transform: translateX(-50%); white-space: nowrap; }
+.burn-bticks span:first-child { transform: none; }
+.burn-bticks span:last-child { transform: translateX(-100%); }
+
+/* Why it costs what it does: context sawtooth per session, then the subagents. */
+.burn-smgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--sp-4) var(--sp-5); padding: 0 var(--sp-5) var(--sp-1); }
+.burn-sm { min-width: 0; }
+.burn-sm svg { display: block; width: 100%; height: 64px; margin-top: var(--sp-1); }
+.burn-cap { font-family: var(--font-mono); font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--muted); margin-top: var(--sp-1); font-variant-numeric: tabular-nums; }
+.burn-base { stroke: var(--line-strong); stroke-width: 1; fill: none; }
+.burn-sline { stroke: var(--chart-input); stroke-width: 1.5; fill: none; stroke-linejoin: round; }
+.burn-sfill { fill: var(--chart-area); }
+.burn-subhead { padding: var(--sp-4) var(--sp-5) 0; margin-top: var(--sp-4); border-top: 1px solid var(--line); }
+.burn-subhead h3 { margin: 0; font-size: var(--fs-md); line-height: var(--lh-md); font-weight: 500; }
+.burn-subhead p { margin: var(--sp-1) 0 var(--sp-3); font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--muted); max-width: 90ch; }
+.burn-minis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1px; background: var(--line); border-block: 1px solid var(--line); margin-bottom: var(--sp-4); }
+.burn-panel { padding: 0 var(--sp-5); }
+.burn-panel h4 { margin: var(--sp-4) 0 0; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 500; }
+.burn-panel h4:first-child { margin-top: 0; }
+.burn-panel > p { margin: 2px 0 var(--sp-2); font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--muted); max-width: 90ch; }
+.burn-chart { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: var(--sp-2); cursor: crosshair; }
+.burn-ylab { position: relative; height: 200px; }
+.burn-chart.short .burn-ylab { height: 110px; }
+.burn-ylab span { position: absolute; right: 0; transform: translateY(-50%); font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--muted); white-space: nowrap; }
+.burn-plotarea { min-width: 0; }
+.burn-plotarea svg { display: block; width: 100%; height: 200px; overflow: visible; }
+.burn-chart.short svg { height: 110px; }
+.burn-xlab { position: relative; height: 20px; }
+.burn-xlab span { position: absolute; top: 3px; transform: translateX(-50%); font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--muted); }
+.burn-xlab span:first-child { transform: none; }
+.burn-xlab span:last-child { transform: translateX(-100%); }
+.burn-gl { stroke: var(--line); stroke-width: 1; fill: none; }
+.burn-ln { stroke: var(--chart-input); stroke-width: 2; fill: none; stroke-linejoin: round; }
+.burn-bnd { fill: var(--chart-input); opacity: .16; }
+.burn-cb { fill: var(--chart-input); }
+.burn-caps { display: flex; flex-direction: column; gap: var(--sp-1); }
+.burn-caprow { display: grid; grid-template-columns: 130px minmax(0, 1fr) minmax(200px, 330px); gap: var(--sp-3); align-items: center; font-size: var(--fs-xs); line-height: var(--lh-xs); }
+.burn-ck { font-family: var(--font-mono); color: var(--muted); white-space: nowrap; }
+.burn-caprow.total .burn-ck, .burn-caprow.total .burn-cv { color: var(--text); font-weight: 500; }
+.burn-captrack { display: block; min-width: 0; }
+.burn-capbar { display: flex; gap: 2px; height: 11px; min-width: 2px; }
+.burn-capbar i { display: block; min-width: 2px; border-radius: 2px; }
+.burn-cv { text-align: right; font-family: var(--font-mono); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.burn-split { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: var(--sp-3) var(--sp-6); padding: var(--sp-4) var(--sp-5) var(--sp-1); margin-top: var(--sp-4); border-top: 1px solid var(--line); }
+.burn-split div { font-size: var(--fs-xs); line-height: var(--lh-sm); color: var(--muted); }
+.burn-split b { color: var(--text); font-weight: 500; }
+.burn-h { display: block; font-size: var(--fs-xs); letter-spacing: .04em; text-transform: uppercase; color: var(--muted); font-weight: 500; margin-bottom: 2px; }
+
+/* The same numbers as a table, with a breakdown per session. */
+.burn-table { min-width: 980px; font-variant-numeric: tabular-nums; }
+.burn-table th, .burn-table td { font-size: var(--fs-xs); padding: var(--sp-2) var(--sp-3); white-space: nowrap; text-align: left; vertical-align: top; }
+.burn-table th:first-child, .burn-table td:first-child { padding-left: var(--sp-5); }
+.burn-table td.num, .burn-table th:nth-child(n+4) { text-align: right; }
+.burn-table td.num { font-family: var(--font-mono); }
+.burn-table tr.peak td { font-weight: 500; }
+.burn-table tr.burn-rest td { color: var(--muted); }
+.burn-desc { white-space: normal !important; min-width: 200px; max-width: 300px; color: var(--muted); }
+.burn-sid small { display: block; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--muted); font-weight: 400; }
+.burn-exp { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; display: flex; gap: var(--sp-2); align-items: flex-start; max-width: 300px; white-space: normal; }
+.burn-car { flex: none; width: 0; height: 0; margin-top: 4px; border-top: 4px solid transparent; border-bottom: 4px solid transparent; border-left: 6px solid var(--muted); transition: transform var(--ease); }
+.burn-exp[aria-expanded="true"] .burn-car { transform: rotate(90deg); }
+.burn-paid span { display: inline-flex; align-items: center; gap: var(--sp-1); margin-left: var(--sp-2); }
+.burn-paid i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+tr.burn-det > td { padding: 0 var(--sp-5) var(--sp-4) !important; background: var(--surface-muted); white-space: normal !important; text-align: left !important; }
+.burn-dgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--sp-4) var(--sp-6); padding-top: var(--sp-3); }
+.burn-dblock h4 { margin: 0 0 var(--sp-2); font-size: var(--fs-xs); letter-spacing: .04em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+.burn-drow { display: grid; grid-template-columns: minmax(0, 1fr) 70px 80px; gap: var(--sp-2); align-items: center; font-size: var(--fs-xs); line-height: var(--lh-xs); padding: 2px 0; }
+.burn-dk { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.burn-dk i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; margin-right: var(--sp-1); }
+.burn-dbar { height: 8px; border-radius: 2px; background: var(--chart-input); min-width: 2px; }
+.burn-dbar.zero { background: var(--line-strong); }
+.burn-dv { text-align: right; font-family: var(--font-mono); color: var(--muted); }
+.burn-dnote { font-size: var(--fs-xs); line-height: var(--lh-sm); color: var(--muted); padding-top: var(--sp-2); margin-top: var(--sp-3); border-top: 1px solid var(--line); }
+.burn-dnote b { color: var(--text); font-weight: 500; font-family: var(--font-mono); }
+
+/* Workflow fan-out: compact lanes on the timing chart, and the full run in a session breakdown.
+   One bar per agent, colored by model (--fam); a failed agent is red, an agent still open when
+   its run ended is hatched amber, a retried agent (attempt 2+) carries a notch on its left edge. */
+.burn-flane { cursor: pointer; }
+.burn-flane .burn-track { min-height: 36px; }
+.burn-flane:hover, .burn-flane:hover .burn-lab { background: var(--surface-hover); }
+.burn-flane:focus { outline: none; }
+.burn-flane:focus-visible .burn-track { outline: 2px solid var(--focus); outline-offset: -2px; }
+.burn-fphase { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.burn-fphase.odd { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.burn-agent { position: absolute; display: block; height: 10px; min-width: 2px; border-radius: 2px; background: var(--fam, var(--chart-input)); box-shadow: inset -1px 0 0 var(--surface); }
+.burn-agent.thin { height: 3px; border-radius: 1px; }
+.burn-agent.failed { background: var(--red); }
+.burn-agent.unfinished { background: repeating-linear-gradient(135deg, var(--amber) 0 3px, color-mix(in srgb, var(--amber) 35%, var(--surface)) 3px 6px); }
+.burn-agent.running { background: color-mix(in srgb, var(--fam, var(--chart-input)) 55%, var(--surface)); }
+.burn-agent.retry { box-shadow: inset 3px 0 0 var(--text-strong), inset -1px 0 0 var(--surface); }
+.burn-agent.thin.retry { box-shadow: none; }
+a.burn-agent:hover, a.burn-agent:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; z-index: 2; }
+.burn-queue { position: absolute; display: block; height: 2px; background: var(--control-border); border-radius: 1px; }
+.burn-sw.failed { background: var(--red); }
+.burn-sw.unfinished { background: repeating-linear-gradient(135deg, var(--amber) 0 3px, color-mix(in srgb, var(--amber) 35%, var(--surface)) 3px 6px); }
+.burn-sw.retry-mark { background: var(--chart-input); box-shadow: inset 3px 0 0 var(--text-strong); }
+.burn-run { margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--line); }
+.burn-runhead h4 { margin: 0; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 500; display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
+.burn-runhead p { margin: 2px 0 var(--sp-2); font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--muted); font-family: var(--font-mono); overflow-wrap: anywhere; }
+.burn-figs { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; margin-bottom: var(--sp-3); }
+.burn-fig { background: var(--surface); padding: var(--sp-2) var(--sp-3); min-width: 0; }
+.burn-fv { font-size: var(--fs-lg); line-height: var(--lh-lg); font-weight: 600; font-variant-numeric: tabular-nums; }
+.burn-runplot { position: relative; padding-top: 20px; }
+.burn-phases { position: absolute; left: 0; right: 0; top: 0; bottom: 20px; }
+.burn-phase { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--accent) 6%, transparent); border-left: 1px solid var(--line-strong); }
+.burn-phase.odd { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.burn-phase span { position: absolute; top: 2px; left: var(--sp-1); right: var(--sp-1); font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.burn-agents { position: relative; z-index: 1; }
+.burn-runaxis { position: relative; height: 20px; border-top: 1px solid var(--line); }
+.burn-runaxis span { position: absolute; top: 3px; transform: translateX(-50%); font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--muted); white-space: nowrap; }
+.burn-runaxis span:first-child { transform: none; }
+.burn-runaxis span:last-child { transform: translateX(-100%); }
+
+/* Off-track signals. */
+.burn-cell.runaway { outline: 2px solid var(--red); outline-offset: 1px; z-index: 2; }
+.burn-sw.runaway { background: transparent; outline: 2px solid var(--red); outline-offset: -2px; }
+.burn-flag { display: inline-block; color: var(--amber); background: var(--amber-bg); border-radius: var(--r-sm); padding: 0 var(--sp-1); font-weight: 500; }
+.burn-signals td small { display: block; color: var(--muted); font-family: var(--font-sans); }
+.burn-signals td { vertical-align: top; }
+.burn-rules { padding: var(--sp-3) var(--sp-5) 0; font-size: var(--fs-xs); color: var(--muted); }
+.burn-rules summary { cursor: pointer; color: var(--text); }
+.burn-rules pre { white-space: pre-wrap; font-family: var(--font-mono); font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--muted); background: var(--surface-muted); border-radius: var(--r-sm); padding: var(--sp-3); overflow-wrap: anywhere; max-width: 110ch; }
+.burn-ops { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: var(--sp-4) var(--sp-6); padding: 0 var(--sp-5) var(--sp-2); }
+.burn-op { min-width: 0; }
+.burn-op h4 { margin: 0 0 var(--sp-2); font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 500; }
+.burn-op h4 span { display: block; font-size: var(--fs-xs); color: var(--muted); font-weight: 400; }
+.burn-op details { margin-top: var(--sp-2); font-size: var(--fs-xs); }
+.burn-op summary { cursor: pointer; color: var(--accent); }
+.burn-trow, .burn-crow, .burn-hrow { grid-template-columns: minmax(0, 1fr) 70px 100px; }
+.burn-crow { grid-template-columns: minmax(0, 1fr) 170px 150px; }
+.burn-hrow { grid-template-columns: 110px minmax(0, 1fr) 320px; }
+.burn-hrow .burn-dv { white-space: nowrap; }
+.burn-runhead p.prose { font-family: var(--font-sans); }
+.burn-trow .burn-dk { white-space: normal; }
+.burn-shared { padding: 0 var(--sp-5) var(--sp-2); }
+.burn-sigrid { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+.burn-sig { font-size: var(--fs-xs); line-height: var(--lh-xs); padding: 2px 0 var(--sp-2); color: var(--muted); }
+.burn-sig b { color: var(--text); font-weight: 500; }
+.burn-sig code, .burn-drow code { display: block; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text); overflow-wrap: anywhere; white-space: normal; }
+.burn-drow code { display: inline; }
+.burn-ref { font-family: var(--font-mono); }
+.burn-dblock .burn-n { margin-top: var(--sp-1); }
+
+#burn-tip { position: fixed; z-index: 60; pointer-events: none; opacity: 0; transition: opacity 90ms ease; background: var(--surface-raised); color: var(--text); border: 1px solid var(--line-strong); border-radius: var(--r-md); padding: var(--sp-2) var(--sp-3); font-size: var(--fs-xs); line-height: var(--lh-xs); max-width: 280px; box-shadow: var(--shadow-sm); }
+#burn-tip.on { opacity: 1; }
+#burn-tip .tt { display: block; font-family: var(--font-mono); color: var(--muted); margin-bottom: 2px; }
+#burn-tip .tv { display: block; font-weight: 600; }
+#burn-tip .tn { display: block; color: var(--muted); margin-top: 2px; }
+
+@media (prefers-reduced-motion: reduce) { .burn-car, #burn-tip { transition: none; } }
+@media (max-width: 900px) {
+  /* The table scrolls sideways inside its card; a session's breakdown stays in view beside it. */
+  .burn-detwrap { position: sticky; left: var(--sp-3); max-width: calc(100vw - 64px); }
+  .burn-brow, .burn-bscale { grid-template-columns: minmax(0, 1fr) 84px; gap: var(--sp-2); }
+  .burn-brow .burn-blab { grid-column: 1 / -1; }
+  .burn-bhead > div:first-child, .burn-bscale > div:first-child { display: none; }
+  .burn-caprow { grid-template-columns: 110px minmax(0, 1fr); }
+  .burn-caprow .burn-cv { grid-column: 1 / -1; text-align: left; }
+}
+@media (max-width: 600px) {
+  .burn-plot { --lab: 132px; }
+  .burn-lab { padding-left: var(--sp-3); }
+  .burn-head, .burn-push, .burn-smgrid, .burn-panel, .burn-subhead, .burn-foot, .burn-legend, .burn-split { padding-left: var(--sp-3); padding-right: var(--sp-3); }
+  .burn-gtitle { padding-left: var(--sp-3); }
+  .burn-table th:first-child, .burn-table td:first-child { padding-left: var(--sp-3); }
+  .burn-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .burn-tile:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .burn-cv { white-space: normal; }
+  .burn-v { font-size: var(--fs-xl); line-height: var(--lh-xl); }
+  .burn-chart { grid-template-columns: 44px minmax(0, 1fr); }
+  .burn-drow { grid-template-columns: minmax(0, 1fr) 50px 70px; }
+  .burn-figs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .burn-ops, .burn-shared { padding-left: var(--sp-3); padding-right: var(--sp-3); }
+  .burn-ops, .burn-sigrid { grid-template-columns: minmax(0, 1fr); }
+  .burn-crow, .burn-hrow { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .burn-hrow .burn-dbar { display: none; }
+  .burn-crow .burn-dv, .burn-hrow .burn-dv { text-align: left; }
+  .burn-runaxis span:nth-child(2), .burn-runaxis span:nth-child(4) { display: none; }
+}

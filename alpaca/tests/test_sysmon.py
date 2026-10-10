@@ -106,3 +106,35 @@ def test_non_linux_host_reports_error(monkeypatch):
     monkeypatch.setattr(sys, "platform", "darwin")
     s = sysmon.snapshot(".")
     assert s["error"] == "host monitor needs Linux /proc" and s["ts"]
+
+
+@linux
+def test_disks_report_inodes_and_a_tmpfs_quota_when_the_kernel_gives_one(tmp_path):
+    rows = sysmon._disks(str(tmp_path))
+    assert rows
+    for row in rows:
+        assert row["inodes_total"] >= row["inodes_used"] >= 0
+        if row["inodes_total"]:
+            assert 0 <= row["inodes_pct"] <= 100
+        quota = row["quota"]
+        assert quota is None or (quota["used_b"] >= 0 and quota["inodes_used"] >= 0)
+        if row["fs"] != "tmpfs":
+            assert quota is None
+
+
+def test_user_quota_is_none_for_a_path_that_cannot_be_opened():
+    assert sysmon.user_quota("/nonexistent/path/for/quota") is None
+
+
+def test_net_status_reports_ms_per_target_and_an_overall_state(monkeypatch):
+    answers = {"a": 12.5, "b": None}
+    monkeypatch.setattr(sysmon, "connect_ms", lambda host, port, timeout=2.0: answers[host])
+    out = sysmon.net_status((("a", 443, "A"), ("b", 443, "B")))
+    assert out["status"] == "degraded" and out["ms"] == 12.5 and out["method"] == "tcp-connect"
+    assert [t["ms"] for t in out["targets"]] == [12.5, None]
+    answers["a"] = None
+    assert sysmon.net_status((("a", 443, "A"), ("b", 443, "B")))["status"] == "offline"
+
+
+def test_connect_ms_is_none_for_a_closed_port():
+    assert sysmon.connect_ms("127.0.0.1", 9, timeout=0.5) is None

@@ -124,6 +124,30 @@ def test_regression_row_is_reentrancy_guarded(tmp_path):
         _restore_env(guarded)
 
 
+@pytest.mark.parametrize("outcome", ["returns", "raises"])
+def test_the_wiki_oracle_row_leaves_the_import_path_as_it_found_it(tmp_path, outcome):
+    """The oracle row loads `tests/wiki/mutation_oracle.py` into this process, and that file puts its
+    tree first on `sys.path` at import. Left there, it redirected every later Python child of the
+    process to that tree's `alpaca` (the m4 fresh copy in the landing full suite:
+    .alpaca/proofs/op-008/t-070.logs/land/red-m4-then-new37.log), so the row restores the path
+    whether the oracle returns or raises."""
+    import sys
+    from alpaca.gates import regression_suite
+    root = tmp_path / "tree"
+    (root / "tests" / "wiki").mkdir(parents=True)
+    stray = str(tmp_path / "stray-root")
+    body = "import sys\nsys.path.insert(0, %r)\nsys.path.append(%r)\n" % (stray, stray + "-tail")
+    if outcome == "returns":
+        body += "def run():\n    return {'total': 1, 'flipped': 1, 'hollow': 0, 'malformed': 0}\n"
+    else:
+        body += "def run():\n    raise RuntimeError('oracle broke')\n"
+    (root / "tests" / "wiki" / "mutation_oracle.py").write_text(body)
+    before = list(sys.path)
+    code, summary = regression_suite.run_wiki_mutation_oracle(str(root))
+    assert sys.path == before, [p for p in sys.path if p not in before]
+    assert code == (vc.PASS if outcome == "returns" else vc.BLOCKED), summary
+
+
 def test_empty_population_folds_to_blocked(tmp_path):
     """A tree with no instrument at all: a preflight over nothing is BLOCKED, never a vacuous PASS."""
     root = str(tmp_path / "bare")

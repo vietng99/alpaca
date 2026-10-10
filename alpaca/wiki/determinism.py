@@ -57,6 +57,10 @@ def sha256_hex(data: bytes | str) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+_SPACES = re.compile(r"[ \t]+")
+_BLANK_LINES = re.compile(r"\n{2,}")
+
+
 def normalize_text(text: str) -> str:
     """Content normalization for the block-content anchor: NFC, collapse whitespace, strip.
 
@@ -65,8 +69,14 @@ def normalize_text(text: str) -> str:
     """
     t = unicodedata.normalize("NFC", text)
     t = t.replace("\r\n", "\n").replace("\r", "\n")
-    t = re.sub(r"[ \t]+", " ", t)
-    t = re.sub(r"\n{2,}", "\n", t)
+    # Each substitution runs only where it can change the text (t-453): `[ \t]+` -> " " leaves a
+    # text with no tab and no two adjacent spaces as it is, and `\n{2,}` needs two adjacent
+    # newlines. The echo index normalizes every active block in each collector process, and the
+    # space substitution matched every single space of them.
+    if "\t" in t or "  " in t:
+        t = _SPACES.sub(" ", t)
+    if "\n\n" in t:
+        t = _BLANK_LINES.sub("\n", t)
     return t.strip()
 
 

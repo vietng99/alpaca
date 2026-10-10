@@ -82,5 +82,19 @@ for line in Path('requirements.txt').read_text(encoding='utf-8').splitlines():
 print('Alpaca bootstrap: Python and pinned dependencies ready in .venv')
 PY
 
-.venv/bin/python -m alpaca --help >/dev/null
+# alpaca-root.pth (t-428): earlier bootstraps wrote the install root into the venv's site-packages,
+# which put the whole root on the import path of every interpreter of the venv. bin/alpaca-python now
+# starts the package by its location (python -I alpaca/boot.py), so no .pth is written, and a legacy
+# one is removed; --check reports it and writes nothing.
+ALPACA_BOOT_SITE="$(.venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
+ALPACA_BOOT_PTH="$ALPACA_BOOT_SITE/alpaca-root.pth"
+if [ -f "$ALPACA_BOOT_PTH" ]; then
+  if [ "$ALPACA_BOOT_CHECK" -eq 0 ]; then
+    rm -f -- "$ALPACA_BOOT_PTH"
+  else
+    printf '%s\n' 'a legacy alpaca-root.pth puts the install root on the import path: bash setup/bootstrap.sh removes it' >&2
+  fi
+fi
+
+"$ALPACA_BOOT_ROOT/bin/alpaca-python" --isolated -m alpaca --help >/dev/null
 printf '%s\n' 'Ready: bin/alpaca --help'

@@ -20,7 +20,7 @@ def test_done_task_shows_title_report_and_completion(project):
     cli.main(["init"])
     cli.main(["op", "new", "x"])
     assert cli.main(["task", "add", "op-001", "B.0 cva6 first physical run: route DRC 0, KLayout DRC 0",
-                     "--title", "cva6 first GDS"]) == 0
+                     "--title", "cva6 first GDS", "--phase", "build"]) == 0
     before = next(t for t in hub.overview(project)["tasks"] if t["id"] == "t-001")
     assert before["status"] == "open" and before["report"] is None
     pointer = proofkit.seal_for(project, "t-001")

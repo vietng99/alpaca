@@ -2,6 +2,15 @@
 # Use this installation's virtual environment from any working directory.
 set -euo pipefail
 ALPACA_INSTALL_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+# `--isolated` as the first argument starts the venv interpreter as `python -I alpaca/boot.py`: -I
+# keeps the working folder, the script folder and PYTHONPATH off sys.path, so a module an agent plants
+# there never runs in an engine process (design/research-engine/in-session-runtime.md section 12.5,
+# mechanism 1), and the boot loads this tree's `alpaca` by its location, with no folder of this tree on
+# the path (t-428). With no venv it runs as it always did, and `alpaca research start` then refuses a
+# session run (RUN-ISOLATION-MISSING). `-I -m <module>`, the form the generated units use, starts the
+# module through the boot too, with the venv interpreter or else python3.
+ALPACA_ISOLATED=0
+if [ "${1:-}" = "--isolated" ]; then ALPACA_ISOLATED=1; shift; fi
 unset ALPACA_ROOT
 # The folder this was called from: a verb that takes a relative path on the command line
 # (alpaca runbook check) reads it from there, not from the install root.
@@ -33,7 +42,17 @@ if [ -f "$ALPACA_SQLITE_DIR/enabled" ]; then
   fi
   export LD_LIBRARY_PATH="$ALPACA_SQLITE_LIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 fi
-if [ -x "$ALPACA_INSTALL_ROOT/.venv/bin/python" ]; then
-  exec "$ALPACA_INSTALL_ROOT/.venv/bin/python" "$@"
+ALPACA_PY=python3
+if [ -x "$ALPACA_INSTALL_ROOT/.venv/bin/python" ]; then ALPACA_PY="$ALPACA_INSTALL_ROOT/.venv/bin/python"; fi
+# The boot (t-428): `alpaca` comes from this tree by its location, never from a search of sys.path,
+# so neither a linked worktree's shared venv nor an alpaca-named distribution in site-packages decides
+# which `alpaca` runs, and no folder of this tree is on the path.
+ALPACA_BOOT="$ALPACA_INSTALL_ROOT/alpaca/boot.py"
+if [ "$ALPACA_ISOLATED" = 1 ] && [ "$ALPACA_PY" != python3 ]; then
+  exec "$ALPACA_PY" -I "$ALPACA_BOOT" "$@"
 fi
-exec python3 "$@"
+if [ "${1:-}" = -I ] && [ "${2:-}" = -m ]; then
+  shift
+  exec "$ALPACA_PY" -I "$ALPACA_BOOT" "$@"
+fi
+exec "$ALPACA_PY" "$@"

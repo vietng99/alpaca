@@ -64,11 +64,164 @@ class Prior(dict):
         return (Prior, (dict(self),))
 
 
+class SupportFlag:
+    """The answer to a question put to a SupportCount (a comparison): true or false in an `if` or an
+    `assert`, but still a count's answer, so gate() refuses it as an oracle. Combining two flags
+    with `&`, `|`, `^` or `~`, or comparing a flag, gives a flag again."""
+
+    __slots__ = ("_value",)
+
+    def __init__(self, value):
+        object.__setattr__(self, "_value", bool(value))
+
+    def __setattr__(self, name, value):
+        raise AttributeError("a SupportFlag does not change")
+
+    def __bool__(self):
+        return self._value
+
+    def __repr__(self):
+        return f"<SupportFlag {self._value} - a count compared, never a verdict>"
+
+    def __hash__(self):
+        return hash(self._value)
+
+    def __eq__(self, other):
+        return SupportFlag(self._value == bool(other))
+
+    def __ne__(self, other):
+        return SupportFlag(self._value != bool(other))
+
+    def __and__(self, other):
+        return SupportFlag(self._value and bool(other))
+
+    __rand__ = __and__
+
+    def __or__(self, other):
+        return SupportFlag(self._value or bool(other))
+
+    __ror__ = __or__
+
+    def __xor__(self, other):
+        return SupportFlag(self._value != bool(other))
+
+    __rxor__ = __xor__
+
+    def __invert__(self):
+        return SupportFlag(not self._value)
+
+
+class SupportCount(int):
+    """A number of supporting memories: the count of a PriorSet. It is an int for display, logging and
+    arithmetic, and it stays a count through them: a sum, a difference, a product, a quotient, a
+    comparison (a SupportFlag) of a SupportCount is still tainted, and gate() refuses it, as an
+    oracle or as what a callable oracle returns. A support count is never a test verdict (FR-16).
+
+    NOT enforced (stated plainly): `int(n)`, `bool(n)` and a number worked out from somewhere else
+    (a `len()` of a list, a column of a row) are plain numbers; a caller who deliberately takes one
+    from the count gets past this, as with a PriorSet."""
+
+    __slots__ = ()
+
+    def __repr__(self):
+        return f"SupportCount({int.__repr__(self)})"
+
+    __str__ = int.__repr__                 # printed and formatted, it reads as the number
+
+    __hash__ = int.__hash__
+
+    def _flag(op):
+        def compare(self, other):
+            out = op(int(self), other)
+            return out if out is NotImplemented else SupportFlag(out)
+        return compare
+
+    __eq__ = _flag(int.__eq__)
+    __ne__ = _flag(int.__ne__)
+    __lt__ = _flag(int.__lt__)
+    __le__ = _flag(int.__le__)
+    __gt__ = _flag(int.__gt__)
+    __ge__ = _flag(int.__ge__)
+
+    def _same(op):
+        def arithmetic(self, *other):
+            out = op(int(self), *other)
+            if isinstance(out, int):
+                return SupportCount(out)
+            return SupportRatio(out) if isinstance(out, float) else out
+        return arithmetic
+
+    __add__ = __radd__ = _same(int.__add__)
+    __sub__ = _same(int.__sub__)
+    __rsub__ = _same(int.__rsub__)
+    __mul__ = __rmul__ = _same(int.__mul__)
+    __floordiv__ = _same(int.__floordiv__)
+    __rfloordiv__ = _same(int.__rfloordiv__)
+    __mod__ = _same(int.__mod__)
+    __rmod__ = _same(int.__rmod__)
+    __pow__ = _same(int.__pow__)
+    __rpow__ = _same(int.__rpow__)
+    __neg__ = _same(int.__neg__)
+    __pos__ = _same(int.__pos__)
+    __abs__ = _same(int.__abs__)
+    __and__ = __rand__ = _same(int.__and__)
+    __or__ = __ror__ = _same(int.__or__)
+    __xor__ = __rxor__ = _same(int.__xor__)
+    __lshift__ = _same(int.__lshift__)
+    __rshift__ = _same(int.__rshift__)
+    __truediv__ = _same(int.__truediv__)
+    __rtruediv__ = _same(int.__rtruediv__)
+    del _flag, _same
+
+
+class SupportRatio(float):
+    """What a SupportCount divides into: a float that stays a count's, as SupportCount does."""
+
+    __slots__ = ()
+
+    def __repr__(self):
+        return f"SupportRatio({float.__repr__(self)})"
+
+    __str__ = float.__repr__
+
+    __hash__ = float.__hash__
+
+    def _flag(op):
+        def compare(self, other):
+            out = op(float(self), other)
+            return out if out is NotImplemented else SupportFlag(out)
+        return compare
+
+    __eq__ = _flag(float.__eq__)
+    __ne__ = _flag(float.__ne__)
+    __lt__ = _flag(float.__lt__)
+    __le__ = _flag(float.__le__)
+    __gt__ = _flag(float.__gt__)
+    __ge__ = _flag(float.__ge__)
+
+    def _same(op):
+        def arithmetic(self, *other):
+            out = op(float(self), *other)
+            return out if out is NotImplemented else SupportRatio(out)
+        return arithmetic
+
+    __add__ = __radd__ = _same(float.__add__)
+    __sub__ = _same(float.__sub__)
+    __rsub__ = _same(float.__rsub__)
+    __mul__ = __rmul__ = _same(float.__mul__)
+    __truediv__ = _same(float.__truediv__)
+    __rtruediv__ = _same(float.__rtruediv__)
+    __neg__ = _same(float.__neg__)
+    __abs__ = _same(float.__abs__)
+    del _flag, _same
+
+
 class PriorSet:
     """Return type of query(). A prior to weigh - never a verdict, never an oracle.
 
     Enforced: __bool__ raises, __len__ raises (use .count()), elements are Prior (also raise on
-    __bool__). gate() deep-inspects both the oracle and, if callable, its return value for taint.
+    __bool__), and .count() is a SupportCount whose comparisons and arithmetic stay tainted.
+    gate() deep-inspects both the oracle and, if callable, its return value for taint.
     NOT enforced (stated plainly): a caller who deliberately launders will get past this. The
     guarantee is against accident and casual reach-through, not against intent."""
 
@@ -82,7 +235,7 @@ class PriorSet:
         return list(self._hits)          # tainted elements, deliberately
 
     def count(self):
-        return len(self._hits)
+        return SupportCount(len(self._hits))
 
     def __iter__(self):
         return iter(self._hits)
@@ -106,7 +259,7 @@ def _tainted(obj, _depth=0):
     cap, and refuses bare iterators outright (unknowable without consuming)."""
     if _depth > 6:
         return True
-    if isinstance(obj, (PriorSet, Prior)):
+    if isinstance(obj, (PriorSet, Prior, SupportCount, SupportRatio, SupportFlag)):
         return True
     if isinstance(obj, (list, tuple, set, frozenset)):
         return any(_tainted(o, _depth + 1) for o in obj)
@@ -336,6 +489,14 @@ class KnowledgeStore:
         """
         cid = _sanitize_component(claim_id or _mint_id(claim, scope), "claim-id")
         scope = _sanitize_component(scope, "scope")
+        if claim_id and self.conn.execute("SELECT 1 FROM knowledge_facts WHERE scope=? AND claim_id=?",
+                                          (scope, cid)).fetchone():
+            # a caller-derived id (Rune2 derives it from the candidate id, OB-06) never takes the
+            # upsert path of `_record`: it would overwrite another candidate's prior
+            e = RejectedWrite(f"claim id {cid!r} is already used in scope {scope!r}; a proposal "
+                              "never overwrites a retained prior", control="NC-id-collision")
+            self._log("reject", cid, scope, f"[{e.control}] {e.reason}")
+            raise e
         try:
             stamp, notes = self._admit_gate(claim, scope, provenance, falsifiability, probe_receipt)
         except RejectedWrite as e:
@@ -475,13 +636,43 @@ class KnowledgeStore:
 
     # -- retention decay -------------------------------------------------
 
-    def decay(self, scope, claim_id):
-        """Retention decay: mark an unreaffirmed claim DECAYED so it drops out of the read path
-        without being deleted (retire-not-delete)."""
+    def decay(self, scope, claim_id, reason="unreaffirmed"):
+        """Retention decay: mark a claim DECAYED so it drops out of the read path without being
+        deleted (retire-not-delete). `reason` is logged: `unreaffirmed` for retention, and
+        `candidate-withdrawn` when the observation that admitted it was withdrawn (architecture.md 7.6)."""
         self.conn.execute(
             "UPDATE knowledge_facts SET decay_state='DECAYED' WHERE scope=? AND claim_id=?",
             (scope, claim_id))
-        self._log("decay", claim_id, scope, "unreaffirmed -> DECAYED")
+        self._log("decay", claim_id, scope, f"{reason} -> DECAYED")
+
+    def replay_admitted(self, row):
+        """Write the prior that an earlier admission recorded (a rebuild from the record,
+        architecture.md 10.2), as it was stamped then, without the gate that admitted it. `row` holds
+        claim_id, scope, claim, stamp and blind_class (and source, provenance, falsifiability and
+        trust_ceiling when recorded). An existing prior is never overwritten: the same row again
+        writes nothing, another claim under the same id is refused with RejectedWrite. Returns True
+        iff a row was written."""
+        for key in ("claim_id", "scope", "claim", "stamp", "blind_class"):
+            if not row.get(key):
+                raise RejectedWrite(f"a recorded prior names its {key}", control="NC-replay")
+        have = self.conn.execute(
+            "SELECT claim, stamp, blind_class FROM knowledge_facts WHERE scope=? AND claim_id=?",
+            (row["scope"], row["claim_id"])).fetchone()
+        if have is not None:
+            if have[0] == _flatten(row["claim"]):
+                return False
+            raise RejectedWrite(
+                f"replay would overwrite {row['claim_id']!r} in scope {row['scope']!r} with another claim",
+                control="NC-replay")
+        self.conn.execute(
+            "INSERT INTO knowledge_facts(claim_id,scope,claim,source,provenance,stamp,blind_class,"
+            "falsifiability,trust_ceiling,decay_state,created_at,reaffirmed_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,'LIVE',?,?)",
+            (row["claim_id"], row["scope"], _flatten(row["claim"]), _flatten(row.get("source") or ""),
+             _flatten(row.get("provenance") or ""), row["stamp"], row["blind_class"],
+             _flatten(row.get("falsifiability") or ""), row.get("trust_ceiling"), _now(), _now()))
+        self._log("replay-admit", row["claim_id"], row["scope"], f"{row['stamp']} {row['blind_class']}")
+        return True
 
     def reaffirm(self, scope, claim_id):
         self.conn.execute(
@@ -700,6 +891,14 @@ def selftest():
             "map()": lambda: gate("g", map(dict, ps)),
             "[h.copy()]": lambda: gate("g", [h.copy() for h in ps]),
             "deep-nest-x6": lambda: gate("g", [[[[[[ps]]]]]]),
+            # a support count and what is worked out from it (FR-16: counts are never verdicts)
+            "count": lambda: gate("g", ps.count()),
+            "count>0": lambda: gate("g", ps.count() > 0),
+            "lambda-count>=1": lambda: gate("g", lambda: ps.count() >= 1),
+            "count==1 flag": lambda: gate("g", (ps.count() == 1) & True),
+            "count+1": lambda: gate("g", ps.count() + 1),
+            "count/1": lambda: gate("g", lambda: ps.count() / 1),
+            "count in a dict": lambda: gate("g", {"n": ps.count()}),
         }
         escaped = []
         for nm, fn in paths.items():

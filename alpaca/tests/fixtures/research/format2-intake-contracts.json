@@ -1,0 +1,125 @@
+{
+ "commit": "f5869e9",
+ "contracts": [
+  {
+   "data": {
+    "done_bar": [
+     "install/install-exit (exit-code): the command exits 0"
+    ],
+    "expected": [],
+    "fail_cases": [
+     "the checks still fail after 2 attempt(s)"
+    ],
+    "input": [
+     "requirements.txt"
+    ],
+    "source": "domain/runbook.yaml stages[0] (install)",
+    "stage": "install"
+   },
+   "ref": "t-001"
+  },
+  {
+   "data": {
+    "done_bar": [
+     "unit-test/tests-exit (exit-code): the command exits 0 (shows SC-001, EC-001, EC-002, FR-001, FR-002, FR-003, FR-004, FR-005)",
+     "unit-test/tests-no-failures (regex-in-file): out/junit.xml does not match /failures=\"[1-9]/ (shows SC-001)"
+    ],
+    "expected": [
+     "out/junit.xml: the test results"
+    ],
+    "fail_cases": [
+     "import-error: the app package does not import (a missing dependency or a syntax error); detect (regex-in-file): out/junit.xml matches /ModuleNotFoundError|ImportError|SyntaxError/; then stop: the stage ends FAIL without another attempt"
+    ],
+    "input": [
+     "app/",
+     "tests/",
+     "stage install passed"
+    ],
+    "source": "domain/runbook.yaml stages[1] (unit-test)",
+    "stage": "unit-test"
+   },
+   "ref": "t-002"
+  },
+  {
+   "data": {
+    "done_bar": [
+     "restart-test/restart-lost (json-field): out/restart.json field lost == 0 (shows SC-003, FR-006)"
+    ],
+    "expected": [
+     "out/restart.json: links created before the restart and the ones read back after it"
+    ],
+    "fail_cases": [],
+    "input": [
+     "stage unit-test passed"
+    ],
+    "source": "domain/runbook.yaml stages[2] (restart-test)",
+    "stage": "restart-test"
+   },
+   "ref": "t-003"
+  },
+  {
+   "data": {
+    "done_bar": [
+     "load-test/load-exit (exit-code): the command exits 0",
+     "load-test/redirect-p95 (json-field): out/load.json field redirect.p95_ms <= ${P95_LIMIT_MS} (50) (shows SC-002)",
+     "load-test/redirect-codes (plugin): plugin checks/status_codes.py out/load.json 301 passes (shows SC-002, FR-003)"
+    ],
+    "expected": [
+     "out/load.json: latency percentiles and status counts of the load run",
+     "out/load.log: the log of the service under test"
+    ],
+    "fail_cases": [
+     "port-busy: port 8080 is already taken, so the service under test never starts; detect (regex-in-file): out/load.log matches /Address already in use/; then run the recovery stage free-port: python3 tools/free_port.py 8080 --out out/free-port.json, checks free-port/port-free (json-field): out/free-port.json field free == True; after it passes, then this stage runs again as one more attempt, and when it fails this stage ends FAIL",
+     "check redirect-codes fails: the stage stops without another attempt",
+     "the checks still fail after 3 attempt(s)"
+    ],
+    "input": [
+     "stage unit-test passed"
+    ],
+    "source": "domain/runbook.yaml stages[3] (load-test)",
+    "stage": "load-test"
+   },
+   "ref": "t-004"
+  },
+  {
+   "data": {
+    "done_bar": [
+     "the owner approves: the owner reads the load report and the README walk-through, then approves the release to production",
+     "the approval judges SC-004"
+    ],
+    "expected": [
+     "the owner's recorded decision on stage release"
+    ],
+    "fail_cases": [
+     "the owner does not approve; stage release does not run"
+    ],
+    "input": [
+     "evidence: out/load.json",
+     "evidence: out/restart.json"
+    ],
+    "source": "domain/runbook.yaml stages[5] (release) owner_gate",
+    "stage": "release"
+   },
+   "ref": "t-005"
+  },
+  {
+   "data": {
+    "done_bar": [
+     "release/release-exit (exit-code): the command exits 0",
+     "release/release-health (plugin): plugin checks/status_codes.py out/health.json 200 passes"
+    ],
+    "expected": [],
+    "fail_cases": [],
+    "input": [
+     "stage restart-test passed",
+     "stage load-test passed",
+     "the owner approved stage release"
+    ],
+    "source": "domain/runbook.yaml stages[5] (release)",
+    "stage": "release"
+   },
+   "ref": "t-006"
+  }
+ ],
+ "note": "the task-contract events alpaca intake records at f5869e9 for templates/runbook-example copied to <project>/domain, op-001"
+}

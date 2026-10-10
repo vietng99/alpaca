@@ -4,6 +4,9 @@ import re
 import pytest
 import yaml
 from alpaca.tests.test_release_pipeline_build import source, api
+from alpaca.tests.devfiles import names_as_data
+
+names_as_data(".github/workflows/alpaca-dev.yml")   # written by release init in the fixture's tree
 
 
 def test_init_is_idempotent_and_returns_both_paths(source):

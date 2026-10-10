@@ -17,7 +17,7 @@ def _conn(project):
 
 def _make_task(project):
     cli.main(["op", "new", "x"])
-    cli.main(["task", "add", "--title", "task", "op-001", "s"])   # yields t-001
+    cli.main(["task", "add", "--title", "task", "op-001", "s", "--phase", "build"])   # yields t-001
 
 
 # ---- positive: shape and kinds --------------------------------------------------

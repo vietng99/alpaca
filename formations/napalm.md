@@ -7,11 +7,13 @@ roles:
     role: the sole spawner; convenes the council, folds, never judges
   - id: seat
     archetype: scout
+    tier: high
     fan: true
     lens: distinct
     role: a council seat, each a distinct lens over the wide surface
   - id: cross
     archetype: red
+    tier: high
     blind: true
     receives: [claim, pointer]
     role: one round of different-lens cross-examination

@@ -32,13 +32,17 @@ HOOKS = [
     "alpaca.hooks.user_prompt",
     "alpaca.hooks.pre_tool",
     "alpaca.hooks.git_guard",
+    "alpaca.hooks.temp_guard",
+    "alpaca.hooks.research_guard",
     "alpaca.hooks.post_tool",
     "alpaca.hooks.stop",
+    "alpaca.hooks.subagent_start",
     "alpaca.hooks.subagent_stop",
     "alpaca.hooks.session_end",
 ]
 CAPTURE_ONLY = {"alpaca.hooks.pre_tool", "alpaca.hooks.post_tool",
-                "alpaca.hooks.subagent_stop", "alpaca.hooks.session_end"}
+                "alpaca.hooks.subagent_start", "alpaca.hooks.subagent_stop",
+                "alpaca.hooks.session_end"}
 
 # Four hostile payloads. Each must still end in exit 0.
 HOSTILE = {
@@ -264,9 +268,10 @@ def _named(res, name):
 
 
 def test_real_settings_register_the_capture_hooks():
-    """The three capture events are wired to their modules, inside the timeout ceiling."""
+    """The capture events, the research guard and the subagent start are wired to their modules, inside the timeout ceiling."""
     s = _real_settings()["hooks"]
-    for event, module in (("PreToolUse", "pre_tool"), ("PostToolUse", "post_tool"),
+    for event, module in (("PreToolUse", "pre_tool"), ("PreToolUse", "research_guard"),
+                          ("PostToolUse", "post_tool"), ("SubagentStart", "subagent_start"),
                           ("SubagentStop", "subagent_stop")):
         entries = [h for grp in s.get(event, []) for h in grp.get("hooks", [])]
         assert entries, "%s registers no hook" % event

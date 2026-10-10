@@ -61,8 +61,10 @@ NOTMP = frozenset()
 PHASES = ("requirement", "design", "build", "verify")
 BOUNDARIES = ("requirement->design", "design->build", "build->verify", "verify->release")
 
-# The six shipped formations (M3.9). The acceptance drives the `solo` formation.
-SIX_FORMATIONS = ("solo", "builder-verifier", "fan-out", "bug-loop", "nuclear", "napalm")
+# The eight shipped formations: the six of M3.9 plus the two research engine formations
+# (design/research-engine/architecture.md section 12.1). The acceptance drives the `solo` formation.
+SIX_FORMATIONS = ("solo", "builder-verifier", "fan-out", "bug-loop", "nuclear", "napalm",
+                  "research-improve", "research-repair")
 SCRIPTED_FORMATION = "solo"
 
 
@@ -86,17 +88,19 @@ def _formation_identity(root):
 def _open_op_at(conn, root, session, rank, scope):
     """Open one op under the posture the formation runs at: mirror the level for the session
     (M3.1) and stand up a single-op authority at that level (M3.2), then open the op through the
-    real `alpaca op new`, which stamps the standing authority onto the op forever. Returns the op id.
+    op's open path (`ops.open_op`), which stamps the standing authority onto the op forever.
+    Returns the op id.
+
+    op-019: `alpaca op new` now also opens the start-of-op question batch, and an op with a batch
+    is held by the intent gates at L5 and L6 (alpaca/batch.py, alpaca/selfcheck.py, tested in their
+    own files). This acceptance pins the M3 posture rules, so it opens the op the way an engine
+    opens a research run's op: through `ops.open_op`, with no batch.
     """
     level.set(conn, session, rank, "drive the sample spec through the phase ladder")
     authority.grant(conn, "L%d" % rank, scope)
-    before = len(db.rows(conn, "ops", "1=1"))
-    code = cli.main(["--session", session, "op", "new",
-                     "carry the sample spec from intent to the release edge",
-                     "--done-when", "every phase boundary is adjudicated"])
-    assert code == vc.PASS
-    oid = "op-%03d" % (before + 1)
-    return oid
+    from alpaca import ops
+    return ops.open_op(conn, "carry the sample spec from intent to the release edge",
+                       "every phase boundary is adjudicated", session=session, actor="human")
 
 
 def _land_and_discharge(conn, spec, op, session):

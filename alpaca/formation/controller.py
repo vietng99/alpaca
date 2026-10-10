@@ -50,6 +50,13 @@ class PlanError(Exception):
     """A malformed or empty plan -- never guessed around, always surfaced as a clean BLOCKED."""
 
 
+def _screen(exc) -> str:
+    """An error's text through the one secret screen before it is recorded: it may quote what
+    failed (t-070 round 2 C-C)."""
+    from alpaca.analytics import detail
+    return detail.screen(str(exc))
+
+
 def _plan_id(plan) -> str:
     return str(plan.get("id") or plan.get("op") or DEFAULT_PLAN_ID)
 
@@ -121,7 +128,7 @@ def run(conn, plan, *, root=None, session="controller", clock=None, tmp_prefixes
         base = root if root is not None else paths.root()
     except Exception as e:
         base = None
-        findings = [("ROOT-ABSENT", str(root), str(e))]
+        findings = [("ROOT-ABSENT", str(root), _screen(e))]
     else:
         findings = workspace_guard.check(base, [], tmp_prefixes=tmp_prefixes)
     if findings:
@@ -135,7 +142,7 @@ def run(conn, plan, *, root=None, session="controller", clock=None, tmp_prefixes
         steps = _load_plan(plan)
     except PlanError as e:
         db.append_event(conn, session=session, actor="controller", kind=BLOCK_KIND,
-                        data={"plan": _plan_id(plan), "reason": "plan", "detail": str(e)},
+                        data={"plan": _plan_id(plan), "reason": "plan", "detail": _screen(e)},
                         clock=clock)
         return vc.BLOCKED
 

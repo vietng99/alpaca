@@ -34,6 +34,11 @@ def handle(payload):
     conn = db.connect(root)
     try:
         data = ids(payload)
+        # the stop event itself names the agent's transcript file, so the session runtime reads
+        # the locator from a row the hook wrote (in-session-runtime.md section 14)
+        path = payload.get("agent_transcript_path") or payload.get("agentTranscriptPath")
+        if isinstance(path, str) and path:
+            data["agent_transcript_path"] = path
         db.append_event(conn, session=sid, actor="alpaca", kind="subagent-stop", data=data)
         result = {"subagent": data}
         from alpaca import observability

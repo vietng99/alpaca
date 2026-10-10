@@ -448,7 +448,9 @@ def _identity_hits(term_list, raw):
 
 def _blob_hits(term_list, raw, path, shape_on=True):
     """Term, `re:` and shape hits in one blob held in memory: the text lanes first, the byte lane as
-    the backstop, exactly as the audit does per file."""
+    the backstop, exactly as the audit does per file. The byte lane skips the terms the text lanes
+    reported and judges every other byte match against the allow rules in its own context
+    (`leak_audit.byte_hits`): an allowed URL is not a hit, a second copy of the term is."""
     text, _codec = leak_audit.decode_explicit(raw)
     hits, accounted = [], set()
     if text is not None:
@@ -754,7 +756,9 @@ def hook_body():
     """The pre-push hook: it hands stdin (the candidate refs) to the PINNED barrier, which refuses
     on anything but PASS. It names no absolute path and no folder literal, so it is rename-safe:
     it finds the pinned copy through git. It runs under the install's own launcher when the repo has
-    one, else python3; a missing pinned copy refuses the push rather than skipping the scan."""
+    one, else python3; a missing pinned copy refuses the push rather than skipping the scan. Python
+    starts with `-I` (the launcher rule of alpaca/child.py, t-070 round 3): the pinned copy puts its
+    own folder on the path itself, and no PYTHONPATH or working folder reaches it."""
     return ("#!/bin/sh\n"
             "# alpaca outbound barrier (M4.11): scan everything a push would send and refuse\n"
             "# mechanically on a protected path or a sealed term. The decision to push at all is\n"
@@ -770,9 +774,9 @@ def hook_body():
             "  exit 2\n"
             "fi\n"
             "if [ -x bin/alpaca-python ]; then\n"
-            '  exec bin/alpaca-python "$pin/run.py" prepush "$@"\n'
+            '  exec bin/alpaca-python -I "$pin/run.py" prepush "$@"\n'
             "fi\n"
-            'exec python3 "$pin/run.py" prepush "$@"\n' % PIN_NAME)
+            'exec python3 -I "$pin/run.py" prepush "$@"\n' % PIN_NAME)
 
 
 _RUN_PY = '''"""The pinned alpaca outbound barrier, written by `alpaca barrier install`. Do not edit.
@@ -1003,7 +1007,7 @@ def _prepush_scan(root, data, cfg, notices):
         try:
             entering = objects_entering(root, local_sha, remote_sha)
         except Exception as e:
-            return _refuse_now("%s: %s" % (type(e).__name__, e))
+            return _refuse_now(vc.error_reason(e))
         for sha, path in entering:
             if sha not in seen:
                 seen.add(sha)
@@ -1030,7 +1034,7 @@ def _cmd_barrier(args):
         try:
             p = install(root)
         except Exception as e:
-            return vc.emit_verdict("alpaca-barrier-install", vc.BLOCKED, "%s: %s" % (type(e).__name__, e))
+            return vc.emit_verdict("alpaca-barrier-install", vc.BLOCKED, vc.error_reason(e))
         return vc.emit_verdict("alpaca-barrier-install", vc.PASS,
                                "pre-push hook installed; the barrier and its settings are pinned in "
                                "the git directory", evidence=[os.path.basename(p), PIN_NAME])
@@ -1040,7 +1044,7 @@ def _cmd_barrier(args):
             objs = objects_entering(root, args.rev, remote_sha)
         except Exception as e:
             return vc.emit_verdict("alpaca-barrier-scan", vc.BLOCKED,
-                                   "%s: %s" % (type(e).__name__, e))
+                                   vc.error_reason(e))
         res = scan(root, [], objects=objs)
         print(render(res.report))
         return vc.emit_verdict("alpaca-barrier-scan", res.verdict, "; ".join(res.reasons[:6]))

@@ -18,7 +18,9 @@ The schema (M3.7 Step 3): a manifest declares
   * `budget_class`-- the resource class it declares up front;
   * `output`      -- the deliverable shape.
 A manifest missing any of these is REFUSED (`ManifestError`); absence blocks, never guesses
-(the same non-vacuity ethos the doctrine boot gate holds).
+(the same non-vacuity ethos the doctrine boot gate holds). Two optional fields belong to the
+shield policy (`formations/shield.yaml`, read by `alpaca.formation.shield`): a role's `tier:`
+and a formation's `escalation:` block.
 
 The blind-pair rule (KEEP row 12): independence engineered against shared bias -- the verifier
 role never receives the builder's narrative. `payload_for` strips the narrative fields from

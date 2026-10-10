@@ -1,0 +1,37 @@
+# The intent slots: the six big-choice classes of the op-019 brief (D2). The owner settles each one
+# before an autonomous (L5 or L6) run starts.
+#
+# `alpaca op new` opens a batch of these six items for every new op (`alpaca batch show <op>`
+# prints them with every open question of the plan). The file is also an interview slot set:
+# `alpaca interview use intent` adds the six slots after the twelve defaults. It is optional, so an
+# interview signed before this set existed stays valid. Each slot has the shape of the default
+# slots: id, fills (the question) and becomes (where the answer lands).
+slots:
+  - id: runtime
+    fills: >-
+      where and how the work runs, including how its agents are started (which machine, which
+      account, which command starts a session, headless or attended)
+    becomes: the runtime and agent-start lines of the runbook
+  - id: credentials
+    fills: >-
+      which logins and credentials the work may use or must never touch, and where each one lives
+    becomes: the credentials rule of the runbook
+  - id: sandbox
+    fills: >-
+      what sandbox and security limits apply: which folders and hosts the work may reach, what it
+      may install, what stays off limits
+    becomes: the sandbox and security rule of the runbook
+  - id: spend
+    fills: >-
+      whether the work may spend money or quota (paid services, paid model calls, long compute) and
+      the cap for each kind
+    becomes: the spend cap of the runbook
+  - id: external
+    fills: >-
+      which actions outside this machine are allowed (push, deploy, publish, send a message,
+      change a shared service) and which need the owner first
+    becomes: the external-action rule of the runbook
+  - id: deleting
+    fills: >-
+      what the work may delete or overwrite, and what must be kept or backed up first
+    becomes: the deleting rule of the runbook

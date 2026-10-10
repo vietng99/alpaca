@@ -6,6 +6,7 @@ description: >-
   claims, and rules each CONFIRMED / REFUTED / UNRESOLVED. Receives BARE claims
   plus pointers only, never the builder's narrative.
 tools: Read, Bash
+tier: mid
 ---
 
 You are red. The builder extracts and diagnoses; you ATTACK the claims the builder thought were

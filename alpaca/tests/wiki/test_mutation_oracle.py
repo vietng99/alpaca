@@ -39,6 +39,37 @@ _M1_INSTRUMENT_DEBT = (
 )
 
 
+class TestSandboxCopy(unittest.TestCase):
+    """The sandbox stands for a fresh clone: a symlink stays a link, the gitignored `.te` link to the
+    runtime tree is left out, and sockets or FIFOs are skipped instead of breaking the copy."""
+
+    def test_copy_keeps_links_and_skips_runtime_entries(self):
+        import socket
+        import tempfile
+        with tempfile.TemporaryDirectory(prefix="sbx_") as td:
+            src = Path(td) / "src"
+            (src / "pkg").mkdir(parents=True)
+            (src / "pkg" / "mod.py").write_text("x = 1\n", encoding="utf-8")
+            runtime = Path(td) / "runtime"
+            runtime.mkdir()
+            (runtime / "state.txt").write_text("live\n", encoding="utf-8")
+            (src / ".te").symlink_to(runtime)
+            (src / "link.py").symlink_to("pkg/mod.py")
+            os.mkfifo(src / "pipe")
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                sock.bind(str(src / "pkg" / "sock"))
+                dst = Path(td) / "dst"
+                mutation_oracle.copy_sandbox(src, dst)
+            finally:
+                sock.close()
+            self.assertEqual((dst / "pkg" / "mod.py").read_text(encoding="utf-8"), "x = 1\n")
+            self.assertFalse(os.path.lexists(dst / ".te"), "the .te runtime link must not be copied")
+            self.assertTrue((dst / "link.py").is_symlink(), "a tracked symlink must stay a link")
+            self.assertFalse(os.path.lexists(dst / "pipe"), "a FIFO must be skipped")
+            self.assertFalse(os.path.lexists(dst / "pkg" / "sock"), "a socket must be skipped")
+
+
 class TestMutationOracle(unittest.TestCase):
     def test_every_mutation_flips_with_zero_hollow(self):
         summary = mutation_oracle.run()

@@ -60,7 +60,7 @@ def phase_discharge_code(conn, op, phase) -> int:
     return contract.worst(codes)
 
 
-def links(conn, op, boundary, *, root=None, tmp_prefixes=None) -> list:
+def links(conn, op, boundary, *, root=None, tmp_prefixes=None, level=None, session=None) -> list:
     """The ordered links of the door for one boundary, each a (name, verdict-code) pair.
 
     workspace_guard is always first. `tmp_prefixes` flows to workspace_guard so a caller can
@@ -92,6 +92,10 @@ def links(conn, op, boundary, *, root=None, tmp_prefixes=None) -> list:
     # 3) the project's own checks under contracts/<phase>/, when present.
     if contracts_runner.executables(root, phase):
         out.append(("contracts:%s" % phase, contracts_runner.run(root, phase)))
+    # 4) op-019: the intent links (owner orders, the batch, the self-check), read at the higher of
+    #    the door's level flag and the level in force (alpaca/intentgate.py).
+    from alpaca import intentgate
+    out.extend(intentgate.door_links(conn, op, boundary, level_flag=level, session=session, root=root))
     return out
 
 
@@ -117,7 +121,8 @@ def run(conn, op, boundary, *, level=None, root=None, tmp_prefixes=None, force=F
     "go" is already in hand (`human_go=True`), which advances it. Human decisions stay human:
     `force` never substitutes for the human go a low level requires.
     """
-    lk = links(conn, op, boundary, root=root, tmp_prefixes=tmp_prefixes)
+    lk = links(conn, op, boundary, root=root, tmp_prefixes=tmp_prefixes, level=level,
+               session=session)
     fold = contract.worst([c for _, c in lk])
     named = [[n, vc.name_of(c)] for n, c in lk]
 

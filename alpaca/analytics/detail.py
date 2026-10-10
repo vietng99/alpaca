@@ -26,10 +26,377 @@ MAX_CHILDREN = 40
 MAX_DIRECTORY_ENTRIES = 2000
 MAX_PAGE = 200
 _IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,159}\Z")
-_SECRET_KEY = re.compile(r"(?:password|passwd|api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|cookie|client[_-]?secret|private[_-]?key)\Z", re.I)
+_SECRET_KEY = re.compile(r"(?:password|passwd|passphrase|api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|cookie|client[_-]?secret|private[_-]?key|secret[_-]?(?:access[_-]?)?key)\Z", re.I)
 _SECRET_TEXT = re.compile(r"(?i)(\b(?:authorization\s*:\s*(?:bearer|basic)|bearer)\s+)[^\s\"']+|"
-                          r"(\b(?:[A-Z0-9_]*(?:API_KEY|ACCESS_TOKEN|SECRET|PASSWORD))\s*[=:]\s*[\"']?)[^\s\"']+")
+                          r"(\b(?=[A-Z0-9_]*\s*[=:])(?:[A-Z0-9_]*(?:API_KEY|ACCESS_TOKEN|SECRET|PASSWORD|PASSPHRASE|SECRET_ACCESS_KEY|SECRET_KEY))\s*[=:]\s*[\"']?)[^\s\"']+")
+# The lookahead of the second branch is implied by the rest of it (the name ends the identifier, and
+# "=" or ":" follows): it only fails a word with no "=" or ":" after it before the alternation of
+# names is tried at each of its letters (t-070 L1, a third less time, same matches).
 _PROVIDER_KEY = re.compile(r"\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,})\b")
+# The classes FR-26 found missing (HS-SCO-05): an AWS access key id, a PEM private key block (through
+# its END line, or through its base64 body when the END line was cut off), a Slack token or webhook
+# and a JWT. Each is masked whole.
+_AWS_KEY = re.compile(r"\b(?:A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16}\b")
+# A PEM private key block: its BEGIN line through the first END line of the same label after it
+# (anywhere later in the text), else, when no such END line follows, its base64 body and header
+# lines. As one regex (`BEGIN ...-----(?:.*?-----END \1-----|...)`) each BEGIN line with no END line
+# scanned to the end of the text, so k of them cost k times the text (t-070 A-5: 1,000 in 2 MB took
+# 3.5 s a pass); `_pem_spans` finds the same span from one index of the END lines, in linear time.
+_PEM_HEAD = re.compile(r"-----BEGIN ([A-Z0-9 ]{0,40}PRIVATE KEY(?: BLOCK)?)-----")
+_PEM_FOOT = re.compile(r"-----END ([A-Z0-9 ]{0,40}PRIVATE KEY(?: BLOCK)?)-----")
+_PEM_TAIL = re.compile(r"(?:(?:\s|\\[nr])*(?:[A-Za-z0-9+/=]{16,}|[A-Z][A-Za-z-]*:[^\n\\]*))*")
+_SLACK_TOKEN = re.compile(r"\bxox[a-z](?:\.xox[a-z])?-[A-Za-z0-9-]{8,}|\bxapp-[A-Za-z0-9-]{8,}"
+                          r"|https://hooks\.slack(?:-gov)?\.com/(?:services|workflows|triggers)/[A-Za-z0-9/_-]+")
+# A JWT: "eyJ" after a word boundary, then three dot-separated parts of the token alphabet, the first
+# two of four characters or more. As one regex (`\beyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[...]*`,
+# through bfb66b189) every "eyJ" inside one run of the alphabet restarted the match and scanned to the
+# end of the run, since "-" both ends a word and stays in the run ("eyJ-" repeated: 2.1 s at 128 KB,
+# t-070 check round 1 A-3); `_jwt_spans` reads each run once and gives the regex's matches.
+_JWT_RUN = re.compile(r"[A-Za-z0-9_-]*")
+_WORD_CHAR = re.compile(r"\w")
+# A secret given in a plain phrasing (dec-804f2708474c Q-A): a credential name, an optional "for the
+# quay camera" of up to six words, then "is", "was", "are" or "were" (optionally "now", "still",
+# "set to", "changed to", "reset to") or "=" or ":", then the value. A bare "code" or "key" is no
+# credential name ("the exit code is 2" and a note's "key: t-069" line stay). A quoted value after a
+# prose verb is masked whatever it holds, one after "=" or ":" only when it holds a digit, so a code
+# or config literal such as pin='release' stays. A bare value is masked when it holds a digit; one
+# with no digit only after a prose verb, when it is a word of letters of six or more that no
+# ordinary word starts ("The wifi password is swordfishmarlin." is masked, "the token is valid" and
+# "the password is stored in the vault" stay), and never for a PIN or a bare "secret", whose
+# letters read as prose ("the pin is loose", "the secret is out"). A passphrase's value runs over
+# its words to the end of the clause ("The vault passphrase is plankton otter quayside."), up to a
+# word that starts another credential phrasing. The value never spans a bracket, quote or
+# backslash, so a mask is never extended or re-masked (screening twice gives the text screening
+# once gave). The spaces and tabs before the verb, after it, and after "=" or ":" are matched
+# possessively (`[ \t]*+`): no value, verb, "=" or ":" starts with a space or a tab, so giving one
+# back never makes a match, and the two `[ \t]*` that sat side by side over one run of spaces tried
+# every split of it before a value failed ("password is" + 16,000 spaces: 4.8 s through bfb66b189,
+# t-070 check round 1 A-3). The output is the one the bfb66b189 pattern gave
+# (`T/wiki/test_screen_door.py::test_the_screen_changes_only_where_a_declared_variant_applies`).
+_PLAIN_NAMES = (r"(?P<phrase>pass[ \t]?phrases?)|(?P<weak>pin(?:[ \t]+(?:code|number))?|secret)"
+                r"|pass(?:word|wd|code)|token|credentials?"
+                r"|(?:api|access|secret|private)[ \t_-]?key|(?:access|security)[ \t]+code")
+_VERB = r"(?:is|was|are|were)\b"
+_BARE = r"[^\s\"'`<>()\[\]{}\\]"
+_WORD = r"[^\s.,;:!?\"'`<>()\[\]{}\\]"
+_NEXT_NAME = r"pass|token|pin\b|secret|credential|(?:api|access|private)[ \t_-]?key"
+_FOR = r"(?:[ \t]+(?:for|of|to|on)(?:[ \t]+(?!" + _VERB + r")[^\s.!?;:=\[\]\"'`\\]+){1,6})?"
+# Another credential phrasing starting where a bare value would: a credential name, its optional
+# "for the ..." words and its verb, "=" or ":". A bare value never starts there (t-070 A-1, m-conf-1:
+# "PIN: password is hunter22x" took "password" as the PIN's value, and the phrasing after it was
+# never matched), so that phrasing is matched on its own and masks its own value.
+_NEXT_PHRASE = (r"\b(?:pass[ \t]?phrases?|pin(?:[ \t]+(?:code|number))?|secret|pass(?:word|wd|code)|token"
+                r"|credentials?|(?:api|access|secret|private)[ \t_-]?key|(?:access|security)[ \t]+code)"
+                r"[\"']?" + _FOR + r"[ \t]*+(?:\b" + _VERB + r"|[=:])")
+_PLAIN_SECRET = re.compile(
+    r"(?i)(?P<head>\b(?:" + _PLAIN_NAMES + r")[\"']?" + _FOR +
+    r"[ \t]*+(?:(?P<verb>\b" + _VERB + r"(?:[ \t]+(?:now|still|set[ \t]+to|changed[ \t]+to|reset[ \t]+to))?"
+    r"[ \t]*+:?)|[=:])[ \t]*+(?:\n[ \t]*+)?)"
+    r"(?:(?P<quote>[\"'`])(?P<quoted>[^\"'`\n]{1,200})(?P=quote)"
+    r"|(?(phrase)(?P<words>" + _WORD + r"{4,}(?:[ \t]+(?!" + _VERB + r"|" + _NEXT_NAME + r")"
+    + _WORD + r"+){0,7})|(?!" + _NEXT_PHRASE + r")(?P<bare>" + _BARE + r"{4,})))")
+#: Words that end a credential phrasing without being its value: grammar words, states and common
+#: adjectives. A word with an English inflection or derivation ending is ordinary too.
+_ORDINARY = frozenset("""
+a an the this that these those it its there here what which who whose whom where when why how
+not no nor now still also only just even never always already often usually sometimes rarely
+too very so then thus therefore however again more most less least much many few several
+some any all both each every either neither none nothing something anything everything one ones
+other another such own same
+in on at of for from to by with without into onto upon under over inside outside within behind
+before after during per via like as about above below between among through across against
+toward towards around near beside besides beyond past since until till than
+me my mine you your yours him his her hers us our ours them their theirs
+be been being do does did done has have had
+valid invalid correct incorrect wrong right required optional mandatory needed necessary
+empty blank null nil none unknown undefined unset set reset changed rotated
+true false yes ok okay fine good bad weak strong short long safe unsafe secure insecure
+secret private public sensitive hidden visible plain clear clean simple complex new old
+current previous next last first second final default random unique static dynamic fixed
+global local temporary permanent real fake dummy sample example placeholder test
+live dead stale fresh active inactive enabled disabled off open closed gone lost lower upper
+identical missing present absent available unavailable ready busy free read write
+opaque expired revoked leaked exposed compromised bearer
+""".split())
+_ORDINARY_ENDINGS = ("ed", "ing", "ly", "able", "ible", "ive", "ous", "ful", "less", "ent", "ant",
+                     "ic", "al", "ary", "ory", "ment", "ness", "tion", "sion", "ity", "ise", "ize")
+
+
+def _ordinary(word):
+    """A word that reads as prose after "is", not as a credential's value: listed, or a part of it
+    (split at hyphens) listed or of five letters or more with an English ending."""
+    return any(part in _ORDINARY or (len(part) >= 5 and part.endswith(_ORDINARY_ENDINGS))
+               for part in word.lower().split("-") if part)
+
+
+def _plain_span(match):
+    """The span of a plain phrasing's value to mask, or None when the phrasing reads as prose."""
+    quote = match.group("quote")
+    if quote:
+        if not match.group("verb") and not any(c.isdigit() for c in match.group("quoted")):
+            return None
+        return match.span("quoted")
+    group = "words" if match.group("words") else "bare"
+    value = match.group(group)
+    core = value.rstrip(".,;:!?")
+    if not any(c.isdigit() for c in core):
+        first = core.split()[0] if core.split() else core
+        if (not match.group("verb") or match.group("weak") or len(first) < 6
+                or not re.fullmatch(r"[A-Za-z][A-Za-z-]*", first) or _ordinary(first)):
+            return None
+    return match.start(group), match.start(group) + len(core)
+
+
+def _plain_spans(value):
+    """The span of each plain phrasing's value to mask (`_plain_span`)."""
+    return [span for span in map(_plain_span, _PLAIN_SECRET.finditer(value)) if span]
+
+
+# The plain phrasings the class above does not read (t-425; op-008 t-070 check round 1, minor A-2: 21
+# phrasings stored in clear at all five retain doors, attack p01). They are one more class,
+# `plain-variant`, beside `plain-phrasing`, which stays byte for byte what it was at bfb66b189, so the
+# screen changes a text only where one of these forms finds a value the other classes leave
+# (`T/wiki/test_screen_door.py::test_the_screen_changes_only_where_a_declared_variant_applies`). The
+# forms, by family (`VARIANT_FAMILIES`):
+#   spacing        a no-break, figure or narrow no-break space, or a carriage return, where a plain
+#                  phrasing has a space or a line end ("password is X", "is\r\nX"): the plain
+#                  phrasing is read again on the text with each of them as a space (the same positions)
+#   verb           a credential name, also plural (passwords, passcodes, API keys, but not tokens,
+#                  PINs or secrets, which count things in prose) and the short names pwd and pw, a
+#                  closing Markdown bold, a clause (a comma clause of up to eight words, or a "for",
+#                  "of", "to", "on", "at", "in", "by", "from" or "with" clause of up to sixteen), then
+#                  "is", "was", "are" or "were", "'s", "has (have, had) been changed (set, reset,
+#                  updated, rotated) to" or "will (would, shall, should, must) be"; a plural name takes
+#                  a list ("X and Y", "X, Y or Z")
+#   separator      a credential name, then ":" or "=" with Markdown bold around the name or the colon,
+#                  a tab, or a dash between spaces; pwd and pw also with a bare ":" or "=" (never a
+#                  path, which `pwd` prints)
+#   yaml-block     "password: >" (or "|") with the value on the next indented line
+#   spaced-digits  a credential name, its verb, "=" or ":", then digits in groups ("PIN is 7 3 1 9")
+#   table          a Markdown table whose header names a password, passcode, passphrase, PIN, pwd,
+#                  pw, credential, secret or key: the cells of that column
+#   env-name       an upper-case name ending in _PASS, _PASSWD, _PWD, _PW or _PIN, then "=" or ":"
+#   reverse        "use X as (the) password", unless a noun follows that makes the name its
+#                  modifier ("use sha256 as password hash")
+# A value is masked when it holds a digit. A value of letters alone is masked only by the rule of the
+# plain phrasing (a word of six letters or more that no ordinary word starts, never for a PIN, a bare
+# secret, pwd or pw) and only after "is", "was", "are", "were", "has been changed to" or "will be"
+# with no clause. An env-name value too needs a digit: such names also end code constants that hold
+# a reason or a state (`R_PIN = "PINNED-BARRIER-UNUSABLE-REFUSES"`, `R_CLEARANCE_NOT_PASS = "..."`,
+# both in the evaluation corpus's transcripts).
+# Each form is read from a credential name or a table line, never across a bracket, quote or
+# backslash, so a mask is never extended and screening twice gives what screening once gave; the
+# clause words and the spaces are matched possessively, so each start reads a bounded stretch.
+_V_SPACES = {0x00A0: " ", 0x2007: " ", 0x202F: " ", 0x000D: " "}
+_V_NAME = (r"pass(?:word|wd|code)s?|pass[ \t]?phrases?|pin(?:[ \t]+(?:code|number))?|secret|token"
+           r"|credentials?|(?:api|access|secret|private)[ \t_-]?keys?|(?:access|security)[ \t]+codes?"
+           r"|pwd|pw")
+_V_WEAK = re.compile(r"(?i)pin(?:[ \t]+(?:code|number))?|secret|pwd|pw")
+_V_ITEM = r"[^\s,;\"'`<>()\[\]{}\\]{4,}"
+_V_WORD = r"[^\s.,;:!?=\[\]\"'`\\]++"
+_V_BOLD = r"(?:\*{1,2}|_{1,2})"
+_V_VERB = (r"(?:is|was|are|were)\b(?:[ \t]++(?:now|still|set[ \t]+to|changed[ \t]+to|reset[ \t]+to)\b)?"
+           r"|(?:has|have|had)[ \t]++been[ \t]++(?:changed|set|reset|updated|rotated)[ \t]++to\b"
+           r"|(?:will|would|shall|should|must)(?:[ \t]++now)?[ \t]++be\b")
+_V_NOT_VERB = r"(?!(?:is|was|are|were|has|have|had|will|would|shall|should|must)\b)"
+_V_CLAUSE = (r"(?P<clause>[ \t]*+,(?:[ \t]++" + _V_WORD + r"){1,8}[ \t]*+,"
+             r"|[ \t]++(?:for|of|to|on|at|in|by|from|with)\b(?:[ \t]++" + _V_NOT_VERB + _V_WORD
+             + r"){1,16})?")
+_V_PROSE = re.compile(
+    r"(?i)\b(?P<name>" + _V_NAME + r")" + _V_BOLD + r"?" + _V_CLAUSE
+    + r"[ \t]*+(?:\b(?P<verb>" + _V_VERB + r")|(?P<owns>['\u2019]s\b))"
+    r"[ \t]*+" + _V_BOLD + r"?[ \t]*+(?:\n[ \t]*+)?"
+    r"(?:(?P<quote>[\"'`])(?P<quoted>[^\"'`\n]{1,200})(?P=quote)"
+    r"|(?!" + _NEXT_PHRASE + r")(?P<bare>" + _V_ITEM + r"))")
+_V_LIST_NEXT = re.compile(r"(?i)(?:[ \t]*+,[ \t]*+(?:(?:and|or)[ \t]++)?|[ \t]++(?:and|or|&)[ \t]++)"
+                          r"(?P<item>" + _V_ITEM + r")")
+_V_SEP = re.compile(
+    r"(?i)\b(?P<name>" + _V_NAME + r")(?:" + _V_BOLD + r"[ \t]*+[:=]|[:=][ \t]*+" + _V_BOLD
+    + r"|\t++|[ \t]++(?:--?|\u2013|\u2014)[ \t]++)[ \t]*+(?P<bare>" + _V_ITEM + r")")
+_V_SHORT = re.compile(r"(?i)\b(?P<name>pwd|pw)[\"']?[ \t]*+[:=][ \t]*+(?P<bare>" + _V_ITEM + r")")
+_V_YAML = re.compile(r"(?i)\b(?P<name>" + _V_NAME + r")[\"']?[ \t]*+:[ \t]*+[>|][+-]?[0-9]?"
+                     r"(?:[ \t]*+\n(?:[ \t]*+\n){0,3}[ \t]++|[ \t]++)(?P<bare>" + _V_ITEM + r")")
+_V_DIGITS = re.compile(
+    r"(?i)\b(?P<name>" + _V_NAME + r")[\"']?" + _FOR + r"[ \t]*+(?:\b(?:" + _V_VERB + r")|[=:])"
+    r"[ \t]*+(?P<digits>\d{1,4}(?:[ \t.-]\d{1,4}){1,7})(?![\w-])")
+_V_ENV = re.compile(r"\b[A-Z][A-Z0-9_]*_(?:PASS|PASSWD|PWD|PW|PIN)[ \t]*+[=:][ \t]*+[\"']?"
+                    r"(?P<bare>[^\s\"'`<>()\[\]{}\\]{4,})")
+#: A noun after "as (the) password" makes the name a modifier ("use sha256 as password hash"), not
+#: the thing the value is used as.
+_V_MODIFIED = (r"(?:hash(?:es|ing|er)?|manager|field|prompt|polic(?:y|ies)|length|input|storage|salt"
+               r"|stores?|files?|resets?|rules?|algorithms?|schemes?|validat\w*|strength|generat\w*"
+               r"|checks?|encod\w*|encrypt\w*|formats?|hints?|protect\w*)\b")
+_V_REVERSE = re.compile(
+    r"(?im)\b(?:use|using|set|try|enter|type)[ \t]++(?P<bare>" + _V_ITEM + r")[ \t]++as[ \t]++"
+    r"(?:(?:the|a|an|my|your|our|its|their|new|admin|root|default|initial)[ \t]++){0,3}"
+    r"(?:" + _V_NAME + r")\b(?![ \t]*+(?:-|" + _V_MODIFIED + r"))")
+_V_TABLE_HEAD = re.compile(r"(?i)\b(?:pass(?:word|wd|code)s?|pass[ \t]?phrases?|pins?|pwd|pw"
+                           r"|credentials?|secrets?|(?:api|access|secret|private)[ \t_-]?keys?)\b")
+_V_TABLE_RULE = re.compile(r"[ \t]*\|?(?:[ \t]*:?-{3,}:?[ \t]*\|)+[ \t]*(?::?-{3,}:?[ \t]*)?\Z")
+_V_RULE_CELL = re.compile(r"[ \t]*:?-{3,}:?[ \t]*")
+_V_CELL = re.compile(r"[ \t]*(?:\*{1,2}|`)?(?P<core>[^\s|\"'`<>()\[\]{}\\]{4,}?)(?:\*{1,2}|`)?[ \t]*\Z")
+_V_LETTERS = re.compile(r"[A-Za-z][A-Za-z-]*")
+
+
+def _v_core(text, start, item):
+    """The span of a value without the punctuation or Markdown that closes it."""
+    core = item.rstrip(".:!?*")
+    return (start, start + len(core)) if core else None
+
+
+def _v_value(text, start, item, letters):
+    """The span of a value to mask: one holding a digit, or with `letters` a word of letters the
+    plain phrasing would mask (`_plain_span`), else None."""
+    span = _v_core(text, start, item)
+    if span is None:
+        return None
+    core = text[span[0]:span[1]]
+    if any(c.isdigit() for c in core):
+        return span
+    if letters and len(core) >= 6 and _V_LETTERS.fullmatch(core) and not _ordinary(core):
+        return span
+    return None
+
+
+def _v_spacing(text):
+    return _plain_spans(text)
+
+
+def _v_prose(text):
+    spans = []
+    for m in _V_PROSE.finditer(text):
+        name = m.group("name")
+        weak = _V_WEAK.fullmatch(name) is not None
+        letters = bool(m.group("verb")) and not m.group("clause") and not weak
+        if m.group("quote"):
+            quoted = m.group("quoted")
+            if any(c.isdigit() for c in quoted) or letters:
+                spans.append(m.span("quoted"))
+            continue
+        span = _v_value(text, m.start("bare"), m.group("bare"), letters)
+        if span:
+            spans.append(span)
+        if name.lower().endswith("s"):           # a plural name takes a list of values
+            at = m.end("bare")
+            for _ in range(7):
+                more = _V_LIST_NEXT.match(text, at)
+                if not more:
+                    break
+                span = _v_value(text, more.start("item"), more.group("item"), letters)
+                if span:
+                    spans.append(span)
+                at = more.end()
+    return spans
+
+
+def _v_digit_spans(pattern, path_free=False):
+    def find(text):
+        spans = []
+        for m in pattern.finditer(text):
+            item = m.group("bare")
+            if path_free and item[0] in "/~.":
+                continue
+            span = _v_value(text, m.start("bare"), item, False)
+            if span:
+                spans.append(span)
+        return spans
+    return find
+
+
+def _v_spaced_digits(text):
+    return [m.span("digits") for m in _V_DIGITS.finditer(text)
+            if sum(c.isdigit() for c in m.group("digits")) >= 4]
+
+
+def _v_env(text):
+    return [span for span in (_v_value(text, m.start("bare"), m.group("bare"), False)
+                              for m in _V_ENV.finditer(text)) if span]
+
+
+def _v_table(text):
+    """The cells under a credential header of each Markdown table: a line of cells, a rule line
+    ("|---|---|"), then the lines that start with "|"; and the same table on one line, as an event
+    note writes one (its line ends become spaces: "| a | password | |---|---| | b | X |"). Each line
+    is split once and each cell read once."""
+    spans, columns, previous, start = [], None, None, 0
+    for line in text.split("\n"):
+        cells, at = line.split("|"), start
+        offsets = []
+        for cell in cells:
+            offsets.append(at)
+            at += len(cell) + 1
+        piped = line.lstrip(" \t").startswith("|")
+        if columns is not None and piped:
+            for index in columns:
+                if index < len(cells):
+                    _v_cell(text, cells[index], offsets[index], spans)
+        elif columns is not None:
+            columns = None
+        if columns is None and piped and previous is not None and _V_TABLE_RULE.match(line):
+            head = previous.split("|")
+            columns = [i for i, cell in enumerate(head) if _V_TABLE_HEAD.search(cell)] or None
+        elif columns is None and len(cells) > 3:
+            _v_table_inline(text, cells, offsets, spans)
+        previous = line if piped else None
+        start += len(line) + 1
+    return spans
+
+
+def _v_cell(text, cell, offset, spans):
+    found = _V_CELL.match(cell)
+    if found:
+        span = _v_value(text, offset + found.start("core"), found.group("core"), False)
+        if span:
+            spans.append(span)
+
+
+def _v_table_inline(text, cells, offsets, spans):
+    """A table on one line: k header cells, a blank cell (a line end made a space), k rule cells,
+    then rows of a blank cell and k cells. Read left to right, each cell once."""
+    i, n = 0, len(cells)
+    while i < n:
+        if not _V_RULE_CELL.fullmatch(cells[i]):
+            i += 1
+            continue
+        j = i
+        while j < n and _V_RULE_CELL.fullmatch(cells[j]):
+            j += 1
+        k, first = j - i, i - 1 - (j - i)
+        if first >= 0 and not cells[i - 1].strip():
+            marked = [c for c in range(k) if _V_TABLE_HEAD.search(cells[first + c])]
+            row = j
+            while marked and row + k < n and not cells[row].strip():
+                for c in marked:
+                    _v_cell(text, cells[row + 1 + c], offsets[row + 1 + c], spans)
+                row += k + 1
+            j = max(j, row)
+        i = j
+
+
+#: The families of `plain-variant`, in the order `_variant_spans` reads them: (name, spans). Each reads
+#: the text with the spaces of `_V_SPACES` as plain spaces; the positions are those of the text given.
+VARIANT_FAMILIES = (
+    ("spacing", _v_spacing),
+    ("verb", _v_prose),
+    ("separator", _v_digit_spans(_V_SEP)),
+    ("short-name", _v_digit_spans(_V_SHORT, path_free=True)),
+    ("yaml-block", _v_digit_spans(_V_YAML)),
+    ("spaced-digits", _v_spaced_digits),
+    ("table", _v_table),
+    ("env-name", _v_env),
+    ("reverse", _v_digit_spans(_V_REVERSE)),
+)
+
+
+def _variant_spans(value, families=VARIANT_FAMILIES):
+    """The span of each value a `plain-variant` form gives (see above)."""
+    text = value.translate(_V_SPACES)
+    spans = []
+    for name, find in families:
+        if name == "spacing" and text == value:
+            continue                              # the plain phrasing already read this text
+        spans.extend(find(text))
+    return spans
 
 
 def _hash(value):
@@ -47,12 +414,187 @@ def _local_file(path, root):
     return _inside(path, root) and os.path.isfile(path)
 
 
+#: The most passes the screen makes over a string before it calls the string unsettled. One pass
+#: applies each class once in a fixed order, and a later class can make an earlier one match: a
+#: Slack mask glued to an AWS key id gives the key its word boundary. A pass that changes the text
+#: only turns secret text into `[redacted]` and never extends a mask, so the passes settle; on glued
+#: pairs of every class two changing passes were the most seen (t-069 fix round 2).
+_REDACT_PASSES = 8
+
+#: Literal text each class cannot match without (each pattern above names it), so a pass skips a
+#: class whose text holds none of it; the test is exact, so a skipped class would have changed
+#: nothing. A class matched without regard to case is tested by a regex of the same flags, so the
+#: case folding of the class and of its test agree.
+_PROVIDER_HINTS = ("sk-", "ghp_", "gho_", "ghu_", "ghs_", "ghr_")
+_AWS_HINTS = ("A3T", "AKIA", "ASIA", "ABIA", "ACCA")
+_SLACK_HINTS = ("xox", "xapp-", "hooks.slack")
+_PLAIN_HINT = re.compile(r"(?i)pass|pin|secret|token|credential|key|code")
+_VARIANT_HINT = re.compile(r"(?i)pass|pin|secret|token|credential|key|code|pw")
+_SECRET_TEXT_HINT = re.compile(r"(?i)bearer|authorization|api_key|access_token|secret|passw|passphrase")
+
+
+def _pem_spans(value):
+    """The span of each PEM private key block: from its BEGIN line through the first END line of
+    the same label after it, else through its base64 body and header lines (`_PEM_TAIL`), as the
+    one regex did. The END lines are indexed once, so the cost is linear in the text however many
+    BEGIN lines have no END line (t-070 A-5)."""
+    from bisect import bisect_left
+    ends = {}
+    at = value.find("-----END ")
+    while at != -1:
+        foot = _PEM_FOOT.match(value, at)
+        if foot:
+            ends.setdefault(foot.group(1), []).append(at)
+        at = value.find("-----END ", at + 1)
+    spans = []
+    head = _PEM_HEAD.search(value)
+    while head:
+        label = head.group(1)
+        found = ends.get(label, ())
+        i = bisect_left(found, head.end())
+        if i < len(found):
+            stop = found[i] + len("-----END ") + len(label) + len("-----")
+        else:
+            stop = _PEM_TAIL.match(value, head.end()).end()
+        spans.append((head.start(), stop))
+        head = _PEM_HEAD.search(value, stop)
+    return spans
+
+
+def _mask(value, spans):
+    """`value` with each span replaced by `[redacted]`; spans that overlap are one mask, spans that
+    only touch stay two."""
+    out, pos, open_at, close_at = [], 0, None, None
+    for start, stop in sorted(spans):
+        if open_at is not None and start < close_at:
+            close_at = max(close_at, stop)
+            continue
+        if open_at is not None:
+            out.append(value[pos:open_at])
+            out.append("[redacted]")
+            pos = close_at
+        open_at, close_at = start, stop
+    if open_at is not None:
+        out.append(value[pos:open_at])
+        out.append("[redacted]")
+        pos = close_at
+    out.append(value[pos:])
+    return "".join(out)
+
+
+def _jwt_spans(value):
+    """The span of each JWT, as `\\beyJ[A-Za-z0-9_-]{4,}\\.[A-Za-z0-9_-]{4,}\\.[A-Za-z0-9_-]*` found
+    them left to right: the first "eyJ" after a word boundary in a run of the token alphabet whose
+    rest of the run is four characters or more, when a "." ends the run and a run of four or more
+    ended by a "." follows; the span runs through the run after that. When the first such "eyJ" of
+    a run fails, every later one in the run fails too (it leaves fewer characters, and the rest is
+    the same), so each run is read once and the cost is linear in the text (t-070 A-3)."""
+    spans = []
+    at = value.find("eyJ")
+    while at != -1:
+        if at and _WORD_CHAR.match(value, at - 1):
+            at = value.find("eyJ", at + 1)
+            continue
+        first = _JWT_RUN.match(value, at).end()
+        stop = None
+        if first - at >= 7 and value.startswith(".", first):
+            second = _JWT_RUN.match(value, first + 1).end()
+            if second - first > 4 and value.startswith(".", second):
+                stop = _JWT_RUN.match(value, second + 1).end()
+        if stop is None:
+            at = value.find("eyJ", first)
+        else:
+            spans.append((at, stop))
+            at = value.find("eyJ", stop)
+    return spans
+
+
+def _secret_text_spans(value):
+    """The span of each bearer token's or secret-named assignment's value (`_SECRET_TEXT`)."""
+    return [(m.start() + len(m.group(1) or m.group(2)), m.end()) for m in _SECRET_TEXT.finditer(value)]
+
+
+def _regex_spans(pattern):
+    return lambda value: [m.span() for m in pattern.finditer(value)]
+
+
+def _holds(hints):
+    return lambda value: any(hint in value for hint in hints)
+
+
+#: Every secret class of the screen, in the order `_redact_once` applies them: (name, a test a text
+#: must pass for the class to be tried, the spans of the class's secrets in a text). The test is
+#: exact (`_PROVIDER_HINTS` and the rest above). The tests read this registry: each class and the
+#: screen as a whole take linear time on generated repeated-input shapes, and each gives the spans
+#: the bfb66b189 pattern gave (`T/wiki/test_screen_door.py`, t-070 round 2 C-C).
+SCREEN_PATTERNS = (
+    ("pem-private-key", _holds(("-----BEGIN ",)), _pem_spans),
+    ("plain-phrasing", _PLAIN_HINT.search, _plain_spans),
+    ("plain-variant", _VARIANT_HINT.search, _variant_spans),
+    ("secret-assignment", _SECRET_TEXT_HINT.search, _secret_text_spans),
+    ("provider-key", _holds(_PROVIDER_HINTS), _regex_spans(_PROVIDER_KEY)),
+    ("aws-access-key", _holds(_AWS_HINTS), _regex_spans(_AWS_KEY)),
+    ("slack-token", _holds(_SLACK_HINTS), _regex_spans(_SLACK_TOKEN)),
+    ("jwt", _holds(("eyJ",)), _jwt_spans),
+)
+
+
+def _redact_once(value):
+    """One pass of every secret class (`SCREEN_PATTERNS`) over a string. Each class reads the string
+    as given and the masks are the union of what they found, so no class's mask hides another
+    class's secret, in whatever order the classes are listed: a passphrase's words do not take the
+    first part of a JWT or a webhook and leave the rest unmatched, and a value glued to the next
+    credential name keeps that name for its own class (t-070 RC2 glued pairs). A mask that makes
+    another match possible is found by the next pass (`settle`)."""
+    spans = []
+    for _name, applies, find in SCREEN_PATTERNS:
+        if applies(value):
+            spans.extend(find(value))
+    return _mask(value, spans) if spans else value
+
+
+def _screen_once(value):
+    """One pass of the screen: every secret class (`_redact_once`), then a mask written in brackets
+    spaced apart, since `[[redacted]]` reads as a wikilink to Rune2 (as `drain._summary` spaces
+    every `[[`)."""
+    value = _redact_once(value)
+    if "[redacted]" in value:
+        value = value.replace("[[redacted]", "[ [redacted]").replace("[redacted]]", "[redacted] ]")
+    return value
+
+
+def settle(step, value, passes=_REDACT_PASSES):
+    """`step` applied until the string stops changing, so the result is a fixed point of `step`
+    and applying the whole again changes nothing. A string still changing after `passes` passes is
+    masked whole: that keeps the result a fixed point and keeps no secret (fail closed)."""
+    for _ in range(passes):
+        screened = step(value)
+        if screened == value:
+            return value
+        value = screened
+    return "[redacted]"
+
+
+def screen(value: str) -> str:
+    """The one secret screen of a string (FR-26, HS-SCO-05; dec-804f2708474c Q-A): every secret
+    class above replaced by `[redacted]` and the masks spaced out of wikilinks, pass after pass in one
+    loop until the text stops changing (`settle`), so `screen(screen(x)) == screen(x)`. A text with
+    no secret is read once, a text with one secret twice (the pass that masks it and the pass that
+    finds nothing more; t-070 A-3). Each class takes time linear in the text on every repeated-input
+    shape the tests generate from the credential names, verbs, separators and token start literals
+    (`T/wiki/test_screen_door.py::test_screen_is_linear_on_generated_pump_shapes`, t-070 round 2
+    C-C); that is a tested property of those shapes, not a proof for every input. The wiki's write
+    door calls it through `alpaca.wiki.ingest.drain.screen`, the redactor below for each string."""
+    return settle(_screen_once, value)
+
+
 def _redact(value, depth=0):
+    """The secret redactor of Alpaca: a secret-named key's value whole, and every string through the
+    one screen (`screen`), so `_redact(_redact(x)) == _redact(x)`."""
     if depth > 24:
         return "[nested content omitted]"
     if isinstance(value, str):
-        value = _SECRET_TEXT.sub(lambda m: (m.group(1) or m.group(2)) + "[redacted]", value)
-        return _PROVIDER_KEY.sub("[redacted]", value)
+        return screen(value)
     if isinstance(value, dict):
         return {str(k): "[redacted]" if _SECRET_KEY.search(str(k)) else _redact(v, depth + 1)
                 for k, v in value.items()}
@@ -84,6 +626,11 @@ class _Budget:
 
 
 class _Capture:
+    #: How a message text, a tool input or a tool result is kept: `(value, cut)`. Here redacted and
+    #: cut to `MAX_CONTENT_CHARS` for a page; the wiki's durable capture keeps each value whole and
+    #: screens the projection once (`alpaca.wiki.ingest.drain._visible_transcript`, t-070 RC2).
+    _bound = staticmethod(_bounded)
+
     def __init__(self, sid, kind, budget):
         self.sid = sid
         self.kind = kind
@@ -171,7 +718,7 @@ class _Capture:
             self.stats["unreadable_sources"] += 1
 
     def message(self, role, text, source, ts=None, identity=None, **extra):
-        text, cut = _bounded(text)
+        text, cut = self._bound(text)
         self.stats["truncated"] |= cut
         ident = _hash(source["id"] + ":" + str(identity or source.get("offset", source.get("event_id"))) + ":" + role)
         msg = {"id": ident, "ts": ts, "role": role, "text": text, "tools": [],
@@ -183,7 +730,7 @@ class _Capture:
         ident = str(ident or _hash(msg["id"] + ":" + str(len(msg["tools"]))))
         if ident in self.tools:
             return self.tools[ident]
-        value, cut = _bounded(value)
+        value, cut = self._bound(value)
         tool = {"id": ident, "name": str(name or "tool"), "input": value, "result": None,
                 "status": "unmatched-start", "input_truncated": cut, "result_truncated": False,
                 "sources": [source]}
@@ -200,7 +747,7 @@ class _Capture:
             tool["status"] = "unmatched-result"
         else:
             tool["status"] = "error" if error else "completed"
-        tool["result"], cut = _bounded(value)
+        tool["result"], cut = self._bound(value)
         tool["result_truncated"] = bool(cut or truncated)
         if source not in tool["sources"]:
             tool["sources"].append(source)

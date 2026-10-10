@@ -171,3 +171,56 @@ def test_gate_does_not_inherit_claude_session_or_project(project, monkeypatch):
     monkeypatch.setenv('CLAUDE_PROJECT_DIR', '/parent/project')
     configure(project, [sys.executable, '-c', 'import os; assert "CLAUDE_CODE_SESSION_ID" not in os.environ; assert "CLAUDE_PROJECT_DIR" not in os.environ'])
     assert check(project).status == 'PASS'
+
+
+def ship_ignored_member(project):
+    """A committed member that the candidate's own .gitignore matches: a fresh repository of the
+    candidate would never carry it, and a scan of its commit would never read it."""
+    (project / 'src/.gitignore').write_text('*.log\n')
+    (project / 'src/debug.log').write_text('debug output\n')
+    subprocess.run(['git', '-C', str(project), 'add', '--force', 'src/.gitignore', 'src/debug.log'], check=True)
+
+
+def test_check_flags_a_candidate_member_its_gitignore_hides(project):
+    ship_ignored_member(project)
+    receipt = check(project)
+    assert 'src/debug.log' in api('build').tree_inventory(receipt.build['tree'])
+    assert receipt.status != 'PASS'
+    gates = {g['name']: g for g in receipt.gates}
+    assert gates['fresh-clone']['status'] == 'FAIL' and 'src/debug.log' in gates['fresh-clone']['detail']
+    assert 'src/.gitignore:1' in gates['fresh-clone']['detail']           # the actual ignore source
+    assert gates['leak-scan']['status'] == 'FAIL' and 'UNSCANNED-IGNORED-MEMBER' in gates['leak-scan']['detail']
+    with pytest.raises(ValueError):
+        api('checks').validate_checks(project, api('config').load_config(project), receipt)
+
+
+def test_dev_gate_keeps_tracked_files_an_ignore_rule_matches(project):
+    ship_ignored_member(project)
+    configure(project, [sys.executable, '-c', 'from pathlib import Path; assert Path("src/debug.log").read_text() == "debug output\\n"'], scope='dev')
+    receipt = check(project)
+    assert next(g for g in receipt.gates if g['name'] == 'product-test')['status'] == 'PASS'
+
+
+@pytest.mark.parametrize('host', ['xdg-default', 'global-config'])
+def test_a_global_git_ignore_on_the_release_host_does_not_fail_a_clean_candidate(project, tmp_path, monkeypatch, host):
+    """Review M-1: the seed takes only the candidate's own ignore rules. A host-wide ignore file (the
+    default $XDG_CONFIG_HOME/git/ignore and a core.excludesFile in the global config) and a global
+    init template's info/exclude never keep a candidate file out of the seed."""
+    home = tmp_path / 'host-home'
+    (home / '.config/git').mkdir(parents=True)
+    (home / '.config/git/ignore').write_text('*.txt\n')
+    (home / 'excludes').write_text('run\n')
+    template = home / 'template'
+    (template / 'info').mkdir(parents=True)
+    (template / 'info/exclude').write_text('project.yaml\n')
+    if host == 'global-config':
+        (home / '.gitconfig').write_text('[core]\n\texcludesFile = %s\n[init]\n\ttemplateDir = %s\n'
+                                         % (home / 'excludes', template))
+    monkeypatch.setenv('HOME', str(home))
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(home / '.config'))
+    monkeypatch.delenv('GIT_CONFIG_GLOBAL', raising=False)
+    receipt = check(project)
+    gates = {g['name']: g for g in receipt.gates}
+    assert gates['fresh-clone']['status'] == 'PASS', gates['fresh-clone']
+    assert gates['leak-scan']['status'] == 'PASS', gates['leak-scan']
+    assert receipt.status == 'PASS'

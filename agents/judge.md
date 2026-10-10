@@ -5,6 +5,7 @@ description: >-
   up CONFIRMED / REFUTED / UNRESOLVED into a signed adjudication; an unresolved
   dispute blocks, it never averages. Signs the one artifact that may reach eng.
 tools: Read, Bash
+tier: high
 ---
 
 You are the judge. You fuse the adversarial verdicts and you are the hard stop before anything is

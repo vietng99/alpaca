@@ -43,8 +43,9 @@ def source_signature(path, subagents_dir=None):
 def ishuman(c):
     if not isinstance(c, str) or not c.strip():
         return False
-    fl = c.split("\n", 1)[0]
-    if fl.startswith(("<command", "<local-command", "<system-reminder", "<task-notification", "<user-prompt")):
+    fl = c.lstrip().split("\n", 1)[0]
+    if fl.startswith(("<command", "<local-command", "<system-reminder", "<task-notification", "<user-prompt", "# AGENTS.md", "<INSTRUCTIONS>",
+                      "<environment_context>", "<recommended_plugins>", "<send_user_message_question_reply>")):
         return False
     return "agent-message from=" not in c
 

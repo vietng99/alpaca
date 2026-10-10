@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS blocks (
     status               TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','superseded'))
 );
 CREATE INDEX IF NOT EXISTS idx_blocks_doc     ON blocks(doc_id, ordinal);
+CREATE INDEX IF NOT EXISTS idx_blocks_doc_status ON blocks(doc_id, status, block_id);
 CREATE INDEX IF NOT EXISTS idx_blocks_content ON blocks(block_content_id);
 CREATE INDEX IF NOT EXISTS idx_blocks_status  ON blocks(status, valid_from);
 
@@ -421,3 +422,73 @@ CREATE TRIGGER IF NOT EXISTS no_delete_nodes BEFORE DELETE ON nodes
     BEGIN SELECT RAISE(ABORT, 'deprecate-not-delete: nodes are append-only (supersede or merge)'); END;
 CREATE TRIGGER IF NOT EXISTS no_delete_blocks BEFORE DELETE ON blocks
     BEGIN SELECT RAISE(ABORT, 'deprecate-not-delete: blocks are append-only (supersede)'); END;
+
+-- ------------------------------------------------------------------ schema 4 (op-008 t-062)
+-- New tables only (design/rune2-memory/architecture.md 10.1): a new column would make pour()
+-- rebuild FTS inside a hook. Every row is written by a store.write.Writer method, answer_outcomes by
+-- engine/ledger.py (a named writer). lessons_log and knowledge_facts are created by their gates.
+CREATE TABLE IF NOT EXISTS source_versions (
+    source_ref TEXT NOT NULL, version_seq INTEGER NOT NULL, doc_id TEXT NOT NULL,
+    content_sha256 TEXT NOT NULL, origin_hash TEXT, operator TEXT, session TEXT, op TEXT, task TEXT,
+    source_time TEXT, recorded_at TEXT NOT NULL, private INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'current' CHECK (status IN ('current','replaced','withdrawn')),
+    PRIMARY KEY (source_ref, version_seq));
+CREATE TABLE IF NOT EXISTS edge_origin (
+    edge_id TEXT NOT NULL REFERENCES edges(edge_id), claim_ref TEXT NOT NULL,
+    origin TEXT NOT NULL CHECK (origin IN ('record-rule','candidate')),
+    rule_id TEXT, source_event_id INTEGER, candidate_id TEXT,
+    source_ref TEXT NOT NULL, quote TEXT NOT NULL, quote_sha256 TEXT NOT NULL,
+    fact_kind TEXT NOT NULL CHECK (fact_kind IN
+        ('record-fact','agent-experience','derived-hypothesis')),
+    status TEXT NOT NULL DEFAULT 'live' CHECK (status IN ('live','withdrawn')),
+    PRIMARY KEY (edge_id, claim_ref));
+CREATE TABLE IF NOT EXISTS candidates (
+    candidate_id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('fact','observation','summary')),
+    body_json TEXT,                        -- null when any anchor failed K-4 (OB-21)
+    body_sha256 TEXT NOT NULL,
+    proposer TEXT NOT NULL,
+    proposer_kind TEXT NOT NULL CHECK (proposer_kind IN ('session','job')), proposer_operator TEXT,
+    record_event_id INTEGER NOT NULL, checks_json TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN
+        ('checked','refused','admitted','withdrawn','stale','retracted')),
+    verdict TEXT, prior_edge_id TEXT, admission_ref TEXT, admission_effect TEXT,
+    admission_event_id INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS candidate_anchors (
+    candidate_id TEXT NOT NULL REFERENCES candidates(candidate_id),
+    ordinal INTEGER NOT NULL, source_ref TEXT NOT NULL,
+    quote TEXT,                            -- null for a K-4 failure or an OB-22 context failure
+    quote_sha256 TEXT NOT NULL, role TEXT NOT NULL CHECK (role IN ('anchor','context')),
+    doc_id TEXT, block_content_id TEXT, block_sha256 TEXT,
+    PRIMARY KEY (candidate_id, ordinal));
+CREATE TABLE IF NOT EXISTS exclusions (
+    source_ref TEXT NOT NULL, reason TEXT NOT NULL,
+    requested_by TEXT NOT NULL, record_event_id INTEGER NOT NULL, recorded_at TEXT NOT NULL,
+    PRIMARY KEY (source_ref, record_event_id));
+CREATE TABLE IF NOT EXISTS corrections (
+    correction_id TEXT PRIMARY KEY,
+    target_subj TEXT NOT NULL, target_predicate TEXT NOT NULL, target_obj_key TEXT NOT NULL,
+    target_valid_from TEXT NOT NULL, target_source_ref TEXT NOT NULL,
+    target_quote_sha256 TEXT NOT NULL,
+    action TEXT NOT NULL CHECK (action IN ('supersede','world-change','retract','revert')),
+    replacement_json TEXT,
+    effective_at TEXT CHECK (action <> 'world-change' OR effective_at IS NOT NULL),
+    reason TEXT NOT NULL, requested_by TEXT NOT NULL,
+    record_event_id INTEGER NOT NULL, recorded_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'applied' CHECK (status IN ('applied','stale')),
+    target_edge_id TEXT, replacement_edge_id TEXT);
+CREATE TABLE IF NOT EXISTS answer_outcomes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, query_hash TEXT NOT NULL, answer_id TEXT,
+    outcome TEXT NOT NULL, reason TEXT, recorded_at TEXT NOT NULL);
+CREATE TRIGGER IF NOT EXISTS no_delete_candidates BEFORE DELETE ON candidates
+    BEGIN SELECT RAISE(ABORT, 'candidates are append-only (withdraw or retract)'); END;
+CREATE TRIGGER IF NOT EXISTS no_delete_corrections BEFORE DELETE ON corrections
+    BEGIN SELECT RAISE(ABORT, 'corrections are append-only (revert)'); END;
+CREATE TRIGGER IF NOT EXISTS no_delete_edge_origin BEFORE DELETE ON edge_origin
+    BEGIN SELECT RAISE(ABORT, 'support claims are append-only (withdraw)'); END;
+CREATE TRIGGER IF NOT EXISTS no_delete_candidate_anchors BEFORE DELETE ON candidate_anchors
+    BEGIN SELECT RAISE(ABORT, 'candidate anchors are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS no_delete_exclusions BEFORE DELETE ON exclusions
+    BEGIN SELECT RAISE(ABORT, 'exclusions are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS no_delete_source_versions BEFORE DELETE ON source_versions
+    BEGIN SELECT RAISE(ABORT, 'source versions are append-only (withdrawn status)'); END;

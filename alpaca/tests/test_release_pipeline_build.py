@@ -38,6 +38,11 @@ def source(tmp_path):
     return root
 
 
+def commit_all(root, message='fixture change'):
+    subprocess.run(['git', '-C', str(root), 'add', '-A'], check=True)
+    subprocess.run(['git', '-C', str(root), 'commit', '-qm', message], check=True)
+
+
 def build(source, name='one'):
     config = api('config').load_config(source)
     return api('build').build_release(source, config, source / '.alpaca/releases' / name / 'tree')
@@ -98,6 +103,7 @@ def test_overlay_replaces_only_allowlisted_targets(source):
     data = yaml.safe_load((source / 'project.yaml').read_text())
     data['release']['overlays'] = {'project.yaml': 'clean.yaml'}
     (source / 'project.yaml').write_text(yaml.safe_dump(data))
+    commit_all(source)
     receipt = build(source)
     assert (Path(receipt.tree) / 'project.yaml').read_text() == 'name: sample\ntemplate: true\n'
     assert not (Path(receipt.tree) / 'clean.yaml').exists()
@@ -162,6 +168,7 @@ def test_allowlisted_bundled_skills_are_preserved(source):
     skill.parent.mkdir(parents=True)
     skill.write_text('shipped skill instructions\n')
     (source / 'ALLOWLIST').write_text('[mechanism]\nplugin/\n[memory]\n.alpaca/\n')
+    commit_all(source)
     receipt = build(source)
     assert (Path(receipt.tree) / 'plugin/skills/nuclear/SKILL.md').read_text() == 'shipped skill instructions\n'
 
@@ -173,3 +180,46 @@ def test_manifest_generator_cannot_read_publication_credentials(source, monkeypa
     (source / 'project.yaml').write_text(yaml.safe_dump(data))
     monkeypatch.setenv('PUBLIC_REPO_TOKEN', 'fixture-credential')
     assert build(source).status == 'PASS'
+
+
+def test_gitignored_and_untracked_files_never_reach_the_built_tree(source):
+    """Only the source commit's files ship (t-071 F-1): a gitignored store inside an allowlisted
+    directory, like the research reproducers under contracts/research/, and a stray untracked file
+    stay behind, while the committed files beside them ship."""
+    (source / '.gitignore').write_text('.alpaca/\n/src/hidden/\n')
+    commit_all(source)
+    hidden = source / 'src/hidden/h1'
+    hidden.mkdir(parents=True)
+    (hidden / 'run.sh').write_text('#!/bin/sh\necho reproducer\n')
+    (hidden / 'tests.txt').write_text('reproducer test list\n')
+    (source / 'src/scratch.txt').write_text('not added\n')
+    receipt = build(source)
+    tree = Path(receipt.tree)
+    assert set(receipt.inventory) == {'project.yaml', 'src/app.txt', 'src/run'}
+    assert not (tree / 'src/hidden').exists() and not (tree / 'src/scratch.txt').exists()
+    assert (tree / 'src/app.txt').read_text() == 'product\n'
+
+
+def test_listed_file_outside_the_source_commit_is_refused(source):
+    (source / '.gitignore').write_text('.alpaca/\nnotes.txt\n')
+    (source / 'ALLOWLIST').write_text('[mechanism]\nsrc/\nnotes.txt\nproject.yaml\n[memory]\n.alpaca/\n')
+    commit_all(source)
+    (source / 'notes.txt').write_text('local notes\n')
+    with pytest.raises(ValueError, match='not in the source commit'):
+        build(source)
+
+
+def test_committed_member_missing_from_the_working_tree_is_refused(source):
+    (source / 'src/app.txt').unlink()
+    with pytest.raises(ValueError, match='missing'):
+        build(source)
+
+
+def test_overlay_source_outside_the_source_commit_is_refused(source):
+    data = yaml.safe_load((source / 'project.yaml').read_text())
+    data['release']['overlays'] = {'project.yaml': 'clean.yaml'}
+    (source / 'project.yaml').write_text(yaml.safe_dump(data))
+    commit_all(source)
+    (source / 'clean.yaml').write_text('name: sample\ntemplate: true\n')
+    with pytest.raises(ValueError, match='overlay source is not in the source commit'):
+        build(source)

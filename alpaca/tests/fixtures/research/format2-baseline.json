@@ -1,0 +1,168 @@
+{
+ "commit": "f5869e9",
+ "files": {
+  "alpaca/tests/fixtures/runbook-example-v1/runbook.yaml": {
+   "errors": [],
+   "verdict": "PASS",
+   "warnings": [
+    {
+     "code": "EC-IGNORED",
+     "message": "format 1 does not cover edge cases; move to runbook: 2 (<REPO>/alpaca/tests/fixtures/runbook-example-v1/spec.md lists 2 under an Edge Cases heading)",
+     "where": "<REPO>/alpaca/tests/fixtures/runbook-example-v1/spec.md"
+    }
+   ]
+  },
+  "docs/alpaca-bootstrap/evidence/partner-kit/fix/prove2-claude/output/runbook.yaml": {
+   "errors": [
+    {
+     "code": "SPEC-MISSING",
+     "message": "cannot read the spec <REPO>/docs/alpaca-bootstrap/evidence/partner-kit/fix/prove2-claude/output/spec.md: [Errno 2] No such file or directory: '<REPO>/docs/alpaca-bootstrap/evidence/partner-kit/fix/prove2-claude/output/spec.md'",
+     "where": "spec"
+    }
+   ],
+   "verdict": "FAIL",
+   "warnings": []
+  },
+  "docs/alpaca-bootstrap/evidence/partner-kit/fix/prove2-codex/delivery/runbook.yaml": {
+   "errors": [],
+   "verdict": "PASS",
+   "warnings": []
+  },
+  "docs/alpaca-bootstrap/evidence/partner-kit/prove-claude/output/runbook.yaml": {
+   "errors": [
+    {
+     "code": "SPEC-MISSING",
+     "message": "cannot read the spec <REPO>/docs/alpaca-bootstrap/evidence/partner-kit/prove-claude/output/spec.md: [Errno 2] No such file or directory: '<REPO>/docs/alpaca-bootstrap/evidence/partner-kit/prove-claude/output/spec.md'",
+     "where": "spec"
+    }
+   ],
+   "verdict": "FAIL",
+   "warnings": []
+  },
+  "docs/alpaca-bootstrap/evidence/partner-kit/prove-codex/delivery/runbook.yaml": {
+   "errors": [
+    {
+     "code": "CHECKS-WITHOUT-RUN",
+     "message": "this stage is only an owner gate and has no `run`, so nothing would judge its checks; move them to a stage that has a `run`, or give this stage the `run` they check",
+     "where": "stages[1].checks"
+    },
+    {
+     "code": "CHECKS-WITHOUT-RUN",
+     "message": "this stage is only an owner gate and has no `run`, so nothing would judge its checks; move them to a stage that has a `run`, or give this stage the `run` they check",
+     "where": "stages[5].checks"
+    }
+   ],
+   "verdict": "FAIL",
+   "warnings": []
+  },
+  "docs/alpaca-bootstrap/evidence/partner-kit/review/gate-only-checks.runbook.yaml": {
+   "errors": [
+    {
+     "code": "CHECKS-WITHOUT-RUN",
+     "message": "this stage is only an owner gate and has no `run`, so nothing would judge its checks; move them to a stage that has a `run`, or give this stage the `run` they check",
+     "where": "stages[1].checks"
+    },
+    {
+     "code": "SPEC-MISSING",
+     "message": "cannot read the spec <REPO>/docs/alpaca-bootstrap/evidence/partner-kit/review/spec.md: [Errno 2] No such file or directory: '<REPO>/docs/alpaca-bootstrap/evidence/partner-kit/review/spec.md'",
+     "where": "spec"
+    }
+   ],
+   "verdict": "FAIL",
+   "warnings": []
+  },
+  "docs/alpaca-bootstrap/evidence/t-007/forge-transcript/work/runbook.yaml": {
+   "errors": [],
+   "verdict": "PASS",
+   "warnings": [
+    {
+     "code": "FR-UNCOVERED",
+     "message": "no check covers FR-005 (a warning: only success criteria must be covered)",
+     "where": "FR-005"
+    },
+    {
+     "code": "EC-IGNORED",
+     "message": "format 1 does not cover edge cases; move to runbook: 2 (<REPO>/docs/alpaca-bootstrap/evidence/t-007/forge-transcript/work/spec.md lists 2 under an Edge Cases heading)",
+     "where": "<REPO>/docs/alpaca-bootstrap/evidence/t-007/forge-transcript/work/spec.md"
+    },
+    {
+     "code": "SPEC-CLARIFY",
+     "message": "the spec still has 1 [NEEDS CLARIFICATION] marker(s)",
+     "where": "<REPO>/docs/alpaca-bootstrap/evidence/t-007/forge-transcript/work/spec.md"
+    }
+   ]
+  },
+  "docs/alpaca-bootstrap/evidence/t-008/flow/produced/specs/001-link-shortener/runbook.yaml": {
+   "errors": [],
+   "verdict": "PASS",
+   "warnings": [
+    {
+     "code": "EC-IGNORED",
+     "message": "format 1 does not cover edge cases; move to runbook: 2 (<REPO>/docs/alpaca-bootstrap/evidence/t-008/flow/produced/specs/001-link-shortener/spec.md lists 6 under an Edge Cases heading)",
+     "where": "<REPO>/docs/alpaca-bootstrap/evidence/t-008/flow/produced/specs/001-link-shortener/spec.md"
+    }
+   ]
+  },
+  "docs/runbook-v2/evidence/trial/05-runbook/runbook-after-supersede.yaml": {
+   "errors": [
+    {
+     "code": "SPEC-MISSING",
+     "message": "cannot read the spec <REPO>/docs/runbook-v2/evidence/trial/05-runbook/spec.md: [Errno 2] No such file or directory: '<REPO>/docs/runbook-v2/evidence/trial/05-runbook/spec.md'",
+     "where": "spec"
+    }
+   ],
+   "verdict": "FAIL",
+   "warnings": []
+  },
+  "docs/runbook-v2/evidence/trial/05-runbook/runbook-run1.yaml": {
+   "errors": [
+    {
+     "code": "SPEC-MISSING",
+     "message": "cannot read the spec <REPO>/docs/runbook-v2/evidence/trial/05-runbook/spec.md: [Errno 2] No such file or directory: '<REPO>/docs/runbook-v2/evidence/trial/05-runbook/spec.md'",
+     "where": "spec"
+    }
+   ],
+   "verdict": "FAIL",
+   "warnings": []
+  },
+  "docs/runbook-v2/evidence/trial/05-runbook/runbook-run2.yaml": {
+   "errors": [
+    {
+     "code": "SPEC-MISSING",
+     "message": "cannot read the spec <REPO>/docs/runbook-v2/evidence/trial/05-runbook/spec.md: [Errno 2] No such file or directory: '<REPO>/docs/runbook-v2/evidence/trial/05-runbook/spec.md'",
+     "where": "spec"
+    }
+   ],
+   "verdict": "FAIL",
+   "warnings": []
+  },
+  "docs/runbook-v2/evidence/trial/05-runbook/runbook.yaml": {
+   "errors": [
+    {
+     "code": "SPEC-MISSING",
+     "message": "cannot read the spec <REPO>/docs/runbook-v2/evidence/trial/05-runbook/spec.md: [Errno 2] No such file or directory: '<REPO>/docs/runbook-v2/evidence/trial/05-runbook/spec.md'",
+     "where": "spec"
+    }
+   ],
+   "verdict": "FAIL",
+   "warnings": []
+  },
+  "templates/runbook-example/runbook.yaml": {
+   "errors": [],
+   "verdict": "PASS",
+   "warnings": []
+  },
+  "templates/runbook-kit/templates/runbook.yaml": {
+   "errors": [],
+   "verdict": "PASS",
+   "warnings": [
+    {
+     "code": "FR-UNCOVERED",
+     "message": "no check covers FR-001 (a warning: only success criteria and edge cases must be covered)",
+     "where": "FR-001"
+    }
+   ]
+  }
+ },
+ "note": "runbook.check at f5869e9 on every tracked *runbook*.yaml outside .alpaca/, with the checkout root written as <REPO>"
+}

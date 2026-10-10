@@ -25,6 +25,17 @@ Intake is a front door onto the checklist engine Alpaca already has, not a secon
     `profile: intake_profile` in project.yaml; `alpaca doctor` then checks the runbooks and their
     plugin check scripts.
 
+A research runbook (`runbook: 3`, design/research-engine/runbook-format-3.md section 14.3) takes
+the same path with five differences: its rows also count the research coverers (metrics, repair
+cases and the parts of the block), whose bars `runbook.bar_parts` writes from the block the
+contract loader expanded, and a row shown only by them is labelled `research`; its stage tasks
+name the stage's research role and no profile stage; intake writes no profile and no project.yaml
+line; and it lands the pack-level contract as one `research-contract` event
+(`alpaca.research.contract.land`) after it compared the contract with the newest one of the
+runbook and refused a loosening no owner grant names (exit 3). A re-intake of an unchanged runbook
+writes nothing. For every runbook, a task contract's stored `research` part (a task's override,
+section 7.4) is left out of the compare and carried into any contract intake records for the task.
+
 The runbook is checked against the spec first (`runbook.check`, the same check as
 `alpaca runbook check`); a runbook that leaves a criterion uncovered is refused and nothing is
 written. `--dry-run` prints the plan and writes nothing. One `intake` event records each run that
@@ -101,6 +112,12 @@ ITEM_FORMAT = 2
 _HEADER = ("Intake item file, format %d. alpaca intake wrote this file from a spec and a runbook "
            "and never edits it; a later intake that sees a change writes a new file.")
 _ITEM_HEADER = _HEADER % ITEM_FORMAT
+#: the run-order entry of a row whose covering parts have no stage: the research engine runs
+#: them (a metric, a repair case, a part of the block), so no stage position applies
+RESEARCH_STAGE = {"position": None, "label": "research"}
+#: the keys of a stored task contract that intake does not plan: the event's own, and the
+#: task's research override, which intake carries unchanged (runbook-format-3.md section 7.4)
+_NOT_PLANNED = ("event_id", "at", "by", "research")
 _SLUG = re.compile(r"[^a-z0-9]+")
 _OP_ID = re.compile(r"^op-\d+$")
 _LIST_MARK = re.compile(r"^(?:[-*+]|\d{1,9}[.)])\s+")
@@ -566,15 +583,60 @@ def _fit(lines, limit=20):
     return lines[:limit - 1] + [("and %d more: %s" % (len(rest), "; ".join(rest)))[:taskcontract.MAX_TEXT]]
 
 
-def _task_plan(data, rel_runbook):
+def _research_roles(block):
+    """{stage id: role} of a research block: `gate` (research.gates), `holdout`
+    (research.holdout.stages) or `prepare` (research.repair.prepare). The check gives a stage one
+    role at most (STAGE-ROLE)."""
+    roles = {}
+    for entry in block.get("gates") or []:
+        if isinstance(entry, dict) and isinstance(entry.get("stage"), str):
+            roles.setdefault(entry["stage"], "gate")
+    holdout = block.get("holdout") if isinstance(block.get("holdout"), dict) else {}
+    for sid in holdout.get("stages") or []:
+        if isinstance(sid, str):
+            roles.setdefault(sid, "holdout")
+    repair = block.get("repair") if isinstance(block.get("repair"), dict) else {}
+    if isinstance(repair.get("prepare"), str):
+        roles.setdefault(repair["prepare"], "prepare")
+    return roles
+
+
+#: the statement of a research runbook's stage task, by the stage's research role
+_ROLE_STATEMENT = {
+    "gate": "Gate stage %s of research runbook %s, run in every attempt worktree by the gate chain.",
+    "holdout": "Holdout stage %s of research runbook %s, run on the final champion only.",
+    "prepare": "Prepare stage %s of research runbook %s, run once per repair case on its base; its "
+               "output is committed as the case baseline.",
+}
+
+
+#: the ladder phase of the tasks intake adds (op-019 D-19: an op with a batch needs a phase on every
+#: task). A runbook stage has no phase of its own, so the choice is made here: a stage's run is the
+#: build phase, an owner gate judges the evidence and is the verify phase.
+STAGE_PHASE = "build"
+GATE_PHASE = "verify"
+
+
+def stage_phase(key):
+    """The phase of the task for plan key `key` (`gate:<stage>` for an owner gate)."""
+    return GATE_PHASE if str(key).startswith("gate:") else STAGE_PHASE
+
+
+def _task_plan(data, rel_runbook, block=None):
     """[(key, title, statement, contract)] for every stage and every owner gate, in run order.
     A recovery stage (`recovery: true`) gets no task: it runs only when a fail case sends to it,
     so the fail case line of the stage that sends names it, its command and its checks. It stays
-    a profile stage."""
+    a profile stage.
+
+    `block` is the expanded research block of a format 3 runbook (None for format 1 and 2). Then
+    a stage task's statement names the stage's research role, and no contract names a `stage`:
+    intake writes no profile for a research runbook, and a contract may name only a profile stage
+    (runbook-format-3.md section 14.3, point 2)."""
     from alpaca import runbook
     knobs = runbook.knob_values(data)
     rb_id = data.get("id")
     by_id = {s.get("id"): s for s in data.get("stages") or [] if isinstance(s, dict)}
+    roles = _research_roles(block) if isinstance(block, dict) else None
     out = []
     for n, stage in enumerate(data.get("stages") or []):
         sid = stage.get("id")
@@ -592,6 +654,8 @@ def _task_plan(data, rel_runbook):
                             + (["the approval judges %s" % ", ".join(str(c) for c in covers)] if covers else []),
                 "fail_cases": ["the owner does not approve; stage %s does not run" % sid],
                 "stage": sid, "source": source + " owner_gate"}
+            if roles is not None:
+                del contract["stage"]
             out.append(("gate:%s" % sid, ("Owner approval: %s" % title)[:60],
                         "Owner gate of stage %s in runbook %s: %s" % (sid, rb_id, " ".join(str(gate.get("approve")).split())),
                         contract))
@@ -618,7 +682,13 @@ def _task_plan(data, rel_runbook):
         contract = {"input": _fit(inputs), "expected": _fit(outputs), "done_bar": _fit(done),
                     "fail_cases": _fit(fails), "stage": sid, "source": source}
         desc = " ".join(str(stage.get("description") or title).split()).rstrip(".")
-        statement = "Run stage %s of runbook %s: %s. Command: %s" % (sid, rb_id, desc, " ".join(str(stage.get("run")).split()))
+        command = " ".join(str(stage.get("run")).split())
+        if roles is None:
+            statement = "Run stage %s of runbook %s: %s. Command: %s" % (sid, rb_id, desc, command)
+        else:
+            del contract["stage"]
+            statement = "%s %s. Command: %s" % (_ROLE_STATEMENT[roles.get(sid, "gate")] % (sid, rb_id),
+                                                 desc[:1].upper() + desc[1:], command)
         out.append(("stage:%s" % sid, title[:60], statement, contract))
     return out
 
@@ -810,6 +880,60 @@ def _profile_plan(root, rel_runbook, stages):
             "runbooks": runbooks}
 
 
+def _research_profile(root):
+    """The profile part of a research runbook's plan: intake writes no `intake_profile.py` and no
+    `profile:` line for it (FR-050, EC-020), so the plan names the project's current profile
+    module, or None, and writes nothing (runbook-format-3.md section 14.3, point 3)."""
+    named = _read_project(root).get("profile")
+    named = named.strip() if isinstance(named, str) and named.strip() else None
+    return {"module": named, "action": "not written: a research runbook sets no profile", "writes": {},
+            "research": True}
+
+
+# ------------------------------------------------------------------------ the research contract
+def _research_contract(root, conn, runbook_path):
+    """The pack-level contract of a research runbook, checked against its baseline
+    (runbook-format-3.md section 14.3, point 4): `contract.load_block` (the check with the
+    runbook's own spec, the pack layers, and `files` at the commit `repo.ref` names), the runbook
+    path made relative to the project root as `contract.preview` makes it (so intake and a run
+    start key the same baseline), `contract.pack_diff` against the newest `research-contract`
+    event of this runbook id and path, and `contract.check_override` with the pack layer only. A
+    refusal is an IntakeError with the loader's verdict as its code (a loosening no owner grant
+    names: PAUSED, exit 3). Reads only. Returns {"pack", "diff", "grants", "lands", "baseline"}:
+    `lands` is whether `contract.land` would record a new event (its pack_sha256 differs from the
+    newest one)."""
+    from alpaca.research import contract, errors
+    root = os.path.realpath(root)
+    try:
+        pack = contract.load_block(os.path.abspath(runbook_path))
+        anchor = os.path.realpath(pack["project"] or pack["repo"]["root"])
+        if anchor != root:
+            for part in ("defaults", "spec"):
+                if pack[part]:
+                    full = os.path.join(anchor, pack[part]["path"])
+                    pack[part]["path"] = os.path.relpath(full, root).replace(os.sep, "/")
+        pack["runbook"] = os.path.relpath(os.path.join(anchor, pack["runbook"]), root).replace(os.sep, "/")
+        pack["pack_sha256"] = contract.pack_sha256(pack)
+        newest = contract._baseline_event(conn, pack["runbook_id"], pack["runbook"])
+        base = newest["data"] if newest is not None and isinstance(newest["data"], dict) else None
+        diff = contract.pack_diff(pack, base)
+        pack_ref = contract.ref(pack["runbook"], None)
+        contract.check_override([(pack_ref, diff)], conn=conn)
+    except errors.ResearchRefusal as exc:
+        detail = [line for line in str(exc.detail or "").splitlines() if line.strip()]
+        if exc.reason == "CONTRACT-LOOSEN-UNGRANTED":
+            message = ("the research contract of %s loosens its baseline (the newest research-contract event of "
+                       "the runbook); each field below needs a term of an owner loosen grant on %s, with the new "
+                       "value, before intake records it" % (pack["runbook"], contract.ref(pack["runbook"], None)))
+        else:
+            message = "the research contract loader refused the runbook: %s" % exc.reason
+        raise IntakeError(message, code=exc.code, detail=["%s %s" % (exc.reason, line) for line in detail]
+                          or [exc.reason])
+    grants = contract._mark_grants(conn, pack_ref, diff)
+    lands = base is None or base.get("pack_sha256") != pack["pack_sha256"]
+    return {"pack": pack, "diff": diff, "grants": grants, "lands": lands, "baseline": newest and newest["id"]}
+
+
 # ------------------------------------------------------------------------------ plan and apply
 def _rel(root, path):
     full = os.path.realpath(path)
@@ -838,7 +962,10 @@ def _open_op(conn, op):
 
 
 def _shown(who, part):
-    """How the `shown by` cell names one covering part."""
+    """How the `shown by` cell names one covering part. A research coverer (a metric, a repair case,
+    a part of the block) has no stage: the research engine runs it."""
+    if part["stage"] is None:
+        return "research %s" % who
     if part["kind"] == "gate":
         return "the owner gate of stage %s" % part["stage"]
     if part["kind"] == "fail":
@@ -885,7 +1012,16 @@ def plan(root, conn, spec_path, runbook_path, *, op=None, session="cli", actor=I
                           code=BLOCKED)
     stages = [s["id"] for s in data["stages"]]
     covered = checked["coverage"]["covered"]
-    bars = runbook.bar_parts(data)
+    research = None
+    if runbook.runbook_format(data) == runbook.RESEARCH_FORMAT:
+        research = _research_contract(root, conn, runbook_path)
+        bars = runbook.bar_parts(data, block=research["pack"]["block"])
+    else:
+        bars = runbook.bar_parts(data)
+
+    def stage_of(part):
+        return bars["stages"][part["stage"]] if part["stage"] is not None else RESEARCH_STAGE
+
     run_order = {s["id"]: {"position": bars["stages"][s["id"]]["position"],
                            "needs": [str(n) for n in (s.get("needs") or [])]} for s in data["stages"]}
 
@@ -963,7 +1099,7 @@ def plan(root, conn, spec_path, runbook_path, *, op=None, session="cli", actor=I
             shown = ", ".join(_shown(w, p) for w, p in zip(who, parts))
             kind = "check" if [p for p in parts if p["kind"] != "gate"] else "review"
             bar = "; ".join(p["bar"] for p in parts)
-            first = min((bars["stages"][p["stage"]] for p in parts), default={"position": None, "label": "-"},
+            first = min((stage_of(p) for p in parts), default={"position": None, "label": "-"},
                         key=lambda st: (st["position"] is None, st["position"] or 0))
             sources = []
             for p in parts:
@@ -1031,13 +1167,14 @@ def plan(root, conn, spec_path, runbook_path, *, op=None, session="cli", actor=I
     held = _held_by_other_runbooks(conn, op, rb_id, keys, store)
     lvl = _level(conn, session, root) if waive else None    # a dry run refuses what the run would
 
-    prof = _profile_plan(root, rel_runbook, stages)
+    prof = _research_profile(root) if research else _profile_plan(root, rel_runbook, stages)
     existing = _intake_tasks(conn, op, rb_id)
     current = taskcontract.latest(conn)
     tasks = {"added": [], "contracts": [], "kept": [], "orphaned": []}
     task_writes = []
     planned_keys = []
-    for key, title, statement, contract in _task_plan(data, rel_runbook):
+    block = research["pack"]["block"] if research else None
+    for key, title, statement, contract in _task_plan(data, rel_runbook, block):
         planned_keys.append(key)
         try:
             normal = taskcontract.check(contract, tuple(stages))
@@ -1045,20 +1182,38 @@ def plan(root, conn, spec_path, runbook_path, *, op=None, session="cli", actor=I
             raise IntakeError("the contract for %s is not valid: %s" % (key, exc))
         tid = existing.get(key)
         if tid is None:
-            tasks["added"].append({"key": key, "title": title, "stage": contract["stage"]})
+            tasks["added"].append({"key": key, "title": title, "stage": contract.get("stage")})
             task_writes.append(("add", key, title, statement, contract))
             continue
-        have = {k: v for k, v in (current.get(tid) or {}).items() if k not in ("event_id", "at", "by")}
+        # the task's research override is not intake's to plan: it is left out of the compare and
+        # carried unchanged into any contract intake records (runbook-format-3.md section 7.4)
+        stored = current.get(tid) or {}
+        have = {k: v for k, v in stored.items() if k not in _NOT_PLANNED}
         if have == normal:
             tasks["kept"].append({"key": key, "task": tid})
         else:
+            if "research" in stored:
+                contract = dict(contract, research=stored["research"])
+                try:
+                    taskcontract.check(contract, tuple(stages))
+                except ValueError as exc:
+                    raise IntakeError("the stored contract of %s (%s) carries a research part intake cannot "
+                                      "carry: %s" % (tid, key, exc), code=BLOCKED)
             tasks["contracts"].append({"key": key, "task": tid})
             task_writes.append(("contract", key, tid, None, contract))
     for key, tid in sorted(existing.items()):
         if key not in planned_keys:
             tasks["orphaned"].append({"key": key, "task": tid})
 
-    return {"op": op, "root": root, "spec": _rel(root, spec_path) or os.path.abspath(spec_path),
+    extra = {}
+    if research:
+        pack = research["pack"]
+        extra = {"contract": {"runbook": pack["runbook"], "runbook_id": pack["runbook_id"], "mode": pack["mode"],
+                              "pack_sha256": pack["pack_sha256"], "baseline": research["baseline"],
+                              "action": "land" if research["lands"] else "kept", "diff": research["diff"],
+                              "grants": research["grants"]},
+                 "_research": research}
+    return dict(extra, **{"op": op, "root": root, "spec": _rel(root, spec_path) or os.path.abspath(spec_path),
             "spec_shape": shape, "format": spec["format"], "runbook": rel_runbook, "runbook_id": rb_id,
             "stages": stages, "required": len(required), "rows": rows, "tasks": tasks,
             "profile": {"module": prof["module"], "action": prof["action"], "stages": stages,
@@ -1076,15 +1231,17 @@ def plan(root, conn, spec_path, runbook_path, *, op=None, session="cli", actor=I
                            for key in sorted(baselined, key=lambda k: order[k])],
             "_files": files, "_batch": batch, "_waive": waive, "_items": items_after, "_level": lvl,
             "_base_items": base_items, "_run_order": run_order,
-            "_profile": prof, "_task_writes": task_writes, "_existing_tasks": existing}
+            "_profile": prof, "_task_writes": task_writes, "_existing_tasks": existing})
 
 
 def _changed(p):
     """Whether apply would write anything. A kept row whose stage, sources or baseline bar changed
-    changes the entry the intake event records, so that is a change too."""
+    changes the entry the intake event records, so that is a change too; so is a research
+    runbook's pack-level contract that differs from its newest research-contract event."""
     r, t = p["rows"], p["tasks"]
     return bool(r["added"] or r["superseded"] or r["withdrawn"] or t["added"] or t["contracts"]
-                or p["_profile"]["writes"] or p["_waive"] or p["_items"] != p["_base_items"])
+                or p["_profile"]["writes"] or p["_waive"] or p["_items"] != p["_base_items"]
+                or (p.get("_research") or {}).get("lands"))
 
 
 def apply(root, conn, p, *, session="cli", actor=INSTRUMENT):
@@ -1123,7 +1280,7 @@ def apply(root, conn, p, *, session="cli", actor=INSTRUMENT):
         util.write_text(os.path.join(root, PROFILE_FILE), writes["file"])
     if "project.yaml" in writes:
         set_project_key(root, "profile", writes["project.yaml"])
-    if p["_profile"]["module"] == PROFILE_MODULE:
+    if p["_profile"]["module"] == PROFILE_MODULE and not p["_profile"].get("research"):
         from alpaca import profile
         have = [str(s) for s in profile.load(root).stages()]
         if profile.error(root) or [s for s in p["stages"] if s not in have]:
@@ -1154,8 +1311,8 @@ def apply(root, conn, p, *, session="cli", actor=INSTRUMENT):
     for write in p["_task_writes"]:
         if write[0] == "add":
             _kind, key, title, statement, contract = write
-            tid = ops.add_task(conn, p["op"], statement, title, session=session, actor=actor,
-                               extra={"intake": {"op": p["op"], "runbook": p["runbook_id"], "key": key}})
+            tid = ops.add_task(conn, p["op"], statement, title, phase=stage_phase(key),
+                               session=session, actor=actor, extra={"intake": {"op": p["op"], "runbook": p["runbook_id"], "key": key}})
             ids[key] = tid
         else:
             _kind, key, tid, _s, contract = write
@@ -1165,6 +1322,11 @@ def apply(root, conn, p, *, session="cli", actor=INSTRUMENT):
             raise IntakeError("the contract for %s was refused: %s" % (key, exc), code=BLOCKED)
     for entry in p["tasks"]["added"]:
         entry["task"] = ids.get(entry["key"])
+    research = p.get("_research")
+    if research and research["lands"]:
+        from alpaca.research import contract
+        contract.land(conn, dict(research["pack"], grants=research["grants"]), op=p["op"], via="intake",
+                      session=session, actor=actor)
 
     summary = {"added": [r["key"] for r in p["rows"]["added"]],
                "kept": [r["key"] for r in p["rows"]["kept"]],
@@ -1254,13 +1416,23 @@ def _print(result):
     print("tasks: %d added, %d contract(s) updated, %d kept, %d no longer in the runbook"
           % (len(t["added"]), len(t["contracts"]), len(t["kept"]), len(t["orphaned"])))
     for x in t["added"]:
-        print("  + %s  %s  (stage %s)" % (x.get("task") or "(new)", x["title"], x["stage"]))
+        print("  + %s  %s  (%s)" % (x.get("task") or "(new)", x["title"],
+                                     "stage %s" % x["stage"] if x.get("stage") else x["key"]))
     for x in t["contracts"]:
         print("  ~ %s  contract of %s updated" % (x["task"], x["key"]))
     for x in t["orphaned"]:
         print("  ! %s  %s is no longer in the runbook; close or block the task by hand" % (x["task"], x["key"]))
     prof = result["profile"]
-    print("profile: %s (%s); stages %s" % (prof["module"], prof["action"], ", ".join(prof["stages"])))
+    rc = result.get("contract")
+    if rc is not None:
+        print("profile: %s; the project's profile stays %s" % (prof["action"], prof["module"] or "unset"))
+        print("contract: research-contract of %s (%s), pack_sha256 %s: %s" % (
+            rc["runbook_id"], rc["runbook"], rc["pack_sha256"][:12],
+            "a new baseline is recorded" if rc["action"] == "land" else "the same as the newest one, kept"))
+        for d in rc["diff"]:
+            print("  ~ %s  %s%s" % (d["field"], d["direction"], ", granted by %s" % d["grant"] if d.get("grant") else ""))
+    else:
+        print("profile: %s (%s); stages %s" % (prof["module"], prof["action"], ", ".join(prof["stages"])))
     for c in prof["plugin_checks"]:
         print("  plugin check %s/%s: %s" % (c["stage"], c["check"], c["script"]))
     for w in result["warnings"]:

@@ -294,3 +294,40 @@ def test_f9_selftest_writes_the_all_scope(project):
     assert [row["model"] for row in data["scopes"]["all"]] == ["claude-opus-4-7"]
     assert data["scopes"]["work"] == []
     assert [row["model"] for row in ratecards.read_gaps(project)] == ["claude-opus-4-7"]
+
+
+# --- t-427: Claude Haiku 5.5, two rows split at 100,000 tokens ---
+
+def test_arithmetic_pins_both_haiku_5_5_rows(project, monkeypatch):
+    items = check(selftest.run(project), "arithmetic")["items"]
+    long_item = next(i for i in items if i["kind"] == "pinned-long")
+    assert long_item["model"] == "claude-haiku-5-5" and long_item["status"] == "pass"
+    assert long_item["threshold"] == 100000
+    # 101000*.5 + 2000*.05 + 1000*.625 + 500*1 + 100*2.5 = 51975 per million
+    assert long_item["expected_usd"] == "0.051975"
+    typo = dict(pricing._CARDS["claude-haiku-5-5"], long_context_rates=(".5", ".05", ".625", "1", None, "2"))
+    monkeypatch.setitem(pricing._CARDS, "claude-haiku-5-5", typo)
+    arithmetic = check(selftest.run(project), "arithmetic")
+    failed = [(i["model"], i["kind"]) for i in arithmetic["items"] if i["status"] == "fail"]
+    assert failed == [("claude-haiku-5-5", "pinned-long")]
+
+
+def test_online_compares_both_haiku_5_5_rows(project):
+    over = next(line for line in PAGE.splitlines() if line.startswith("| Claude Haiku 5.5 (for prompts over"))
+    changed = PAGE.replace(over, over.replace("$2.50 / MTok", "$3 / MTok"))
+    assert changed != PAGE
+    online = check(selftest.run(project, online=True, fetch=lambda url: changed.encode()), "online")
+    failed = [i for i in online["items"] if i["status"] == "fail"]
+    assert [i["model"] for i in failed] == ["claude-haiku-5-5"]
+    assert [m["category"] for m in failed[0]["mismatches"]] == ["long_context:output"]
+
+
+def test_client_snapshot_bounds_span_both_haiku_5_5_rows(project):
+    # 50K in and 1K out: up-to-100K row 0.0055, over-100K row 0.0275; both are inside.
+    for sid, cost in (("s1", 0.0055), ("s2", 0.0275)):
+        write(project, sid, [claude("r1", "claude-opus-5"), cost_state({"claude-haiku-5-5[1m]": client(
+            cost, inputTokens=50000, outputTokens=1000, cacheReadInputTokens=0, cacheCreationInputTokens=0)})])
+    snap = check(selftest.run(project), "client-snapshot")
+    items = [i for i in snap["items"] if i["card_model"] == "claude-haiku-5-5"]
+    assert len(items) == 2 and all(i["status"] == "pass" for i in items), items
+    assert all("at standard rates" not in i["note"] for i in items)

@@ -3,11 +3,16 @@ import json, os, stat, sys, tempfile
 from alpaca import cli, db, paths, project, util
 
 HOOK_EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop",
-               "SubagentStop", "SessionEnd", "PreCompact")
+               "SubagentStart", "SubagentStop", "SessionEnd", "PreCompact")
 
 # Generic read-only check modules. Each exposes checks(root, conn) -> [(name, level, detail)],
 # the same shape the profile seam returns. A module that is absent contributes nothing.
-CHECK_MODULES = (("transcripts", "transcript-snapshots"), ("proof", "proof-integrity"))
+CHECK_MODULES = (("transcripts", "transcript-snapshots"), ("proof", "proof-integrity"),
+                 ("observability", "collector"))
+# Check modules that need no record: checks(root, None) runs before the record check, so a fresh
+# checkout is checked too. A module that does not load, raises, returns no row or returns a
+# malformed row gives a warn row under its label.
+RECORD_FREE_MODULES = (("research.doctor", "research"),)  # t-115: needs no record; conn is None
 
 # No hook may declare a timeout above this ceiling: a hook that can hang for minutes stalls
 # a session, so the registered timeout is the outer bound the fail-open plumbing runs under.
@@ -43,6 +48,117 @@ def _manifest_paths(root):
     return out
 
 
+AUTORESEARCH_SKILL = ".claude/skills/autoresearch/SKILL.md"
+
+
+def _autoresearch_skill(root, add):
+    """WARN when the skill file exists and MANIFEST.json (the shipped digest map) does not list it
+    with the file's sha256. Silent when the skill folder is absent, or when the project carries no
+    MANIFEST.json (a copy with no digest map has nothing to compare with)."""
+    skill = os.path.join(root, *AUTORESEARCH_SKILL.split("/"))
+    digests = os.path.join(root, "MANIFEST.json")
+    if not os.path.isfile(skill) or not os.path.isfile(digests):
+        return
+    try:
+        listed = (_read_json(digests).get("files") or {}).get(AUTORESEARCH_SKILL)
+        with open(skill, "rb") as fh:
+            actual = util.sha256_hex(fh.read())
+    except (OSError, ValueError, AttributeError) as exc:
+        add("autoresearch-skill", "warn", "cannot compare with MANIFEST.json: %s" % exc)
+        return
+    if listed == actual:
+        add("autoresearch-skill", "ok", "%s is the shipped skill" % AUTORESEARCH_SKILL)
+    else:
+        add("autoresearch-skill", "warn",
+            "%s is not the skill an installed release shipped (MANIFEST.json %s); the next "
+            "upgrade replaces it" % (AUTORESEARCH_SKILL,
+                                     "does not list it" if listed is None else "lists another digest"))
+
+
+#: A code file left modified or untracked in the main tree longer than this is reported. On
+#: 2026-10-01 t-164 and t-165 were sealed done with their edits still uncommitted on main.
+STALE_UNCOMMITTED_SECONDS = 2 * 3600
+
+
+def _git_lines(root, *args):
+    import subprocess
+    try:
+        proc = subprocess.run(["git", "-C", root, *args], capture_output=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return proc.stdout.decode("utf-8", "surrogateescape") if proc.returncode == 0 else None
+
+
+def _uncommitted_code(root, add, now=None):
+    """WARN when code in the main tree (anything outside .alpaca/) has sat modified or untracked
+    for over STALE_UNCOMMITTED_SECONDS. Linked worktrees are skipped: uncommitted work on a task
+    branch is normal there. A root that is not the top of a git work tree adds no line."""
+    import time
+    top = _git_lines(root, "rev-parse", "--show-toplevel", "--git-dir", "--git-common-dir")
+    if top is None:
+        return
+    lines = top.splitlines()
+    if len(lines) != 3 or os.path.realpath(lines[0]) != os.path.realpath(root):
+        return
+    git_dir, common = (os.path.realpath(os.path.join(root, p)) for p in lines[1:])
+    if git_dir != common:
+        return
+    status = _git_lines(root, "status", "--porcelain", "-z", "--untracked-files=all",
+                        "--", ".", ":(exclude).alpaca")
+    if status is None:
+        return
+    now = time.time() if now is None else now
+    stale, entries = [], status.split("\0")
+    i = 0
+    while i < len(entries):
+        entry = entries[i]
+        i += 1
+        if len(entry) < 4:
+            continue
+        code, path = entry[:2], entry[3:]
+        if "R" in code or "C" in code:
+            i += 1                                   # -z puts a rename's source path next
+        try:
+            age = now - os.lstat(os.path.join(root, path)).st_mtime
+        except OSError:
+            age = None                               # deleted: its age is unknown, so report it
+        if age is None or age > STALE_UNCOMMITTED_SECONDS:
+            stale.append(path)
+    if stale:
+        shown = ", ".join(sorted(stale)[:5]) + (" (+%d more)" % (len(stale) - 5) if len(stale) > 5 else "")
+        add("uncommitted", "warn",
+            "%d code file(s) modified or untracked in the main tree for over %d h: %s; "
+            "commit them before their task closes" % (len(stale), STALE_UNCOMMITTED_SECONDS // 3600, shown))
+    else:
+        add("uncommitted", "ok", "no code left uncommitted in the main tree for over %d h"
+            % (STALE_UNCOMMITTED_SECONDS // 3600))
+
+
+def _record_free(root, add):
+    """Run each RECORD_FREE_MODULES module's checks(root, None). Silence is never a pass: a module
+    that does not load, raises, returns no row, or returns a row that is not a (name, level,
+    detail) triple with a known level gives a warn row under its label."""
+    for modname, label in RECORD_FREE_MODULES:
+        try:
+            mod = __import__("alpaca.%s" % modname, fromlist=["checks"])
+            check = mod.checks
+        except Exception as e:
+            add(label, "warn", "checks not loaded: %s: %s" % (type(e).__name__, e))
+            continue
+        try:
+            rows = list(check(root, None) or ())
+        except Exception as e:
+            add(label, "warn", "checks skipped: %s: %s" % (type(e).__name__, e))
+            continue
+        if not rows:
+            add(label, "warn", "checks returned no finding")
+        for row in rows:
+            if isinstance(row, (list, tuple)) and len(row) == 3 and row[1] in _LEVELS:
+                add(str(row[0]), str(row[1]), str(row[2]))
+            else:
+                add(label, "warn", "malformed row: %.200r" % (row,))
+
+
 def checks(root):
     out = []
 
@@ -61,6 +177,15 @@ def checks(root):
             add("manifest", "ok", "%d mechanism paths present" % len(m["mechanism"]))
     except OSError as e:
         add("manifest", "error", str(e))
+
+    # autoresearch-skill: the /autoresearch skill ships as a mechanism path whose name has no
+    # `alpaca-` prefix, and an upgrade replaces a mechanism path whole. A project that kept its own
+    # .claude/skills/autoresearch/SKILL.md is told here that the file is not the shipped one.
+    _autoresearch_skill(root, add)
+
+    # record-free check modules: outside the record guard below, since a fresh checkout has no
+    # record yet, and with conn None, so a broken record cannot hide them
+    _record_free(root, add)
 
     # record: a copied-and-renamed project has no DB until its first chat, so a missing
     # .alpaca/alpaca.db is not an error; an unreadable or broken one is.
@@ -142,6 +267,34 @@ def checks(root):
             add("hooks", "error", "settings.json unreadable: %s" % e)
     else:
         add("hooks", "error", "no .claude/settings.json")
+
+    # the research engine's session runtime (design/research-engine/in-session-runtime.md sections
+    # 12.3 and 12.5): the guard hook is the second PreToolUse entry, and with a venv bin/alpaca starts
+    # an isolated interpreter through alpaca/boot.py, which loads the package by its location (t-428).
+    # A legacy alpaca-root.pth (earlier bootstraps wrote one) puts the whole install root on the path
+    # of every plain interpreter of the venv; Alpaca's own starts take it off, so it is a warning with
+    # the step that removes it. Warnings only: nothing else changes.
+    if os.path.isfile(sp):
+        try:
+            hooks = _read_json(sp).get("hooks", {})
+            guard = any("alpaca.hooks.research_guard" in h.get("command", "")
+                        for grp in hooks.get("PreToolUse", []) for h in grp.get("hooks", []))
+            add("research-guard", "ok" if guard else "warn",
+                "the PreToolUse guard of the research engine is registered" if guard
+                else "the research guard is not registered in .claude/settings.json")
+        except ValueError:
+            pass
+    venv = os.path.join(root, ".venv")
+    if os.path.isdir(venv):
+        import glob as _glob
+        legacy = sorted(_glob.glob(os.path.join(venv, "lib", "python*", "site-packages",
+                                                "alpaca-root.pth")))
+        add("research-isolation", "warn" if legacy else "ok",
+            "the venv holds a legacy alpaca-root.pth, which puts the whole install root on the "
+            "import path of every plain interpreter of the venv (%s); run bash setup/bootstrap.sh "
+            "to remove it" % ", ".join(legacy) if legacy else
+            "bin/alpaca starts the package by its location (alpaca/boot.py), with no folder of the "
+            "install root on the import path")
 
     # Codex uses explicit lifecycle commands and project-scoped MCP configuration.
     try:
@@ -330,6 +483,13 @@ def checks(root):
         except Exception as e:
             add("consistency", "warn",
                 "consistency scan skipped: %s: %s" % (type(e).__name__, e))
+
+    _uncommitted_code(root, add)
+    try:
+        from alpaca import disk
+        disk.doctor_check(root, add)
+    except Exception as e:
+        add("disk", "warn", "disk check failed: %s: %s" % (type(e).__name__, e))
 
     # A generic project without a collector registration has no collection obligation yet.
     from alpaca.hub import capture_health

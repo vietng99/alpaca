@@ -268,6 +268,150 @@ def test_rejected_event_projection_keeps_previous_raw_file(project, monkeypatch)
     def refuse(*args, **kwargs):
         raise RuntimeError("injected rejection")
     monkeypatch.setattr(Absorber, "absorb_text", refuse)
-    with pytest.raises(RuntimeError, match="injected rejection"):
-        drain.run(project, "s1")
+    # Merge of op-008 into main, review B4: by default a changed rendering of a stored note is kept
+    # and never reaches the absorber; the owner's re-render (rerender_notes) is the path that
+    # rewrites it, and a rejection there must leave the raw file as it was.
+    assert drain.run(project, "s1")["kept_renderings"] == 2       # both notes of the session
     assert path.read_bytes() == before
+    with pytest.raises(RuntimeError, match="injected rejection"):
+        drain.run(project, "s1", rerender_notes=True)
+    assert path.read_bytes() == before
+
+
+def _reused_id_note(event):
+    """The note another event rendered at this event's id before the 2026-09-30 record restore gave
+    the id to a new event: the same doc_id (op, id and role), another time and body."""
+    other = dict(event, ts='2020-01-01T00:00:00+00:00',
+                 data={'statement': 'another event that held this record id before the restore'})
+    return drain._note_doc(other)
+
+
+# Merge of op-008 into main (2026-10-06), decision D3: main (cea450f95) wrote every changed event-
+# note rendering to a `-render-<sha>` revision; op-008 re-renders a note of the same event in place,
+# so its facts follow it (OB-14, OB-17) and the secret screen supersedes the old text (FR-26). The
+# live incident main fixed was a record id that the 2026-09-30 restore reused for another event, so
+# these two tests (before the merge: the same event padded with legacy lines) now seed the old note
+# from another event at the same id; the same-event case is pinned by the in-place test below.
+def test_event_renderer_revision_preserves_older_note_and_replays_idempotently(project):
+    from pathlib import Path
+    from alpaca.wiki.ingest.absorb import Absorber
+    conn = _seed(project)
+    event = dict(conn.execute('SELECT * FROM events ORDER BY id LIMIT 1').fetchone())
+    conn.close()
+    conn = tedb.connect_readonly(project)
+    try:
+        normalized = drain.normalize_events(conn, [event])[0]
+    finally:
+        conn.close()
+    doc, text = drain._note_doc(normalized)
+    other_doc, other_text = _reused_id_note(normalized)
+    assert other_doc == doc
+    old = other_text + '\nLegacy renderer metadata ' * 40
+    cfg = Config.for_project(project); cfg.vault_dir.mkdir(parents=True, exist_ok=True)
+    absorber = Absorber(cfg)
+    absorber.absorb_text(doc, old)
+    absorber.close()
+    path = cfg.vault_dir / doc; path.parent.mkdir(parents=True, exist_ok=True); path.write_text(old)
+    result = drain.capture(project, [event])
+    assert result['notes'] == 1
+    assert result['docs'][0] != doc
+    assert path.read_text() == old
+    assert (cfg.vault_dir/result['docs'][0]).read_text() == text
+    assert drain.capture(project, [event])['ingested'] == 0
+    database = _wiki(project)
+    try:
+        assert database.conn.execute("SELECT count(*) FROM blocks WHERE doc_id=? AND status='active'", (doc,)).fetchone()[0] == 0
+        assert database.conn.execute("SELECT count(*) FROM blocks WHERE doc_id=? AND status='active'", (result['docs'][0],)).fetchone()[0] > 0
+    finally:
+        database.close()
+
+
+def test_event_revision_keeps_private_lineage_and_rejects_unsafe_old_path(project):
+    from alpaca.wiki.ingest.absorb import Absorber
+    conn = _seed(project)
+    event = dict(conn.execute('SELECT * FROM events ORDER BY id LIMIT 1').fetchone())
+    normalized = drain.normalize_events(conn, [event])[0]; conn.close()
+    doc, text = drain._note_doc(normalized)
+    private_doc = 'wiki/private/'+doc
+    old = _reused_id_note(normalized)[1]+'\nNOFORN synthetic legacy metadata ' * 40
+    cfg = Config.for_project(project); cfg.vault_dir.mkdir(parents=True, exist_ok=True)
+    absorber = Absorber(cfg); absorber.absorb_text(private_doc, old); absorber.close()
+    path = cfg.vault_dir/private_doc; path.parent.mkdir(parents=True, exist_ok=True); path.write_text(old)
+    result = drain.capture(project, [event])
+    assert result['docs'][0].startswith('wiki/private/')
+    assert result['docs'][0] != private_doc
+    assert path.read_text() == old
+    assert not (cfg.vault_dir/doc).exists()
+    # A replaced legacy target cannot be silently bypassed by naming a new version.
+    path.unlink(); outside = cfg.vault_dir/'outside.txt'; outside.write_text('canary')
+    path.symlink_to(outside)
+    with pytest.raises(ValueError, match='non-regular'):
+        drain.capture(project, [event])
+    assert outside.read_text() == 'canary'
+
+
+def test_same_event_rerender_lands_in_place_and_keeps_its_private_lineage(project):
+    # Merge decision D3, the op-008 half: a new rendering of the SAME record event (here an older
+    # renderer's longer note of this very event) replaces the note at its own doc_id; the absorber
+    # treats the smaller body as a change of format, and a source held private stays private.
+    # Review B4: only the owner's re-render (rerender_notes) does that; a default capture keeps the
+    # stored notes and writes nothing (alpaca/tests/wiki/test_note_rerender_optin.py).
+    from alpaca.wiki.ingest.absorb import Absorber
+    conn = _seed(project)
+    events = [dict(r) for r in conn.execute('SELECT * FROM events ORDER BY id')]
+    normalized = drain.normalize_events(conn, events); conn.close()
+    doc, text = drain._note_doc(normalized[0])
+    private_doc, private_text = drain._note_doc(normalized[1])
+    cfg = Config.for_project(project); cfg.vault_dir.mkdir(parents=True, exist_ok=True)
+    absorber = Absorber(cfg)
+    absorber.absorb_text(doc, text + '\nLegacy renderer metadata ' * 40)
+    absorber.absorb_text('wiki/private/' + private_doc, private_text + '\nNOFORN synthetic legacy metadata ' * 40)
+    absorber.close()
+    kept = drain.capture(project, events)
+    assert kept['kept_renderings'] == 2 and kept['ingested'] == 0
+    assert not (cfg.vault_dir / doc).exists()                 # the default capture wrote no file
+    result = drain.capture(project, events, rerender_notes=True)
+    assert result['docs'] == [doc, 'wiki/private/' + private_doc]
+    assert (cfg.vault_dir / doc).read_text() == text
+    assert (cfg.vault_dir / 'wiki/private' / private_doc).read_text() == private_text
+    assert drain.capture(project, events)['ingested'] == 0
+    database = _wiki(project)
+    try:
+        assert not database.conn.execute("SELECT 1 FROM docs WHERE doc_id LIKE '%-render-%'").fetchone()
+    finally:
+        database.close()
+
+
+def test_recovery_verifies_an_event_note_where_capture_landed_its_revision(project):
+    # Merge of op-008 into main (2026-10-06): a changed rendering of an event note lands at its
+    # `-render-<sha>` revision (main cea450f95), and a source held private stays private (main
+    # 3a2f32481). `wiki recover` (op-008 recovery.replay) must verify each note where capture put
+    # it, not at the path the plain placement names, or a live-store recover fails verification.
+    from alpaca.wiki import recovery
+    from alpaca.wiki.ingest.absorb import Absorber
+    conn = _seed(project)
+    events = [dict(r) for r in conn.execute('SELECT * FROM events ORDER BY id')]
+    normalized = drain.normalize_events(conn, events)
+    conn.close()
+    doc, text = drain._note_doc(normalized[0])
+    private_doc, private_text = drain._note_doc(normalized[1])
+    cfg = Config.for_project(project); cfg.vault_dir.mkdir(parents=True, exist_ok=True)
+    absorber = Absorber(cfg)
+    old = _reused_id_note(normalized[0])[1] + '\nLegacy renderer metadata ' * 40
+    private_old = _reused_id_note(normalized[1])[1] + '\nNOFORN synthetic legacy metadata ' * 40
+    absorber.absorb_text(doc, old)
+    absorber.absorb_text('wiki/private/' + private_doc, private_old)
+    absorber.close()
+    for name, body in ((doc, old), ('wiki/private/' + private_doc, private_old)):
+        path = cfg.vault_dir / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_text(body)
+    report = recovery.replay(project)
+    assert report['status'] == 'ok' and report['verified_events'] == len(events)
+    database = _wiki(project)
+    try:
+        landed = {r[0] for r in database.conn.execute(
+            "SELECT DISTINCT doc_id FROM blocks WHERE status='active' AND doc_id NOT LIKE '%transcripts%'")}
+    finally:
+        database.close()
+    assert any(d.startswith(doc[:-3] + '-render-') for d in landed)
+    assert any(d.startswith('wiki/private/' + private_doc[:-3] + '-render-') for d in landed)
+    assert (cfg.vault_dir / doc).read_text() == old

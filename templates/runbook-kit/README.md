@@ -19,6 +19,13 @@ Each check names the items of your spec it shows (success criteria `SC-001`, edg
 `EC-001`, ... or OpenSpec scenarios). The checker fails while any success criterion or edge
 case has no check, so nothing in the spec is left unshown.
 
+A research runbook (`runbook: 3`) is the contract of a loop in which agents improve a measured
+number, such as a benchmark's time, or fix reported bugs, each proved by a failing test. It adds a
+`research` block to the same file: the metrics and their targets, what an attempt may change,
+what counts as better, when a run stops and what it may spend. Its metrics and bug cases cover
+spec items too. `FORMAT.md` ("The research block") has every field, and `AGENTS.md` (step 4a)
+tells your agent how to write one. A target is written only when your spec states the number.
+
 ## What is in the kit
 
 | file | for |
@@ -111,6 +118,7 @@ rules you wrote. Owner gates wait for a person; no agent approves them.
 
 ## Versions and checksums
 
-`VERSION` names the format version and the product commit this kit was built from. A runbook
-starts with `runbook: {{FORMAT}}`. A kit for a later format comes in a folder with a new name.
+`VERSION` names the format version, the research runbook's format (`research_format`) and the
+product commit this kit was built from. A runbook starts with `runbook: {{FORMAT}}`, a research
+runbook with `runbook: 3`. A kit for a later format comes in a folder with a new name.
 To check that a download is complete, run `sha256sum -c SHA256SUMS` inside the kit folder.

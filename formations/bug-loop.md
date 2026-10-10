@@ -3,11 +3,13 @@ name: bug-loop
 roles:
   - id: finder
     archetype: scout
+    tier: mid
     fan: true
     lens: distinct
     role: finders with distinct lenses, each hunting the failure a different way
   - id: root-causer
     archetype: tracer
+    tier: high
     produces: the root cause behind the symptom, not the symptom
   - id: fixer
     archetype: eng

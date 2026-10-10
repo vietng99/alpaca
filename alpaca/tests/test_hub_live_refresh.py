@@ -85,7 +85,7 @@ def test_index_is_computed_once_per_data_and_pricing_revision(project, monkeypat
     calls = []
     guard = threading.Lock()
 
-    def fake_index(root, sessions):
+    def fake_index(root, sessions, *, yield_control=None):
         with guard:
             calls.append(1)
         time.sleep(0.3)     # hold the computation so the concurrent requests overlap it
@@ -121,12 +121,15 @@ def test_index_is_computed_once_per_data_and_pricing_revision(project, monkeypat
         live.refresh()
         assert live.data_rev != before
         _fetch(url, "/hub/analytics-index.json")
+        _join(live)
         _fetch(url, "/hub/analytics-index.json")
         assert len(calls) == 2
 
         # A newly recorded rate card moves only the pricing revision.
         with live.lock:
             live.pricing_rev = "another-rate-card-revision"
+        _fetch(url, "/hub/analytics-index.json")
+        _join(live)
         status, _, priced = _fetch(url, "/hub/analytics-index.json")
         assert status == 200 and json.loads(priced)["totals"]["n"] == 3
         _fetch(url, "/hub/analytics-index.json")
@@ -140,7 +143,7 @@ def test_index_is_computed_once_per_data_and_pricing_revision(project, monkeypat
 def test_watcher_warms_the_index_after_a_fold_that_changed_data(project, monkeypatch):
     calls = []
     monkeypatch.setattr(metrics_index, "index",
-                        lambda root, sessions: calls.append(1) or {"sessions": [], "totals": {}, "scope": "x"})
+                        lambda root, sessions, *, yield_control=None: calls.append(1) or {"sessions": [], "totals": {}, "scope": "x"})
     conn = db.connect(project)
     live = serve.Live(project)
     live.refresh()
@@ -163,7 +166,7 @@ def test_watcher_warms_the_index_after_a_fold_that_changed_data(project, monkeyp
 def test_index_writes_the_pricing_gap_notice_even_without_a_viewer(project, monkeypatch):
     gap = {"model": "claude-opus-9-1", "provider": "anthropic", "responses": 7, "sessions": 2,
            "fix": "bin/alpaca analytics price-check --model claude-opus-9-1"}
-    monkeypatch.setattr(metrics_index, "index", lambda root, sessions: {
+    monkeypatch.setattr(metrics_index, "index", lambda root, sessions, *, yield_control=None: {
         "sessions": [], "totals": {"unpriced_models": [gap], "unpriced_other": 0}, "scope": "x"})
     conn = db.connect(project)
     live = serve.Live(project)
@@ -186,7 +189,7 @@ def _join(live):
 
 def _counting_index(monkeypatch, totals=None):
     calls = []
-    monkeypatch.setattr(metrics_index, "index", lambda root, sessions: calls.append(1) or {
+    monkeypatch.setattr(metrics_index, "index", lambda root, sessions, *, yield_control=None: calls.append(1) or {
         "sessions": [], "totals": dict(totals or {}), "scope": "main conversations only"})
     return calls
 
@@ -212,6 +215,7 @@ def test_only_a_recent_index_request_makes_the_watcher_warm_it_for_a_viewer(proj
     httpd, url = _start(live, project)
     try:
         assert _fetch(url, "/hub/analytics-index.json")[0] == 200
+        _join(live)
         asked = len(calls)
         _heartbeat(conn)
         live.refresh()
@@ -776,7 +780,7 @@ def test_hub_live_refresh_findings_in_headless_chrome(project, tmp_path, monkeyp
         with live.lock:
             return json.loads(live.data_json).get("sessions", [])
 
-    def fake_index(root, sessions):
+    def fake_index(root, sessions, *, yield_control=None):
         time.sleep(ctl["index_delay"])
         rows = [{"sid": s["sid"], "title": s["title"], "first": s["first"], "operator": "claude",
                  "summary": {"responses": 3, "costed_responses": 3, "estimated_cost_usd": 0.03,
@@ -869,3 +873,92 @@ def test_hub_live_refresh_findings_in_headless_chrome(project, tmp_path, monkeyp
     report = run.stdout + run.stderr
     assert run.returncode == 0 and "FAIL" not in report, report
     assert report.count("PASS") == 12, report
+
+
+def test_sessions_distinguish_record_only_from_measured_zero():
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('node unavailable')
+    script = r"""
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+globalThis.document = {addEventListener() {}};
+const {analyticsIndex} = await import('data:text/javascript;base64,' + fs.readFileSync(process.argv[1]).toString('base64'));
+const html = analyticsIndex({sessions: [
+ {sid:'record', title:'Recorded check-in', summary:{responses:0, costed_responses:0}, coverage:{state:'record-only',usage:'unavailable'}},
+ {sid:'zero', title:'Measured zero', summary:{responses:1, usage_responses:1, costed_responses:1, estimated_cost_usd:0,tokens:{input_tokens:0,output_tokens:0}},coverage:{state:'captured',usage:'measured'}}
+],totals:{}});
+assert.match(html, /<details[^>]*class="[^"]*record-only/);
+assert.ok(html.indexOf('Measured zero') < html.indexOf('<details'));
+const recorded = html.slice(html.indexOf('<details'));
+assert.match(recorded, /Recorded check-in/);
+assert.match(recorded, /Usage unavailable/);
+assert.doesNotMatch(recorded, /0 priced/);
+assert.match(html.slice(0,html.indexOf('<details')), /\$0\.00/);
+"""
+    result = subprocess.run([node, '--input-type=module', '-e', script, str(WEB / 'analytics.js')], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_connection_distinguishes_page_freshness_from_capture_health():
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('node unavailable')
+    script = r"""
+import assert from 'node:assert/strict';
+import {pathToFileURL} from 'node:url';
+// by file URL: liveflags.js imports the page registry (pages.js) next to it
+const {connectionHealth} = await import(pathToFileURL(process.argv[1]));
+const h = {status:'degraded',projection:{state:'fresh'},observability:{status:'degraded',collector:{status:'unknown'},backlog:{bytes:1800000000},coverage:{missing_children:['one','two']}}};
+const v = connectionHealth(h);
+assert.equal(v.label, 'Live - capture gaps');
+assert.equal(v.error,true);
+assert.match(v.title,/collector unknown/);
+assert.match(v.title,/2 missing child sources/);
+assert.equal(connectionHealth({...h,projection:{state:'stale'}}).label,'Stale');
+assert.equal(connectionHealth({projection:{state:'fresh'},observability:{status:'ok'}}).label,'Live');
+"""
+    result = subprocess.run([node,'--input-type=module','-e',script,str(WEB / 'liveflags.js')],capture_output=True,text=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_index_reads_remain_responsive_during_cold_build_and_refresh(project, monkeypatch):
+    # a read that waits on the build waits the 20 s it holds, far past the 6 s bounds below
+    entered, release = threading.Event(), threading.Event()
+    def slow_index(root, sessions, *, yield_control=None):
+        entered.set()
+        assert release.wait(20)
+        return {'sessions': [], 'totals': {'revision': live.data_rev}, 'scope': 'measured'}
+    monkeypatch.setattr(metrics_index, 'index', slow_index)
+    live = serve.Live(project)
+    live.data_json = '{"sessions":[]}'
+    live.data_rev = 'first'
+    live.data_ready.set()
+    httpd, url = _start(live, project)
+    try:
+        started = time.monotonic()
+        code, headers, body = _fetch(url, '/hub/analytics-index.json')
+        assert time.monotonic() - started < 6
+        assert entered.wait(10) and code == 202
+        assert json.loads(body)['state'] == 'building'
+        assert 'sessions' not in json.loads(body), 'pending is not zero usage'
+        release.set(); _join(live)
+        ready_code, ready_headers, _ = _fetch(url, '/hub/analytics-index.json')
+        assert ready_code == 200
+        old_etag = ready_headers['ETag']
+        entered.clear(); release.clear(); live.data_rev = 'second'
+        started = time.monotonic()
+        code, headers, body = _fetch(url, '/hub/analytics-index.json')
+        assert code == 200 and headers['X-Alpaca-Analytics-State'] == 'refreshing'
+        assert json.loads(body)['totals']['revision'] == 'first'
+        assert time.monotonic() - started < 6
+        assert entered.wait(10)
+        conditional_code, conditional_headers, _ = _fetch(url, '/hub/analytics-index.json', {'If-None-Match': old_etag})
+        assert conditional_code == 304
+        assert conditional_headers['X-Alpaca-Analytics-State'] == 'refreshing'
+        release.set(); _join(live)
+        code, headers, body = _fetch(url, '/hub/analytics-index.json')
+        assert headers['X-Alpaca-Analytics-State'] == 'fresh'
+        assert json.loads(body)['totals']['revision'] == 'second'
+    finally:
+        release.set(); _join(live); httpd.shutdown(); httpd.server_close()

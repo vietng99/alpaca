@@ -9,12 +9,16 @@ repository and outside the project, and the read-only forms (`git stash list`, `
 `git restore --staged`, `git clean -n`) stay allowed everywhere.
 
 It only ever writes one thing on stdout: a PreToolUse deny decision. Every other path, including a
-parse failure, prints nothing, so the call goes ahead (fail open). It never opens the record.
+parse failure, prints nothing, so the call goes ahead (fail open). It never opens the record. A deny
+also appends one line to `.alpaca/git-guard/denials.jsonl` under the project root (best effort, a
+write failure is ignored), so the Studio can see that the guard blocked something without reading
+transcripts: Arthur raises his shield when that file grows (alpaca/hub.py, brief 2g).
 """
 import json
 import os
 import shlex
 import subprocess
+import time
 
 from alpaca.hooks import common
 
@@ -72,6 +76,11 @@ def rewrites_worktree(sub, args):
 
 
 LIVE_RECORD = ".alpaca/alpaca.db"
+#: Where the deny sends a session that still needs the command (op-021, design/watchdog/design.md
+#: section 8). The watchdog is advisory: it reports and keeps an undo point, it never runs the command.
+WATCHDOG_HINT = ("For a preflight report and an undo point before the owner runs it, ask the watchdog: "
+                 "`alpaca msg post --from <you> --to watchdog --kind question '<command>'`, or open a "
+                 "session with /watchdog.")
 BRINGS_REVISION = {"merge", "cherry-pick", "rebase", "checkout", "switch", "pull", "revert"}
 
 
@@ -159,6 +168,20 @@ def _main_toplevel(path):
     return top if git_dir == common else None
 
 
+DENIALS = os.path.join(".alpaca", "git-guard", "denials.jsonl")
+
+
+def note_denial(root, reason):
+    """Append one line for a deny; never raises, so a full disk or a read-only tree only loses the note."""
+    try:
+        path = os.path.join(root, DENIALS)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"ts": round(time.time(), 3), "reason": str(reason)[:200]}) + "\n")
+    except (OSError, ValueError):
+        pass
+
+
 def decide(payload):
     """The deny decision for one PreToolUse payload, or None to let the call run."""
     if payload.get("tool_name") != "Bash":
@@ -171,6 +194,7 @@ def decide(payload):
     root = os.path.realpath(paths.root(cwd))
     for target, reason in findings(command, cwd):
         if _main_toplevel(target) == root:
+            note_denial(root, reason)
             return {"hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "deny",
@@ -179,7 +203,7 @@ def decide(payload):
                     "live record work. Use `git diff`, `git stash list` or `git status` to inspect, "
                     "revert a single file of your own with an edit, or do this in a separate "
                     "worktree (git worktree add). If the owner wants it here, they run it in their "
-                    "own terminal." % (reason, root))}}
+                    "own terminal. %s" % (reason, root, WATCHDOG_HINT))}}
     return None
 
 

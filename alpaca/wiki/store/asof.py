@@ -23,13 +23,14 @@ _ASOF_CLAUSE = (
 
 # AUDIT (K set): pin BOTH axes - domain window contains T, and the KB's belief AS-OF knowledge-time
 #   K (recorded_at<=K<superseded_at). No current-status filter: an edge invalidated AFTER K was
-#   still believed at K. Retracted poison is the one thing still excluded.
+#   still believed at K. Retracted poison and quarantined rows (a rule output that failed its field
+#   check, an ambiguous or ungrounded record) are excluded: a quarantined row was never believed.
 _ASOF_CLAUSE_TXN = (
     "{a}.valid_from <= :T "
     "AND ({a}.valid_until IS NULL OR :T < {a}.valid_until) "
     "AND {a}.recorded_at <= :K "
     "AND ({a}.superseded_at IS NULL OR :K < {a}.superseded_at) "
-    "AND {a}.status <> 'retracted'"
+    "AND {a}.status NOT IN ('retracted', 'quarantined')"
 )
 
 
@@ -51,6 +52,15 @@ class AsOf:
 
 def asof_where(asof: AsOf, alias: str = "edges") -> tuple[str, dict]:
     """Return (sql_fragment, params) - append the fragment to any edge SELECT's WHERE."""
+    return asof.clause(alias), asof.params()
+
+
+def block_where(asof: "AsOf | None", alias: str = "blocks") -> tuple[str, dict]:
+    """The block predicate of a lexical, floor or row read (architecture.md 5.2): the as-of clause,
+    so a K-pinned read still sees a block retired after K; `status='active'` when the caller gives
+    no as-of. Named parameters, so it composes with any other named parameter of the query."""
+    if asof is None:
+        return f"{alias}.status='active'", {}
     return asof.clause(alias), asof.params()
 
 

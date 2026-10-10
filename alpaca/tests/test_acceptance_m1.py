@@ -108,8 +108,16 @@ def test_m1_acceptance_end_to_end(project):
     spec = os.path.join(root, "SPEC.md")
 
     # ---- 2. open the op and add the tracker row the pad will name as the first non-done row.
-    _ok(_alpaca(["op", "new", "drive the sample spec through the requirement gate",
-             "--done-when", "every requirement obligation is discharged"], root))
+    # op-019: `alpaca op new` also opens the start-of-op question batch, and an op with a batch is
+    # held by the intent gates at L5 and L6 (tested in test_batch.py and test_selfcheck.py). This
+    # acceptance pins the M1 door rules, so it opens the op through `ops.open_op`, with no batch, the
+    # way an engine opens a research run's op.
+    from alpaca import db as _db, ops as _ops
+    _conn = _db.connect(root)
+    assert _ops.open_op(_conn, "drive the sample spec through the requirement gate",
+                        "every requirement obligation is discharged", session="cli",
+                        actor="human") == "op-001"
+    _conn.close()
     _ok(_alpaca(["task", "add", "--title", "task", "op-001",
              "carry requirement obligations to the design boundary",
              "--phase", "requirement"], root))

@@ -18,7 +18,7 @@ from pathlib import Path
 from ..config import Config
 from ..store.db import DB
 from .artifacts import (_PUBLIC_NODE_SQL, _PUBLIC_PRIMARY_EDGE_SQL,
-                        _public_aliases, _write)
+                        _public_aliases, _write, page_name)
 
 _BADGE = {"active": "", "invalidated": " `⟂ SUPERSEDED`", "quarantined": " `? QUARANTINED`",
           "retracted": " `✗ RETRACTED`"}
@@ -53,7 +53,7 @@ def render(cfg: Config) -> list[Path]:
                          f"<sub>edge:`{e['edge_id']}` · src:{cite} · corrob:{e['corroboration_count']}</sub>")
             if e["source_quote"]:
                 lines.append(f"  > {e['source_quote']}")
-        p = _write(cfg, f"{nid}.md", "\n".join(lines) + "\n")
+        p = _write(cfg, page_name(nid), "\n".join(lines) + "\n")
         written.append(p)
     db.close()
     return written

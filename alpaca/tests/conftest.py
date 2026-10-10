@@ -1,5 +1,9 @@
 import os, shutil, pytest
 
+# Tests copy the repository, project.yaml and its disk: block included, and run the session hooks
+# in those copies; a detached disk sweep (alpaca/disk.py) must never start from a test run.
+os.environ["ALPACA_DISK_SWEEP"] = "0"
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 
@@ -21,6 +25,30 @@ def shipped_project_yaml(repo=REPO):
 
 
 SHIPPED_PROJECT_YAML = shipped_project_yaml()
+
+
+@pytest.fixture(autouse=True, scope="session")
+def contained_tempdir(tmp_path_factory):
+    """Route every tempfile.mkdtemp() of the run, in this process and in child processes, into one
+    dir under pytest's basetemp, and delete it when the session ends.
+
+    Gate selftests, the wiki tests and the CLI subprocesses create throwaway stores with
+    tempfile.mkdtemp() and never remove them; they piled up in the RAM-backed /tmp and filled
+    zram swap on the development host (2026-10-02). The dir stays on the same filesystem as basetemp, so the
+    sqlite-heavy tests keep their RAM speed.
+    """
+    import tempfile
+    base = str(tmp_path_factory.mktemp("tempfile", numbered=False))
+    old_env, old_tempdir = os.environ.get("TMPDIR"), tempfile.tempdir
+    os.environ["TMPDIR"] = base
+    tempfile.tempdir = base
+    yield base
+    tempfile.tempdir = old_tempdir
+    if old_env is None:
+        os.environ.pop("TMPDIR", None)
+    else:
+        os.environ["TMPDIR"] = old_env
+    shutil.rmtree(base, ignore_errors=True)
 
 # Integration glue for the vendored wiki suite. Wiki tests authored across M2.8-M2.16 install
 # sys.modules.setdefault(...) stand-ins for wiki modules that were not vendored yet at authoring
@@ -61,6 +89,10 @@ def no_ambient_session(monkeypatch):
     from alpaca import cli
     for name in cli.ENV_SESSION_VARS:
         monkeypatch.delenv(name, raising=False)
+    # the research guard marks the shell of a subagent with ALPACA_RESEARCH_AGENT while its
+    # session drives a run; a suite run by such a subagent must not inherit it, or every driving
+    # verb a test runs would refuse as RUN-DRIVER-IS-SUBAGENT. A test that wants it sets it.
+    monkeypatch.delenv("ALPACA_RESEARCH_AGENT", raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -102,4 +134,23 @@ def project(tmp_path, monkeypatch):
     (tmp_path / "cfg").mkdir()
     (root / ".alpaca" / "config").mkdir(parents=True)
     monkeypatch.delenv("ALPACA_ROOT", raising=False)
-    return str(root)
+    yield str(root)
+    # the attempt audit's packets are read-only trees (verifier.md section 9.4): make them
+    # writable again so the basetemp can be removed
+    research = root / ".alpaca" / "research"
+    if research.is_dir():
+        from alpaca.research import audit
+        audit._writable_tree(str(research))
+
+
+# Shipped tests that need a development-only file name it through alpaca/tests/devfiles.py
+# (op-008 t-072b): a release tree skips them, the development tree runs them, and a development
+# tree that lost the file fails them here.
+from alpaca.tests.devfiles import pytest_runtest_setup  # noqa: E402,F401
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "dev_files(*paths): the test reads these development-only "
+                            "files (alpaca/tests/devfiles.py)")
+    config.addinivalue_line("markers", "dev_files_lost(*paths, reason): the development tree lost a "
+                            "file the test reads; the test fails")

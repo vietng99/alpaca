@@ -1,0 +1,2 @@
+/* The sample project's own stylesheet hook: linked last, so it may restyle anything. */
+:root{--slot-sample:1}

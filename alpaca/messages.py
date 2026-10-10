@@ -81,6 +81,13 @@ def post(conn, frm, to, kind, body, pointer=None, *, session="cli", root=None):
     if kind not in KINDS:
         raise MessageError("unknown kind %r; one of %s" % (kind, ", ".join(KINDS)))
     resolved = _resolve_pointer(conn, pointer, root)
+    if kind == "handoff":
+        # op-019 t-210: a handoff that drops an open owner order is refused here, so a code caller
+        # is bound as well as the verb (a warning can be ignored; brief R4 was a dropped order).
+        from alpaca import orders
+        dropped = orders.check_handoff(conn, to, resolved, body)
+        if dropped:
+            raise MessageError(orders.dropped_message(dropped, "handoff"))
     ts = util.now_iso()
     with db.transaction(conn):
         db.append_event(conn, session=session, actor=frm, kind="msg", ref=resolved,

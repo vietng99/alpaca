@@ -246,6 +246,33 @@ def _mount_of(path: str, mounts: list[tuple[str, str]]) -> tuple[str, str]:
     return best
 
 
+def user_quota(path: str) -> dict | None:
+    """This user's quota on the filesystem holding `path` (a tmpfs mounted with usrquota, for
+    example), read with quotactl_fd(2) because the `quota` tool is often missing. None when the
+    kernel, the filesystem or the architecture does not offer it. Block limits are in 1 KiB units."""
+    import ctypes
+    import platform
+    import struct
+    if platform.machine() not in ("x86_64", "aarch64"):
+        return None
+    nr = 443                                  # quotactl_fd, the same number on x86_64 and aarch64
+    q_getquota, usrquota = 0x800007, 0
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return None
+    try:
+        buf = ctypes.create_string_buffer(72)
+        if libc.syscall(nr, fd, ctypes.c_uint((q_getquota << 8) | usrquota), os.getuid(), buf) != 0:
+            return None
+    finally:
+        os.close(fd)
+    bhard, _bsoft, space, ihard, _isoft, inodes = struct.unpack("QQQQQQ", buf.raw[:48])
+    return {"limit_b": bhard * 1024 or None, "used_b": space,
+            "inode_limit": ihard or None, "inodes_used": inodes}
+
+
 def _disks(root: str) -> list[dict]:
     mounts = _mounts()
     seen: dict[int, dict] = {}
@@ -266,9 +293,13 @@ def _disks(root: str) -> list[dict]:
         used = total - free
         denom = used + avail
         mount, fs = _mount_of(real, mounts)
+        inodes, ifree = vfs.f_files, vfs.f_ffree
         row = {"mount": mount, "path": real, "paths": [label], "fs": fs, "total_b": total,
                "used_b": used, "avail_b": avail,
-               "pct": round(used * 100.0 / denom, 1) if denom else 0.0}
+               "pct": round(used * 100.0 / denom, 1) if denom else 0.0,
+               "inodes_total": inodes, "inodes_used": inodes - ifree,
+               "inodes_pct": round((inodes - ifree) * 100.0 / inodes, 1) if inodes else None,
+               "quota": user_quota(real) if fs == "tmpfs" else None}
         seen[dev] = row
         out.append(row)
     return out
@@ -357,7 +388,7 @@ def _build(root: str) -> dict:
         notes.append("%d processes could not be read." % cur["unreadable"])
     disks = _disks(root)
     if any(d["mount"] == "/tmp" and d["fs"] == "tmpfs" for d in disks):
-        notes.append("/tmp is RAM-backed tmpfs; its per-user quota is not shown by the size.")
+        notes.append("/tmp is RAM-backed tmpfs with a per-user quota; the /tmp row shows your share when the kernel reports it.")
 
     swap_total = mem.get("SwapTotal", 0)
     return {
@@ -369,8 +400,10 @@ def _build(root: str) -> dict:
         "cpu": {"count": len(per_core) or (os.cpu_count() or 1), "pct": total_pct, "per_core": per_core},
         "mem": {"total_b": mem_total, "used_b": max(0, mem_total - mem_avail), "available_b": mem_avail,
                 "pct": round((mem_total - mem_avail) * 100.0 / mem_total, 1) if mem_total else 0.0,
-                "swap_total_b": swap_total, "swap_used_b": max(0, swap_total - mem.get("SwapFree", 0))},
+                "swap_total_b": swap_total, "swap_used_b": max(0, swap_total - mem.get("SwapFree", 0)),
+                "swap_pct": round((swap_total - mem.get("SwapFree", 0)) * 100.0 / swap_total, 1) if swap_total else None},
         "disks": disks,
+        "net": _net_reading(),
         "users": user_rows,
         "procs": procs,
         "notes": notes,
@@ -379,6 +412,53 @@ def _build(root: str) -> dict:
 
 def supported() -> bool:
     return sys.platform.startswith("linux") and os.path.exists("/proc/stat")
+
+
+#: Internet reachability: a TCP connect to each target, timed. No ICMP (that needs root or a
+#: capability); a connect round trip is close to a ping. A daemon thread refreshes it every
+#: NET_EVERY_S so a snapshot never waits on the network.
+NET_TARGETS = (("1.1.1.1", 443, "Cloudflare"), ("8.8.8.8", 443, "Google"))
+NET_EVERY_S = 10.0
+NET_TIMEOUT_S = 2.0
+_net = {"value": None, "thread": None}
+
+
+def connect_ms(host: str, port: int, timeout: float = NET_TIMEOUT_S) -> float | None:
+    """Milliseconds for one TCP connect to host:port, or None when it fails or times out."""
+    start = time.monotonic()
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return round((time.monotonic() - start) * 1000.0, 1)
+    except OSError:
+        return None
+
+
+def net_status(targets=NET_TARGETS) -> dict:
+    """One reachability reading: per target ms, the best ms, and online / degraded / offline."""
+    rows = [{"host": h, "port": p, "name": n, "ms": connect_ms(h, p)} for h, p, n in targets]
+    ok = [r["ms"] for r in rows if r["ms"] is not None]
+    status = "offline" if not ok else ("online" if len(ok) == len(rows) else "degraded")
+    return {"status": status, "ms": min(ok) if ok else None, "targets": rows, "ts": _now_iso(),
+            "method": "tcp-connect"}
+
+
+def _net_loop() -> None:
+    while True:
+        try:
+            _net["value"] = net_status()
+        except Exception:
+            _net["value"] = {"status": "unknown", "ms": None, "targets": [], "ts": _now_iso(),
+                             "method": "tcp-connect"}
+        time.sleep(NET_EVERY_S)
+
+
+def _net_reading() -> dict | None:
+    """The latest reading; starts the background prober on first use (never under pytest)."""
+    if _net["thread"] is None and not os.environ.get("PYTEST_CURRENT_TEST"):
+        import threading
+        _net["thread"] = threading.Thread(target=_net_loop, name="alpaca-net-probe", daemon=True)
+        _net["thread"].start()
+    return _net["value"]
 
 
 def snapshot(root) -> dict:

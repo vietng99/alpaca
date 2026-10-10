@@ -25,8 +25,10 @@ Run: python3 tests/wiki/mutation_oracle.py            # all mutations
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -39,16 +41,37 @@ if str(ROOT) not in sys.path:
 from alpaca import manifest  # noqa: E402
 
 _PATTERNS = shutil.ignore_patterns(
-    "__pycache__", "*.pyc", ".git", ".claude", ".alpaca", "analytics", ".pytest_cache",
+    "__pycache__", "*.pyc", ".git", ".claude", ".alpaca", ".te", "analytics", ".pytest_cache",
     "node_modules", "*.db", "*.db-wal", "*.db-shm")
 _MEMORY = manifest.memory_ignore(ROOT)
 
 
+def _special(dirpath, names):
+    """Sockets, FIFOs and device nodes: live runtime entries a clone never holds and copy2 cannot
+    copy (a browser profile socket once failed every mutation of this oracle)."""
+    out = set()
+    for name in names:
+        try:
+            mode = os.lstat(os.path.join(dirpath, name)).st_mode
+        except OSError:
+            continue
+        if stat.S_ISSOCK(mode) or stat.S_ISFIFO(mode) or stat.S_ISCHR(mode) or stat.S_ISBLK(mode):
+            out.add(name)
+    return out
+
+
 def _IGNORE(dirpath, names):
     """Byte caches and stores by pattern, plus every [memory] path of the manifest anchored at
-    ROOT (the local environment, host-local tool installs, build outputs). A sandbox stands for a
-    fresh clone; copying runtime state into sixteen of them only costs disk and time."""
-    return set(_PATTERNS(dirpath, names)) | set(_MEMORY(dirpath, names))
+    ROOT (the local environment, host-local tool installs, build outputs), plus sockets and FIFOs.
+    A sandbox stands for a fresh clone; copying runtime state into sixteen of them only costs disk
+    and time."""
+    return set(_PATTERNS(dirpath, names)) | set(_MEMORY(dirpath, names)) | _special(dirpath, names)
+
+
+def copy_sandbox(src: Path, dst: Path) -> None:
+    """Copy the tree the way a fresh clone holds it: symlinks stay links (the gitignored `.te` link
+    to the runtime tree is ignored by name), and ignored or special entries are left out."""
+    shutil.copytree(src, dst, symlinks=True, ignore=_IGNORE)
 
 
 def _path() -> str:
@@ -113,7 +136,7 @@ def evaluate(mutation: dict) -> dict:
     expect = mutation.get("expect", "fail")
     with tempfile.TemporaryDirectory(prefix="mut_") as td:
         sandbox = Path(td) / "root"
-        shutil.copytree(ROOT, sandbox, ignore=_IGNORE)
+        copy_sandbox(ROOT, sandbox)
         err = _apply(sandbox, mutation["file"], mutation["find"], mutation["replace"])
         if err:
             return {"mechanism_id": mech, "status": "MUTATION_MALFORMED", "detail": err}

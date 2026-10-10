@@ -30,6 +30,20 @@ def _obj_value(edge: dict) -> str:
     return edge.get("obj_node") or edge.get("obj_literal") or ""
 
 
+def time_known(item: dict) -> bool:
+    """Whether a candidate or an edge row has a valid time that can order history (OB-05). It does
+    with a `source_created_at`. An agent fact (extractor `llm`) without one does not: its `valid_from`
+    is only the capture time of its anchor block (architecture.md 5.1), so it is never placed on the
+    time axis. A fact of an authored document keeps its `valid_from` as before, the date the author
+    wrote or the ingest clock, which the older rules and tests pin; one with no `valid_from` at all
+    has no time either."""
+    if item.get("source_created_at"):
+        return True
+    if item.get("extractor") == "llm":
+        return False
+    return bool(item.get("valid_from"))
+
+
 def classify(db: DB, cand: dict, edge_id: str) -> Verdict:
     """Classify a candidate assertion against the ACTIVE edges sharing its supersede_key."""
     # identity-preserving no-op: the exact content-derived edge already exists
@@ -47,18 +61,27 @@ def classify(db: DB, cand: dict, edge_id: str) -> Verdict:
             (cand["subj_node"], cand["predicate"]),
         ).fetchall()
         active = [dict(r) for r in key_rows]
-        candidate_time = cand.get("valid_from") or ""
+        # OB-05: an unknown time (`time_known`) never orders history. A candidate whose valid_from
+        # is only the capture-time proxy picks no containing prior and back-fills no valid_until
+        # from a later edge; a prior of unknown time is never placed on the time axis either, it is
+        # only the current edge of the key.
+        candidate_time = (cand.get("valid_from") or "") if time_known(cand) else ""
         if candidate_time:
-            containing = [p for p in active
+            dated = [p for p in active if time_known(p)]
+            containing = [p for p in dated
                           if (p.get("valid_from") or "") <= candidate_time
                           and (not p.get("valid_until") or candidate_time < p["valid_until"])]
             priors = ([max(containing, key=lambda p: p.get("valid_from") or "")]
                       if containing else [])
             if not cand.get("valid_until"):
-                later = [p for p in active if (p.get("valid_from") or "") > candidate_time]
+                later = [p for p in dated if (p.get("valid_from") or "") > candidate_time]
                 if later:
                     cand["valid_until"] = min(
                         later, key=lambda p: p.get("valid_from") or "")["valid_from"]
+            if not priors:
+                undated = [p for p in active if not time_known(p) and not p.get("valid_until")]
+                priors = ([max(undated, key=lambda p: p.get("valid_from") or "")]
+                          if undated else [])
         else:
             current = [p for p in active if not p.get("valid_until")]
             priors = ([max(current, key=lambda p: p.get("valid_from") or "")]
@@ -86,7 +109,8 @@ def classify(db: DB, cand: dict, edge_id: str) -> Verdict:
         if cand["obj_datatype"] != "node" and pv and cv and (cv.startswith(pv) or pv in cv) and cv != pv:
             return Verdict("refines", prior_edge_id=prior["edge_id"])
         # world-change vs correction, decided by the DOMAIN axis (valid_from ordering)
-        world = bool(cand.get("valid_from") and prior.get("valid_from")
+        world = bool(time_known(cand) and time_known(prior)
+                     and cand.get("valid_from") and prior.get("valid_from")
                      and cand["valid_from"] > prior["valid_from"])
         return Verdict("contradicts", prior_edge_id=prior["edge_id"], world_change=world)
 

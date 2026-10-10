@@ -67,11 +67,27 @@ def test_denies_rewrites_in_the_main_tree(repo, command):
     decision = git_guard.decide(_bash(command, repo))
     assert decision and decision["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert "git guard" in decision["hookSpecificOutput"]["permissionDecisionReason"]
+    assert git_guard.WATCHDOG_HINT in decision["hookSpecificOutput"]["permissionDecisionReason"]
 
 
 @pytest.mark.parametrize("command", ALLOWED)
 def test_allows_reads_and_index_only_commands(repo, command):
     assert git_guard.decide(_bash(command, repo)) is None
+    assert not os.path.exists(os.path.join(repo, git_guard.DENIALS))
+
+
+def test_a_deny_appends_one_note_line_for_the_studio(repo):
+    path = os.path.join(repo, git_guard.DENIALS)
+    git_guard.decide(_bash("git stash", repo))
+    git_guard.decide(_bash("git reset --hard", repo))
+    lines = [json.loads(x) for x in open(path, encoding="utf-8")]
+    assert len(lines) == 2 and all(isinstance(x["ts"], float) and x["reason"] for x in lines)
+
+
+def test_a_note_that_cannot_be_written_never_stops_the_deny(repo, monkeypatch):
+    monkeypatch.setattr(git_guard.os, "makedirs", lambda *a, **k: (_ for _ in ()).throw(PermissionError("ro")))
+    decision = git_guard.decide(_bash("git stash", repo))
+    assert decision["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
 def test_cd_and_dash_c_resolve_the_target(repo, tmp_path):
@@ -122,3 +138,9 @@ def test_bringing_in_a_branch_that_changed_the_live_record_is_denied(repo):
         assert git_guard.decide(_bash(command, repo)), command
     assert git_guard.decide(_bash("git merge clean", repo)) is None
     assert git_guard.decide(_bash("git checkout clean", repo)) is None
+
+
+def test_deny_points_to_the_watchdog(repo):
+    reason = git_guard.decide(_bash("git stash", repo))["hookSpecificOutput"]["permissionDecisionReason"]
+    assert reason.endswith(git_guard.WATCHDOG_HINT)
+    assert "alpaca msg post --from <you> --to watchdog --kind question" in reason and "/watchdog" in reason

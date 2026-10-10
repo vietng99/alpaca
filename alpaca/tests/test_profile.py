@@ -83,7 +83,11 @@ class Fake(profile.Profile):
                            "started_at": 1.0}], "total": 1, "errors": []}
 
     def routes(self):
-        return {"/hub/fake.json": lambda root, query: ({"fake": True}, 200)}
+        return {"/hub/fake.json": lambda root, query: ({"fake": True}, 200),
+                "/hub/log.json": lambda root, query: ({"text": ""}, 200)}
+
+    def paths(self):
+        return {"text_exts": [".fx", "QL"]}
 
     def web(self):
         return {"pages": ["runs"], "stage_names": {"alpha": "Alpha stage"},
@@ -162,8 +166,8 @@ def test_the_empty_profile_hides_domain_data_on_the_hub(project):
     from alpaca import hub
     db.connect(project)
     view = hub.overview(project)
-    assert view["profile"] == {"name": "", "pages": [], "cards": [], "stages": [],
-                               "stage_names": {}}
+    assert view["profile"] == {"name": "", "pages": [], "slot_pages": [], "styles": [], "cards": [],
+                               "stages": [], "stage_names": {}}
     assert view["stages"] == [] and view["items"] == [] and view["active_jobs"] == []
     assert view["capture"]["status"] == "ok" and view["capture"]["profile"] == {}
     assert hub.runs(project) == {"items": [], "total": 0, "errors": []}
@@ -218,6 +222,29 @@ def test_project_yaml_names_the_profile_and_its_hooks_reach_the_call_sites(fake)
     assert view["stages"][0]["recorded_status"] == "PASS"
     assert view["acceptance"]["status"] == "BLOCKED"
     assert hub.runs(root)["total"] == 1
+
+
+def test_the_file_browser_reads_generic_text_and_the_profiles_own_extensions(fake):
+    """The generic list carries no domain extension; a profile's `paths()["text_exts"]` adds its own,
+    with or without the dot and in any case."""
+    from alpaca import serve
+    assert not {".sv", ".v", ".vh", ".tcl"} & serve.FILES_TEXT_EXTS
+    (fake / "notes.md").write_text("generic\n", encoding="utf-8")
+    (fake / "shader.fx").write_text("domain\n", encoding="utf-8")
+    (fake / "query.ql").write_text("domain\n", encoding="utf-8")
+    assert serve.files_read(str(fake), "notes.md")["text"] == "generic\n"
+    assert serve.files_read(str(fake), "shader.fx")["text"] == "domain\n"
+    assert serve.files_read(str(fake), "query.ql")["text"] == "domain\n"
+    assert serve.files_text_exts(str(fake)) == serve.FILES_TEXT_EXTS | {".fx", ".ql"}
+
+
+def test_without_a_profile_the_file_browser_reads_only_the_generic_extensions(project):
+    from alpaca import serve
+    Path(project, "notes.md").write_text("generic\n", encoding="utf-8")
+    Path(project, "shader.fx").write_text("domain\n", encoding="utf-8")
+    assert serve.files_read(project, "notes.md")["text"] == "generic\n"
+    assert serve.files_read(project, "shader.fx")["error"] == "not a readable text file"
+    assert serve.files_text_exts(project) == serve.FILES_TEXT_EXTS
 
 
 def test_a_profile_check_that_raises_blocks_every_stage(fake, monkeypatch):
@@ -361,8 +388,9 @@ def test_the_cockpit_shows_a_profiles_pages_and_cards(fake, tmp_path):
 
 def test_the_hub_gates_profile_pages_on_the_profile():
     text = (WEB / "hub.js").read_text(encoding="utf-8")
-    assert "const PROFILE_PAGES = ['runs','live'];" in text
-    assert "!PROFILE_PAGES.includes(id)||profileOn(id)" in text
+    pages = json.loads((WEB / "pages.json").read_text(encoding="utf-8"))["pages"]
+    assert [p["id"] for p in pages if p.get("gate") == "profile"] == ["runs", "live"]
+    assert "p.gate!=='profile'||profileOn(p.id)" in text
     assert "const pages = [" not in text        # every page list goes through visiblePages()
 
 

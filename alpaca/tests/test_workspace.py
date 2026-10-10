@@ -241,6 +241,13 @@ def start(handler, who="other"):
     return httpd
 
 
+def test_the_own_tile_is_named_from_project_yaml_else_the_folder(project):
+    """With no registry entry the own tile carries the project's name, never a product name."""
+    assert serve.workspaces(project)[0]["name"] == "proj"
+    Path(project, "project.yaml").write_text("name: Fern Survey\n", encoding="utf-8")
+    assert serve.workspaces(project)[0]["name"] == "Fern Survey"
+
+
 def test_hub_lists_registered_instances_and_reads_their_status_server_side(project, tmp_path):
     assert [w["href"] for w in serve.workspaces(project)] == ["/hub/"]     # no registry: self only
     up, open_ = start(Board), start(Board)

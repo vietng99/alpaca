@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd \"$CLAUDE_PROJECT_DIR\" && bin/alpaca-python -m alpaca.hooks.session_start",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && bin/alpaca-python --isolated -m alpaca.hooks.session_start",
             "timeout": 20
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd \"$CLAUDE_PROJECT_DIR\" && bin/alpaca-python -m alpaca.hooks.user_prompt",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && bin/alpaca-python --isolated -m alpaca.hooks.user_prompt",
             "timeout": 10
           }
         ]
@@ -30,7 +30,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd \"$CLAUDE_PROJECT_DIR\" && bin/alpaca-python -m alpaca.hooks.pre_tool",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && bin/alpaca-python --isolated -m alpaca.hooks.pre_tool",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && bin/alpaca-python --isolated -m alpaca.hooks.research_guard",
             "timeout": 10
           }
         ]
@@ -40,7 +50,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd \"$CLAUDE_PROJECT_DIR\" && bin/alpaca-python -m alpaca.hooks.git_guard",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && bin/alpaca-python --isolated -m alpaca.hooks.git_guard",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && bin/alpaca-python --isolated -m alpaca.hooks.temp_guard",
             "timeout": 10
           }
         ]
@@ -52,7 +67,19 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd \"$CLAUDE_PROJECT_DIR\" && bin/alpaca-python -m alpaca.hooks.post_tool",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && bin/alpaca-python --isolated -m alpaca.hooks.post_tool",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && bin/alpaca-python --isolated -m alpaca.hooks.subagent_start",
             "timeout": 10
           }
         ]
@@ -64,7 +91,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd \"$CLAUDE_PROJECT_DIR\" && bin/alpaca-python -m alpaca.hooks.subagent_stop",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && bin/alpaca-python --isolated -m alpaca.hooks.subagent_stop",
             "timeout": 10
           }
         ]
@@ -76,7 +103,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd \"$CLAUDE_PROJECT_DIR\" && bin/alpaca-python -m alpaca.hooks.stop",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && bin/alpaca-python --isolated -m alpaca.hooks.stop",
             "timeout": 20
           }
         ]
@@ -88,7 +115,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd \"$CLAUDE_PROJECT_DIR\" && bin/alpaca-python -m alpaca.hooks.session_end",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && bin/alpaca-python --isolated -m alpaca.hooks.session_end",
             "timeout": 60
           }
         ]
@@ -100,7 +127,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd \"$CLAUDE_PROJECT_DIR\" && bin/alpaca-python -m alpaca.hooks.pre_compact",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && bin/alpaca-python --isolated -m alpaca.hooks.pre_compact",
             "timeout": 20
           }
         ]

@@ -32,17 +32,55 @@ def policy(root):
     return cfg, terms, digest({'barrier': block, 'terms_digest': terms.digest})
 
 
-def init_repository(path):
-    git(path, 'init', '-q', '-b', 'main')
+def seed_git(path, *args, accept=(0,), stdin=None):
+    """git for a seed repository that sees only the tree's own ignore rules: no global or system
+    config (so no core.excludesFile and no init.templateDir with an info/exclude), no host-wide
+    $XDG_CONFIG_HOME/git/ignore, no template. A release host's own ignore settings can then never
+    keep a candidate file out of the seed (review M-1)."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith('GIT_')}
+    env.update(GIT_NO_REPLACE_OBJECTS='1', GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull)
+    done = subprocess.run(['git', '-c', 'core.excludesFile=' + os.devnull, '-C', str(path), *args],
+                          capture_output=True, env=env, input=stdin)
+    if done.returncode not in accept:
+        raise subprocess.CalledProcessError(done.returncode, ['git', *args], done.stdout, done.stderr)
+    return done.stdout
+
+
+def init_repository(path, tracked=()):
+    """Commit the files under path the way a fresh repository would take them.
+
+    Nothing is force-added: a file the tree's own .gitignore ignores stays out of the commit, where
+    left_out() reports it, so a candidate member that a clone would never carry cannot pass the
+    leak scan or the fresh-clone gate unseen. Only the tree's own ignore rules apply (seed_git).
+    tracked names files the source repository already tracks (the development seed); only those are
+    added past an ignore rule, one path at a time."""
+    seed_git(path, 'init', '-q', '--template=', '-b', 'main')
     for key, value in [('user.name', 'Alpaca Release'), ('user.email', 'release@localhost'),
                        ('commit.gpgsign', 'false'), ('core.autocrlf', 'false'), ('core.fileMode', 'true')]:
-        git(path, 'config', key, value)
+        seed_git(path, 'config', key, value)
     hooks = path / '.git/release-empty-hooks'
     hooks.mkdir()
-    git(path, 'config', 'core.hooksPath', str(hooks))
-    git(path, 'add', '--all', '--force')
-    git(path, 'commit', '-qm', 'Alpaca release candidate')
-    return git(path, 'rev-parse', 'HEAD').decode().strip()
+    seed_git(path, 'config', 'core.hooksPath', str(hooks))
+    seed_git(path, 'add', '--all')
+    missing = sorted(set(tracked) & set(left_out(path)))
+    for start in range(0, len(missing), 500):
+        seed_git(path, 'add', '--force', '--', *missing[start:start + 500])
+    seed_git(path, 'commit', '-qm', 'Alpaca release candidate')
+    return seed_git(path, 'rev-parse', 'HEAD').decode().strip()
+
+
+def left_out(path):
+    """Files in the work tree of path that its commit does not hold (ignored by its .gitignore)."""
+    return sorted(rel for rel in seed_git(path, 'ls-files', '--others', '-z').decode().split('\0') if rel)
+
+
+def ignore_sources(path, rels):
+    """'<file> (<ignore file>:<line>)' for each file, naming the rule that keeps it out of the seed."""
+    out = seed_git(path, 'check-ignore', '--no-index', '-v', '-z', '--stdin', accept=(0, 1),
+                   stdin=b'\0'.join(r.encode() for r in rels) + b'\0' if rels else b'')
+    fields = out.decode().split('\0')
+    found = {fields[i + 3]: '%s:%s' % (fields[i], fields[i + 1]) for i in range(0, len(fields) - 3, 4)}
+    return ['%s (%s)' % (rel, found.get(rel, 'no ignore rule')) for rel in rels]
 
 
 def copy_files(files, target):
@@ -123,16 +161,25 @@ def check_release(root, config, build):
     try:
         copy_files({rel: Path(build.tree) / rel for rel in build.inventory}, seed)
         candidate = init_repository(seed)
+        ignored = left_out(seed)
         cfg, terms, policy_hash = policy(root)
         report = barrier.scan(str(seed), [candidate], cfg=cfg, term_list=terms)
-        add('leak-scan', report.verdict == 0, ','.join(report.reasons))
+        reasons = list(report.reasons)
+        if ignored:
+            # The scan reads the commit; a member the candidate's .gitignore keeps out of it is unscanned.
+            reasons.append('UNSCANNED-IGNORED-MEMBER')
+        add('leak-scan', report.verdict == 0 and not ignored, ','.join(reasons))
     except (ValueError, OSError, subprocess.SubprocessError) as exc:
+        ignored = []
         add('leak-scan', False, type(exc).__name__)
 
     try:
         clone = work / 'fresh'
         git(work, 'clone', '-q', '--no-local', str(seed), str(clone))
-        add('fresh-clone', digest(tree_inventory(clone)) == build.tree_hash)
+        detail = ('kept out of the seed by the candidate\'s own ignore rules: '
+                  + ', '.join(ignore_sources(seed, ignored[:5]))
+                  + (' and %d more' % (len(ignored) - 5) if len(ignored) > 5 else '')) if ignored else ''
+        add('fresh-clone', digest(tree_inventory(clone)) == build.tree_hash and not ignored, detail)
     except (ValueError, OSError, subprocess.SubprocessError) as exc:
         add('fresh-clone', False, type(exc).__name__)
 
@@ -145,8 +192,9 @@ def check_release(root, config, build):
             if gate.get('scope', 'release') == 'dev':
                 if dev_seed is None:
                     dev_seed = work / 'dev-seed'
-                    copy_files(dev_files(root, config), dev_seed)
-                    init_repository(dev_seed)
+                    sources = dev_files(root, config)
+                    copy_files(sources, dev_seed)
+                    init_repository(dev_seed, tracked=sources)
                 origin = dev_seed
             git(work, 'clone', '-q', '--no-local', str(origin), str(cwd))
             tracked = {rel: cwd / rel for rel in git(cwd, 'ls-files', '-z').decode().split('\0') if rel}

@@ -19,20 +19,26 @@ except ModuleNotFoundError:  # pragma: no cover
 
 # meta.* defaults (mirrored into the DB `meta` table at pour; the deterministic knobs live here)
 META_DEFAULTS: dict[str, Any] = {
-    "schema_version": "3",
-    "embed_model": "deterministic-hash-64",   # SEAM default: swap for a real CPU embedder
+    "schema_version": "4",
+    "embed_model": "deterministic-hash-64",   # deterministic hash stand-in; no model embedder exists
     "embed_dim": "64",
     "embed_version": "0",
-    "rerank_model": "identity",               # SEAM default: swap for mxbai-rerank-v2 (0.5B CPU)
-    "entail_models": "structural-only",       # SEAM default: swap for HHEM/MiniCheck/Paladin
+    "rerank_model": "identity",               # identity or lexical only; no model reranker exists
+    "entail_models": "structural-only",       # deterministic entailers only; no model entailer exists
     "ppr_alpha": "0.15",
     "ppr_iters": "40",
     "ppr_epsilon": "1e-6",
     "rrf_k": "60",
-    "retrieval_profile": "narrow",
+    "retrieval_profile": "narrow",             # narrow | graph | hybrid | full; graph = narrow + PPR (arch 8.2), off by default: bar A3 does not hold at the op-008 t-068 after-run (dec-7574faf2ea3b; X ties X-lex in every category)
     "determinism_seed": "0",
     "sqlite_vec_version": "none",
 }
+
+
+#: The retrieval profiles (interfaces.py.txt `RetrievalProfile`): narrow is BM25 and the exact floor;
+#: graph adds the PPR arm and lets an edge be the answer claim (architecture.md 8.2); hybrid adds the
+#: vector arm to narrow; full is graph and hybrid together.
+RETRIEVAL_PROFILES = ("narrow", "graph", "hybrid", "full")
 
 
 @dataclass(frozen=True)
@@ -53,6 +59,7 @@ class Config:
     dream_blast_cap: int = 64           # HELD if a pass would change more than this many edges
     dream_min_interval_s: int = 3600    # PAUSED (throttle) if two passes run closer than this apart
     dream_kill_switch: bool = False     # force-disarm regardless of dream_armed (config-level e-stop)
+    consolidate_after_capture: bool = False   # one bounded consolidation step after a SessionEnd capture (architecture.md 9.2); it only proposes
     use_git: bool = False               # events.jsonl git-commit only if a repo + this flag
     refine_budget: int = 3
     meta: dict[str, Any] = field(default_factory=lambda: dict(META_DEFAULTS))
@@ -63,7 +70,7 @@ class Config:
         for name in ("embedder", "reranker", "entailer", "llm_extractor"):
             if not isinstance(getattr(self, name), str):
                 raise TypeError(f"{name} must be a string")
-        for name in ("dream_armed", "dream_kill_switch", "use_git"):
+        for name in ("dream_armed", "dream_kill_switch", "use_git", "consolidate_after_capture"):
             if not isinstance(getattr(self, name), bool):
                 raise TypeError(f"{name} must be true or false")
         if self.use_git:
@@ -80,9 +87,9 @@ class Config:
                        lower_inclusive=False)
         if "authority_unit" in self.meta:
             _bounded_float("meta.authority_unit", self.meta["authority_unit"], 0.0, 1.0)
-        profile = self.meta.get("retrieval_profile", "narrow")
-        if profile not in ("narrow", "hybrid", "full"):
-            raise ValueError("meta.retrieval_profile must be narrow, hybrid, or full")
+        profile = self.meta.get("retrieval_profile", META_DEFAULTS["retrieval_profile"])
+        if profile not in RETRIEVAL_PROFILES:
+            raise ValueError("meta.retrieval_profile must be narrow, graph, hybrid, or full")
 
     @staticmethod
     def for_vault(vault_dir: str | os.PathLike) -> "Config":
@@ -120,7 +127,7 @@ class Config:
             raise TypeError("wiki settings must be a table")
         names = {"embedder", "reranker", "entailer", "llm_extractor", "dream_armed",
                  "dream_blast_cap", "dream_min_interval_s", "dream_kill_switch", "use_git",
-                 "refine_budget", "meta"}
+                 "refine_budget", "consolidate_after_capture", "meta"}
         unknown = set(data) - names
         if unknown:
             raise ValueError("unknown wiki settings: " + ", ".join(sorted(unknown)))
@@ -132,10 +139,13 @@ class Config:
         return replace(self, meta=meta, **{k: v for k, v in data.items() if k != "meta"})
 
     @staticmethod
-    def for_project(root: str | os.PathLike) -> "Config":
+    def for_project(root: str | os.PathLike, resolve: bool = True) -> "Config":
         """Defaults < project wiki_providers < vault rune.toml; reject unavailable providers.
 
         This reads settings only. It does not create a vault or enable optional learning.
+        `resolve=False` skips the provider check, for the readers that report a configured provider
+        rather than use it (`wiki status` provider states, FR-25; the consolidation queue status):
+        a configured unsupported provider must not make them raise (t-070 D-4).
         """
         from alpaca import paths, project
         runtime = Path(paths.runtime_dir(str(root)))
@@ -148,7 +158,8 @@ class Config:
         local = cfg.vault_dir / "rune.toml"
         if local.exists():
             cfg = cfg.with_settings(tomllib.loads(local.read_text(encoding="utf-8")))
-        cfg.providers()
+        if resolve:
+            cfg.providers()
         return cfg
 
 

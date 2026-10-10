@@ -57,6 +57,8 @@ _NAME_OLD = re.compile(r"claude-(\d{1,2})(?:-(\d{1,2}))?-([a-z]+)(?:-(\d{8}))?\Z
 _HEADING = re.compile(r"#{1,6}\s+(.*?)\s*#*\Z")
 _LINK_SUFFIX = re.compile(r"\(\[[^\]]*\]\([^)]*\)\)")
 _PRICE = re.compile(r"\$(\d+(?:\.\d+)?|\.\d+) / MTok")
+# The name suffix of a model priced by prompt length: "(for prompts up to 100,000 tokens)".
+_TIER = re.compile(r"\(for prompts (up to|over) (\d{1,3}(?:,\d{3})+|\d+) tokens\)\Z")
 # The Model pricing table columns after "Model", and the pricing category each one feeds.
 _HEADER = ("Base input tokens", "5m cache writes", "1h cache writes", "Cache hits and refreshes", "Output tokens")
 _HEADER_CATEGORIES = ("uncached_input", "cache_write_5m", "cache_write_1h", "cached_input", "output")
@@ -185,6 +187,9 @@ def _card(data):
             return None
         threshold = data.get("context_threshold_tokens")
         if threshold is not None and (type(threshold) is not int or threshold <= 0):
+            return None
+        if data.get("long_context_rates") is not None:
+            # A second rate row this loader cannot carry: skip the event rather than price one row.
             return None
         label = data["label"]
         if not isinstance(label, dict) or label.get("method") not in METHODS:
@@ -361,7 +366,10 @@ def parse_anthropic(markdown, model):
 
     Refuses (ValueError) unless the "Model pricing" table has exactly the expected columns and
     exactly one row whose name, without footnotes and a trailing parenthesised link, equals the
-    model's page name. "Claude Opus 5" never matches "Claude Opus 5.5".
+    model's page name. "Claude Opus 5" never matches "Claude Opus 5.5". A model priced by prompt
+    length instead has exactly one "(for prompts up to N tokens)" row and one "(for prompts over N
+    tokens)" row with the same N; the result then also carries `long_context_rates` and
+    `context_threshold_tokens`. A row that names the model with any other qualifier is refused.
     """
     name = anthropic_name(model)
     if name is None:
@@ -378,22 +386,43 @@ def parse_anthropic(markdown, model):
                          % (" | ".join(_HEADER), " | ".join(header) or table[0]))
     if len(table) < 2 or not _separator(_cells(table[1])):
         raise ValueError("the Model pricing table has no separator row under its header")
-    matches = []
+    matches, tiers = [], []
     for line in table[2:]:
         cells = _cells(line)
-        if cells and _clean_name(cells[0]) == name:
+        cleaned = _clean_name(cells[0]) if cells else None
+        if cleaned == name:
             matches.append((line, cells))
-    if not matches:
+        elif cleaned and cleaned.startswith(name + " ("):
+            tier = _TIER.fullmatch(cleaned, len(name) + 1)
+            if tier is None:
+                raise ValueError("the Model pricing table row %r qualifies %s in a way this parser cannot price"
+                                 % (cleaned, name))
+            tiers.append((tier.group(1), int(tier.group(2).replace(",", "")), line, cells))
+    if matches and tiers:
+        raise ValueError("the Model pricing table has a plain row and prompt-size rows for %s" % name)
+    if not matches and not tiers:
         raise ValueError("the Model pricing table has no row for %s" % name)
     if len(matches) > 1:
         raise ValueError("the Model pricing table has %d rows for %s" % (len(matches), name))
-    line, cells = matches[0]
-    if len(cells) != len(header):
-        raise ValueError("the %s row has %d cells, the header has %d" % (name, len(cells), len(header)))
-    parsed = {category: _price(cell, name) for category, cell in zip(_HEADER_CATEGORIES, cells[1:])}
+    if tiers and (sorted(t[0] for t in tiers) != ["over", "up to"] or tiers[0][1] != tiers[1][1]):
+        raise ValueError("%s needs exactly one 'up to N' and one 'over N' row with the same N; the page has: %s"
+                         % (name, "; ".join(_clean_name(t[3][0]) for t in tiers)))
+
+    def read(line, cells):
+        if len(cells) != len(header):
+            raise ValueError("the %s row has %d cells, the header has %d" % (name, len(cells), len(header)))
+        return {category: _price(cell, name) for category, cell in zip(_HEADER_CATEGORIES, cells[1:])}
+
+    ordered = sorted(tiers, key=lambda t: t[0] != "up to") or [(None, None) + matches[0]]
+    parsed = read(*ordered[0][2:])
     fast, fast_row = _fast_mode(lines, name, parsed)
-    return {"model": model, "name": name, "rates": tuple(parsed.get(c) for c in pricing._CATEGORIES),
-            "row": line, "fast_multiplier": fast, "fast_row": fast_row}
+    out = {"model": model, "name": name, "rates": tuple(parsed.get(c) for c in pricing._CATEGORIES),
+           "row": ordered[0][2], "fast_multiplier": fast, "fast_row": fast_row}
+    if tiers:
+        long_rates = read(*ordered[1][2:])
+        out.update(long_context_rates=tuple(long_rates.get(c) for c in pricing._CATEGORIES),
+                   context_threshold_tokens=ordered[0][1], row="\n".join((ordered[0][2], ordered[1][2])))
+    return out
 
 
 # --- fetching -----------------------------------------------------------------------------------
@@ -512,6 +541,9 @@ def fetch_anthropic(root, model, *, url=ANTHROPIC_PRICING_MD, fetch=None, save=T
     if page is None:
         page = fetch_page(root, url, fetch=fetch, save=save)
     parsed = parse_anthropic(page["text"], model)
+    if parsed.get("long_context_rates") is not None:
+        raise ValueError("%s is priced by prompt length (two rows on the page); a recorded card holds one row, "
+                         "so it needs a built-in card in alpaca/analytics/pricing.py" % parsed["name"])
     human = page["url"][:-3] if page["url"].endswith(".md") else page["url"]
     return {"model": model, "provider": "anthropic", "name": parsed["name"], "rates": parsed["rates"],
             "fast_multiplier": parsed["fast_multiplier"], "source_url": human,

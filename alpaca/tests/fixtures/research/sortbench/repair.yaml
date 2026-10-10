@@ -1,0 +1,76 @@
+# Research contract, repair mode, for the sortbench pack.
+runbook: 3
+id: sortbench-repair
+title: Fix the reported sortlib bugs
+description: >-
+  For each reported bug, a reproducing test must fail on the base tree; a fix counts only when that
+  test passes and every test that passed before still passes.
+spec: repair-spec.md
+owner: the sortlib maintainer
+
+stages:
+  - id: build
+    title: the package compiles
+    run: python3 -m compileall -q ${WORKTREE}/src/sortlib
+    timeout: 120
+    checks:
+      - {id: build-exit, type: exit-code}
+  - id: prepare
+    title: write the test helper data into the case's base tree
+    run: python3 bench/prepare.py --src ${WORKTREE}/src
+    timeout: 300
+    checks:
+      - {id: prepare-exit, type: exit-code}
+
+research:
+  mode: repair
+  defaults: pack.yaml
+  accept:
+    rule: repair
+  paths:
+    editable: [src/sortlib/]
+    covers: [EC-002]
+    source: spec:EC-002
+  gates:
+    - {stage: build}
+  stop:
+    # rounds and slots: interview:research-stop
+    rounds: 3
+    slots: 2
+  controls:
+    noop_rounds: 2
+    random: false
+  repair:
+    prepare: prepare
+    pass_to_pass:
+      command: >-
+        python3 ${CONTRACT_DIR}/packs/sortbench/tests/run_tests.py
+        --src ${WORKTREE}/src --markers
+      min_tests: 12
+      timeout: 600
+      covers: [SC-003]
+      source: spec:SC-003
+    cases:
+      - id: stable-keys
+        bug_report: bugs/stable-keys.md
+        base: 0f4c2a9e1b7d3c5a8e6f0b2d4c6a8e0f1b3d5c7a
+        fail_to_pass:
+          origin: store
+          tests: [stable_equal_keys, stable_all_same_key]
+          timeout: 300
+        suspect_files: [src/sortlib/merge.py]
+        covers: [SC-001, EC-001]
+        source: spec:SC-001
+      - id: none-key
+        bug_report: bugs/none-key.md
+        fail_to_pass:
+          origin: generate
+          timeout: 300
+          repeats: 2
+        suspect_files: [src/sortlib/sort.py, src/sortlib/keys.py]
+        covers: [SC-002]
+        source: spec:SC-002
+  coupled:
+    - id: dispatch
+      files: [src/sortlib/sort.py, src/sortlib/dispatch.py]
+      note: dispatch.py lists every entry point of sort.py; a new or renamed entry point changes both

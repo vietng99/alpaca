@@ -19,7 +19,48 @@ pending preservation jobs, consumer checkpoints, retries and coverage. Read-only
 connections can use SQLite shared-memory coordination files; they do not modify logical
 record contents or initialize a missing project database.
 
-`bin/alpaca collect once --max-records 1000` processes a bounded record batch. Sources are
+`bin/alpaca collect once --max-records 1000` processes a bounded record batch.
+For an existing backlog, `bin/alpaca collect watch --interval 2 --max-records 20000
+--source-batch 2000 --event-batch 2000 --preservation-batch 128` increases catch-up throughput while retaining
+source prefix verification, transactional cursors, retries and the per-source round robin.
+The default source and event batches remain 200; each explicit batch is capped at
+10000 records. Preservation defaults to eight jobs per cycle and is capped at 256.
+Each preservation batch shares one wiki comparison index and prior-projection inventory, refreshes both after
+another connection commits, and keeps the index for the next batch: the collector lends one wiki
+absorber to all its captures (below), and closes it only when a batch left its connection inside a
+transaction. Jobs still commit or retry independently. Empty capture does not rebuild the wiki corpus.
+Watch reports completed and failed jobs in its heartbeat during long batches and
+finishes the current job when stopped, leaving the rest queued. The normal wiki
+schema pour adds a covering document/status index to existing stores, so capture
+does not scan every active block for each document. Witness comparisons retain
+quote, attribution and deterministic match decisions; mathematically impossible
+similarity matches skip set allocation.
+After stopping the watcher, `bin/alpaca collect once --retry-consumer wiki`
+retries that consumer immediately through its normal capture checks. Other consumer
+backoffs remain in force; failure still retains the checkpoint. Restart the watcher
+after the one-shot collection finishes.
+
+Run one supervised collector only. Operation replay and the independent durable preservation queue share a bounded
+metadata cache of successful transcript projections. Changed, missing or malformed
+sources still revalidate; an unchanged native file is not reread for every old
+event batch. Single-source collection uses the total `--max-records` ceiling. Marked projections
+are routed into `wiki/private/` before ingestion; the existing write barrier remains
+in force. Missing originals still need a retained copy or an external backup. When a
+registered transcript and its retained copy are both absent, the wiki consumer does not
+stop: it captures the rest of the batch and, before its checkpoint advances, commits an
+open `transcript-unavailable` issue (naming the session, never the locator) and a queued
+snapshot retry for that session. The gap stays explicit: no transcript document is
+written and coverage stays incomplete. A restored original clears the issue through the
+normal snapshot retry. A malformed source, an unreadable file, or a directory, special
+file or dangling link at the locator still stops the consumer for retry. In every case
+the batch's event notes land first (FR-8); only the checkpoint waits. The wiki consumer's
+capture has no deadline of its own; a preservation job has 45 seconds, and lands its transcript
+before the deadline is checked. The collector loop waits at most 120 seconds for either
+(`CAPTURE_BUDGET_S`): past that it abandons the batch or job, which is retried after the
+consumer's backoff and leaves one `capture-deferred` record event, while the other consumers go on. The collector lends one wiki absorber to all its
+captures, so the echo index of every active block is read once per process (about 30
+seconds and 3.6 GiB on a store of 530,000 blocks) and again only after another writer
+commits to the wiki store. Sources are
 registered explicitly through session lifecycle commands or `collect register`. Codex
 session start discovers only a supplied native ID with a matching project header.
 Project pool discovery refuses symlink ancestry and never imports another project's
@@ -37,7 +78,16 @@ capture. New transcript snapshots exclude private reasoning and preserve prior g
 Hook appends serialize short-write retries and fsync under a bounded lock. Failed hook
 outcomes are durable when storage permits; sanitized stderr is the fallback. The hook
 wall-clock budget includes outcome recording. In collector-enabled mode, hooks append
-boundaries while the collector handles snapshots and wiki/export work. Snapshot request
+boundaries while the collector handles snapshots and wiki/export work. Its `session-views`
+consumer also takes over two views the Stop and SessionEnd hooks then skip: the pad
+(`RESUME.md`, `CHECKLIST.md`, `board.json`) after a session end, and `analytics/index.html`
+after a session end and after every tenth turn end of a session. The pad is written at most
+once a minute and analytics is rebuilt at most once every 10 minutes (one build read the
+live record of 813 sessions in about 23 s of CPU); a trigger inside that interval waits and
+runs on a later pass, with or without new events. A failed refresh opens a
+`pad-refresh-failed` or `analytics-refresh-failed` issue in `collect status` and is tried
+again after the interval; it never holds the consumer's checkpoint or another consumer.
+`bin/alpaca analytics build` still rebuilds the page at once. Snapshot request
 checkpoints acknowledge durable jobs; only a successful snapshot completes a job. One
 missing source retries independently without stopping preservation of other sessions.
 Derived wiki transcript summaries use content-addressed revisions. Parser corrections and
@@ -127,6 +177,11 @@ budget. `bin/alpaca artifact retention-dry-run` reports candidates and never del
 Inspect those files, then install the generated units under `~/.config/systemd/user/`, run
 `systemctl --user daemon-reload`, and enable/start the dashboard, collector and timer.
 `bin/alpaca collect enable` switches expensive native-hook projections to the collector.
+Without that switch, the Stop, PreCompact and SessionEnd hooks (and `session checkpoint`)
+still skip their wiki capture call while this project's `collect watch` collector is
+running, because the collector lands those events itself. Liveness is the collector lock of
+this root, held by the process the record's collector row names, read from `/proc/locks`
+without taking the lock. With no live collector the hooks capture as before.
 The services restart after failures with backoff; systemd journals sanitized diagnostics.
 The project-local SQLite runtime is loaded by `bin/alpaca-python`; see
 `setup/sqlite-runtime.md` for the pinned build, checksum checks and rollback.

@@ -38,6 +38,7 @@ from .engine.compartment import is_pushable, pushable_where_clause
 from .migrate import content_port
 from .project import artifacts as _artifacts
 from .project import render as _render
+from .servable import servable_docs
 from .store.db import DB
 from .store.ledger import Ledger
 from .store.write import Writer
@@ -66,10 +67,13 @@ def _placeholders(items) -> str:
 
 
 def _public_doc_ids(src: DB) -> list[str]:
-    """The public docs - the M2.12 compartment filter, composed ONCE at the data layer."""
+    """The public docs - the M2.12 compartment filter, composed ONCE at the data layer - less every
+    doc whose source fails the servable predicate (excluded or quarantined, architecture.md 6.2)."""
     where = pushable_where_clause()  # COALESCE(private,1)=0 AND COALESCE(privacy_scanned,0)=1
-    return [r["doc_id"] for r in _rows(
+    public = [r["doc_id"] for r in _rows(
         src.conn, f"SELECT doc_id FROM docs WHERE {where} ORDER BY doc_id")]
+    keep = servable_docs(src, public)
+    return [d for d in public if d in keep]
 
 
 def _reconstruct_pages(src: DB, doc_ids: list[str]) -> dict[str, str]:
@@ -111,6 +115,8 @@ def _copy_public(src: DB, writer: Writer) -> dict[str, Any]:
         % _placeholders(doc_ids),
         tuple(doc_ids),
     ) if doc_ids else []
+    # architecture.md 6.2: an edge whose anchor block is not servable stays behind; the edge loop
+    # below copies an edge only when its source block was copied from a servable doc.
 
     # nodes reachable from public provenance: endpoints of public edges + node_blocks on public
     # blocks. Endpoint nodes of a public assertion are public by that assertion.
@@ -272,10 +278,17 @@ def emit(root, out_dir, clock: Clock = now_iso) -> dict:
     """Emit the wiki at `root` as a standalone portable vault under `out_dir`. Return the manifest.
 
     Deterministic under a fixed `clock`: the ledger, the projection files and the manifest are
-    byte-identical across two emits with the same clock.
+    byte-identical across two emits with the same clock. A project's vault whose store is behind its
+    record's removal acts raises `service.StoreBehindRecord` and emits nothing.
     """
     root = Path(root).expanduser().resolve()
     out_dir = Path(out_dir).expanduser().resolve()
+    # the serving gate (t-070 round 2 C-E): a project vault (`<project>/.alpaca/wiki`) whose store
+    # has not processed every removal act of the project's record is not extracted
+    project = root.parent.parent
+    if root.parent.name == ".alpaca" and (project / ".alpaca" / "alpaca.db").is_file():
+        from . import service
+        service._serving_gate(str(project))
 
     src_cfg = Config.for_vault(root)
     src = DB(src_cfg)
@@ -325,7 +338,7 @@ def emit(root, out_dir, clock: Clock = now_iso) -> dict:
 
     manifest = {
         "schema": EXTRACT_SCHEMA,
-        "schema_version": "3",
+        "schema_version": "4",
         "generated": stamp,
         "counts": counts,
         "db_content_sha256": db_digest,

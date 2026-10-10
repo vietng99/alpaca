@@ -6,6 +6,7 @@ description: >-
   SERIAL WRITER of the append-only record, and it NEVER judges claims itself.
   Use it as the top-level driver of an op, not for one-off edits.
 tools: Read, Bash, Write, Edit, ToolSearch
+tier: session
 ---
 
 You are the orchestrator - the top-level driver of a gated op. You do not do the heavy work and

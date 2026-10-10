@@ -110,6 +110,14 @@ def run_wiki_mutation_oracle(root):
     oracle_path = os.path.join(root, "tests", "wiki", "mutation_oracle.py")
     if not os.path.isfile(oracle_path):
         return vc.BLOCKED, "no wiki mutation oracle at tests/wiki/mutation_oracle.py"
+    # The oracle puts its tree first on sys.path when it loads. Left there, every later Python child
+    # of this process (alpaca.child builds a child's path from this one) would import that tree's
+    # alpaca, so the path is restored however the oracle ends (t-070 landing fix). Only sys.path is
+    # restored: this is not an isolation of the oracle. Modules it imported stay in sys.modules and
+    # anything else it changed in this process stays changed; its `from alpaca import manifest`
+    # resolves to this process's already-loaded alpaca, so no module from its tree is left behind
+    # today (review of 97b59a438, m4).
+    saved_path = list(sys.path)
     try:
         spec = importlib.util.spec_from_file_location("alpaca_wiki_mutation_oracle", oracle_path)
         mod = importlib.util.module_from_spec(spec)
@@ -117,6 +125,8 @@ def run_wiki_mutation_oracle(root):
         summary = mod.run()
     except Exception as e:  # the oracle could not complete a run, so no verdict was reached
         return vc.BLOCKED, "wiki mutation oracle could not run (%s)" % e
+    finally:
+        sys.path[:] = saved_path
     if summary["total"] == 0:
         return vc.BLOCKED, "wiki mutation oracle has an empty mutation set"
     if summary["hollow"]:

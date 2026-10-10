@@ -293,8 +293,9 @@ def test_m1_web_up_script_requires_the_login_and_passes_remote(tmp_path):
     assert done.returncode == 1 and "files-auth" in done.stderr and not calls.exists()
     Path(root, ".alpaca", "files-auth").write_text(":pin")
     done = subprocess.run(["bash", script], env=env, capture_output=True, text=True, timeout=15)
+    # Python starts with -I by the launcher rule of alpaca/child.py (t-070 round 3, check round 2 F-1)
     assert done.returncode == 0 and calls.read_text().split() == [
-        "-m", "alpaca", "serve", "--detach", "--keep", "--remote", "--port", str(port)]
+        "-I", "-m", "alpaca", "serve", "--detach", "--keep", "--remote", "--port", str(port)]
 
 
 # ---- M2: one unapplied hostname never restarts the shared tunnel -------------------------------
@@ -457,7 +458,8 @@ def test_l3_units_and_scripts_never_exist_with_a_wider_mode(tmp_path, monkeypatc
 
     def replace(src, dst, *a, **k):
         if str(dst).endswith((".service", ".timer", ".sh", ".yml", ".json")):
-            seen.append((os.path.basename(str(dst)), stat.S_IMODE(os.stat(src).st_mode)))
+            # a write through a folder descriptor (t-424 `_nofollow.write_below`) names src there
+            seen.append((os.path.basename(str(dst)), stat.S_IMODE(os.stat(src, dir_fd=k.get("src_dir_fd")).st_mode)))
         return real_replace(src, dst, *a, **k)
 
     def chmod(path, mode, *a, **k):
@@ -605,7 +607,7 @@ def test_n5_web_up_accepts_alpaca_files_auth_as_the_login(tmp_path):
     env.pop("ALPACA_FILES_AUTH", None)
     done = subprocess.run(["bash", script], env=dict(env, ALPACA_FILES_AUTH=":from-env"), capture_output=True,
                           text=True, timeout=15)
-    assert done.returncode == 0 and calls.read_text().split()[:2] == [":from-env", "-m"]
+    assert done.returncode == 0 and calls.read_text().split()[:3] == [":from-env", "-I", "-m"]  # -I: t-070 F-1
     calls.unlink()
     Path(root, ".alpaca", "service.env").write_text("OTHER=1\nALPACA_FILES_AUTH=':from-unit-env'\n")
     done = subprocess.run(["bash", script], env=env, capture_output=True, text=True, timeout=15)

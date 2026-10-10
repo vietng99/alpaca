@@ -11,6 +11,7 @@ import re
 from dataclasses import dataclass, field
 
 from ..determinism import normalize_text
+from ..servable import servable
 from ..store.asof import AsOf
 from ..store.db import DB
 from ..store import query as q
@@ -150,7 +151,10 @@ def evaluate(db: DB, entailer, asof: AsOf, plan_templates: list[str],
              used_edge_ids: list[str], read_edge_ids: set[str],
              answer_node_ids: list[str], floor_ids: list[str],
              final_ids: list[str],
-             required_subclaims: list[str] | None = None) -> OracleResult:
+             required_subclaims: list[str] | None = None,
+             compartment: str | None = None) -> OracleResult:
+    """`compartment` is the answer's compartment (architecture.md 6.2): the servable filter on the
+    conflict-note overturner reads applies it, as retrieval does. None = any domain."""
     dag: dict = {}
     citations: list[Citation] = []
     hard_fail = None
@@ -201,7 +205,9 @@ def evaluate(db: DB, entailer, asof: AsOf, plan_templates: list[str],
     if "SUCCESSOR_READ" in plan_templates:
         results["SUCCESSOR_READ"] = T.successor_read(db, used_edge_ids, read_edge_ids, asof)
     if "OVERTURNER_QUERY" in plan_templates:
-        results["OVERTURNER_QUERY"] = T.overturner_query(db, answer_node_ids, read_edge_ids, asof)
+        results["OVERTURNER_QUERY"] = _servable_overturner_query(db, answer_node_ids,
+                                                                  read_edge_ids, asof,
+                                                                  compartment=compartment)
     if "AS_OF_CURRENCY" in plan_templates:
         results["AS_OF_CURRENCY"] = T.as_of_currency(db, used_edge_ids, asof)
     if "SUBCLAIM_COVERAGE" in plan_templates:
@@ -221,6 +227,18 @@ def evaluate(db: DB, entailer, asof: AsOf, plan_templates: list[str],
     conflict_note = ""
     contradicted = [c for c in citations if c.verdict == "contradicted"]
     overturner_fail = results.get("OVERTURNER_QUERY") and not results["OVERTURNER_QUERY"].passed
+    # A contradicted citation makes a conflict only when the cited blocks speak to the question:
+    # they cover the planner's required sub-claims, or one of them contradicts a sub-claim. When the
+    # sub-claims are uncovered and no cited block contradicts any of them, the cited text is not
+    # about what was asked, so the answer abstains on the unmet predicate below instead of
+    # reporting that sources disagree on it (an absent-target question: no block names the asked-about
+    # target, and the claim cut from the top block is contradicted by a negation later in that same
+    # block; alpaca/tests/wiki/test_question_coverage.py). An unread
+    # overturner on the answer's nodes still makes a conflict, covered or not.
+    question_unaddressed = bool(
+        contradicted and required_subclaims is not None and not completeness.subclaim_coverage
+        and not any(coverage_entail(sc, text)[0] == "contradicted"
+                    for sc in subclaims for text in cited_texts))
 
     # ---- roll up the DAG into a verdict ----
     # oracle-safety.1 GAP block: on abstain we surface WHY and the closest pages we did read, so an
@@ -231,10 +249,10 @@ def evaluate(db: DB, entailer, asof: AsOf, plan_templates: list[str],
     if hard_fail:
         return OracleResult("abstained", completeness, citations, dag, reason=hard_fail,
                             gap=_gap(hard_fail))
-    if contradicted or overturner_fail:
+    if (contradicted and not question_unaddressed) or overturner_fail:
         # F7: actually RANK the disagreeing edges by source_authority + recency + corroboration and
         # surface the winner - never emit a static note that claims arbitration it did not perform.
-        disagreeing = q.overturners_for_nodes(db, answer_node_ids, asof)
+        disagreeing = _servable_overturners(db, answer_node_ids, asof, compartment=compartment)
         for c in citations:
             if c.verdict == "contradicted" and c.source_edge_id:
                 e = q.get_edge(db, c.source_edge_id)
@@ -260,6 +278,26 @@ def evaluate(db: DB, entailer, asof: AsOf, plan_templates: list[str],
         return OracleResult("insufficient", completeness, citations, dag,
                             reason=r, gap=_gap(r))
     return OracleResult("grounded", completeness, citations, dag, reason="all layers passed")
+
+
+def _servable_overturners(db: DB, node_ids: list[str], asof: AsOf, *,
+                          compartment: str | None = None) -> list[dict]:
+    """architecture.md 6.2: the edge reads by node behind conflict_note keep only edges whose anchor
+    block is servable in the answer's compartment, so a private, excluded or other-domain source
+    never names the winner or lends its text."""
+    edges = q.overturners_for_nodes(db, node_ids, asof)
+    ok = servable(db, [e["source_block_id"] for e in edges], compartment=compartment)
+    return [e for e in edges if e["source_block_id"] in ok]
+
+
+def _servable_overturner_query(db: DB, answer_node_ids: list[str], read_edge_ids: set[str],
+                               asof: AsOf, *, compartment: str | None = None) -> T.PredResult:
+    """templates.overturner_query over the servable overturners only (architecture.md 6.2)."""
+    for e in _servable_overturners(db, answer_node_ids, asof, compartment=compartment):
+        if e["edge_id"] not in read_edge_ids:
+            return T.PredResult("OVERTURNER_QUERY", False,
+                                f"unread overturner {e['edge_id']} on answer nodes")
+    return T.PredResult("OVERTURNER_QUERY", True)
 
 
 def _source_authority(db: DB, edge: dict) -> int:

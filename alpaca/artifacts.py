@@ -42,7 +42,12 @@ def _sync_dir(path):
 
 def _safe_destination(path):
     path = Path(path).absolute()
+    held = None     # a folder held by descriptor (/proc/self/fd/N, alpaca/backup.py `_held`) is a link by form
+    if path.parts[:4] == ('/', 'proc', 'self', 'fd') and len(path.parts) > 4 and path.parts[4].isdigit():
+        held = Path(*path.parts[:5])
     for component in (path, *path.parents):
+        if held is not None and (component == held or held.is_relative_to(component)):
+            break
         if component.is_symlink():
             raise ValueError('symlink storage destination refused')
     return path

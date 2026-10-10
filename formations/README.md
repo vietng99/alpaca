@@ -42,6 +42,24 @@ output: a verified change carrying an independent verdict
 Prose after the front matter is documentation, not part of the manifest.
 ```
 
+## Tiers and escalation (shield)
+
+Every spawned role runs on a model chosen by `formations/shield.yaml`, never on the session's model
+by default. A role's tier is its own optional `tier:` (`low`, `mid`, `high`, `top`, or `session` for
+the main chat), else the `tier:` its archetype brief declares in `agents/<archetype>.md`. The policy
+maps each tier to a model for Claude and Codex. A role with no tier anywhere or a runtime with no
+model table is refused. Resolve the current values with `--runtime claude` or `--runtime codex`.
+
+A formation may also carry an optional `escalation:` block holding only `round_cap`; it may lower
+the policy cap (5), never raise it, and never to the class check's `after_failed_rounds` (3) or
+below, where the class check could never run. The rest of the ladder (the think stage before
+round 1, one high investigator per failed round that reports before the next fix, the
+cause-to-action map, the class check that sends a non-converging task back through the think stage
+once, the stop at the cap) and the verifier rules live in `shield.yaml` alone. `alpaca/formation/shield.py` resolves them; print the resolved table with
+`bin/alpaca-python -m alpaca.formation.shield [formation ...] --runtime codex --json` for Codex
+(the CLI default remains Claude). The shared Shield skill is how an orchestrator applies it;
+Codex discovers its project entry under `.agents/skills/shield/` and uses native subagents.
+
 ## Registered in both directions
 
 `manifest.registry(root)` scans this directory and registers every manifest both ways: name to

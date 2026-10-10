@@ -6,9 +6,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from ..clock import now_iso
+from ..clock import now_iso, to_clock_format
 
-_DATE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
+#: An ISO-8601 date, alone or with a time of day (`T` or one space, minutes or seconds, fractions,
+#: `Z` or an offset): `2026-03-01`, `2026-03-01T03:30:00+00:00`, `2026-03-01 03:30Z` (t-070 D-2).
+_MOMENT = re.compile(r"(?<![\w-])(\d{4})-(\d{2})-(\d{2})"
+                     r"(?:[Tt ](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)([Zz]|[+-]\d{2}:?\d{2})?)?(?![\w:])")
 _YEAR = re.compile(r"\b(19|20)\d{2}\b")
 _PRED_VERBS = ("work", "works", "founded", "attended", "cites", "cite", "born",
                "located", "refines", "related")
@@ -69,19 +72,61 @@ def classify_domain(question: str) -> str | None:
     return best if scores[best] > 0 else None
 
 
-_KNOWLEDGE = re.compile(r"\bas (?:known|recorded)(?:\s+at)?\s+(\d{4}-\d{2}-\d{2})\b")
+_KNOWLEDGE = re.compile(r"\bas (?:known|recorded)(?:\s+at)?\s+(?=\d{4}-)", re.IGNORECASE)
+
+
+def _moment(match) -> tuple[str, bool] | None:
+    """(instant in the store clock's format, has_time) of a `_MOMENT` match. A date alone is the
+    start of that day, as before; a date-time is that instant in UTC (an offset converted, none read
+    as UTC). A time of day that is not a readable instant (`25:61`) is read as the date alone."""
+    date = "%s-%s-%s" % match.group(1, 2, 3)
+    if match.group(4) is None:
+        return f"{date}T00:00:00+00:00", False
+    zone = match.group(5) or "+00:00"
+    if zone in ("Z", "z"):
+        zone = "+00:00"
+    elif ":" not in zone:
+        zone = zone[:3] + ":" + zone[3:]
+    instant = to_clock_format(f"{date}T{match.group(4)}{zone}")
+    return (instant, True) if instant else (f"{date}T00:00:00+00:00", False)
+
+
+def knowledge_pin(question: str) -> tuple[str | None, tuple[int, int] | None]:
+    """(K, span) of "as known at <date or date-time>" (also "as recorded at", or without "at"): a
+    date-time pins K at that instant, a date at the end of that day, so everything recorded during
+    the day is known (architecture.md 5.1; t-070 D-2, D-3). `span` is the clause's place in the
+    question, which the T parse leaves out. (None, None) when the question names no K."""
+    for clause in _KNOWLEDGE.finditer(question):
+        m = _MOMENT.match(question, clause.end())
+        if not m:
+            continue
+        found = _moment(m)
+        if found is None:
+            continue
+        instant, has_time = found
+        k = instant if has_time else "%s-%s-%sT23:59:59+00:00" % m.group(1, 2, 3)
+        return k, (clause.start(), m.end())
+    return None, None
 
 
 def parse_as_of(question: str, default: str | None = None) -> tuple[str, str]:
-    """Return (T_iso, resolved_from). A full date pins T; a bare year pins year-end; else now."""
+    """Return (T_iso, resolved_from). A date-time pins T at that instant, a full date at the start of
+    that day, a bare year at year-end; else now. The date of an "as known at <date>" clause pins K,
+    not T (`knowledge_pin`): a question that names only a K reads the world as it stood at K, so T is
+    K (`knowledge-time`) and a fact valid later on K's own day is not hidden (t-070 D-3)."""
     if default is not None:
         return default, "api-argument"
-    m = _DATE.search(question)
-    if m:
-        return f"{m.group(1)}-{m.group(2)}-{m.group(3)}T00:00:00+00:00", "explicit-date"
-    y = _YEAR.search(question)
-    if y and re.search(r"\b(in|as of|by|during)\b", question.lower()):
+    k, span = knowledge_pin(question)
+    rest = question if span is None else question[:span[0]] + " " + question[span[1]:]
+    for m in _MOMENT.finditer(rest):
+        found = _moment(m)
+        if found is not None:
+            return found[0], "explicit-datetime" if found[1] else "explicit-date"
+    y = _YEAR.search(rest)
+    if y and re.search(r"\b(in|as of|by|during)\b", rest.lower()):
         return f"{y.group(0)}-12-31T23:59:59+00:00", "explicit-year"
+    if k is not None:
+        return k, "knowledge-time"
     return now_iso(), "now"
 
 
@@ -119,8 +164,7 @@ def classify(question: str, as_of: str | None = None) -> Plan:
     else:
         templates = base
 
-    km = _KNOWLEDGE.search(low)
-    knowledge_time = f"{km.group(1)}T23:59:59+00:00" if km else None
+    knowledge_time, _span = knowledge_pin(question)
 
     return Plan(qtype=qtype, as_of=T, terms=terms, subclaims=_subclaims(question),
                 templates=templates, resolved_from=resolved_from, knowledge_time=knowledge_time,

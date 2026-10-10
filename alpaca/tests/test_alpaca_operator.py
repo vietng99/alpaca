@@ -87,12 +87,18 @@ def test_missing_and_unsafe_session_ids_are_refused(project, monkeypatch):
 
 
 def test_explicit_checkpoint_failure_is_nonzero(project, monkeypatch):
-    from alpaca.wiki.ingest import drain
+    from alpaca import capture_runner
     assert invoke(monkeypatch, "--session", "codex-a", "session", "start") == 0
-    def broken(*args, **kwargs):
-        raise OSError("capture failed")
-    monkeypatch.setattr(drain, "run", broken)
+    # the capture runner's child runs a capture that raises (alpaca/tests/runner_fakes.py)
+    monkeypatch.setattr(capture_runner, "CAPTURE", "alpaca.tests.runner_fakes:broken_os")
     assert invoke(monkeypatch, "--session", "codex-a", "session", "checkpoint") == 67
+    conn = db.connect(project)
+    try:
+        failed = [json.loads(r["data"]) for r in conn.execute(
+            "SELECT data FROM events WHERE kind='drain-failed'")]
+    finally:
+        conn.close()
+    assert failed == [{"where": "checkpoint", "error": "OSError: capture failed"}]
 
 
 def test_analytics_include_record_only_session_with_unknown_usage(project):

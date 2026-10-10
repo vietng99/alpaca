@@ -43,7 +43,7 @@ def test_nudge_after_an_unclaimed_edit(project):
 def test_no_nudge_while_the_session_holds_a_claim(project, monkeypatch):
     cli.main(["init"])
     cli.main(["op", "new", "x"])
-    cli.main(["task", "add", "--title", "task", "op-001", "s"])
+    cli.main(["task", "add", "--title", "task", "op-001", "s", "--phase", "build"])
     monkeypatch.setenv("ALPACA_SESSION_ID", "s1")
     assert cli.main(["task", "claim", "t-001", "--by", "w1", "--minutes", "30"]) == 0
     edit(project, "s1")

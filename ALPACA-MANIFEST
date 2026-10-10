@@ -15,7 +15,7 @@
 # never a copy source.
 #
 # project.yaml is in [mechanism] (human-owned, it carries the project id analytics keys on); once a
-# project is onboarded, project.yaml and intents/ are its own (alpaca upgrade keeps them, and
+# project is onboarded, project.yaml, intents/ and README.md are its own (alpaca upgrade keeps them, and
 # setup/gen_manifest.py --verify lists their changes as instance-owned). The self-tests live under
 # alpaca/tests/ so they cannot collide with a product's own tests/. docs/ is not a mechanism
 # directory as a whole: the operating guides under docs/ are listed one by one below. Alpaca's own
@@ -28,6 +28,7 @@ ALPACA-MANIFEST
 THIRD-PARTY-NOTICES.md
 LICENSE
 README.md
+install.sh
 MANUAL.md
 MAP.md
 requirements.txt
@@ -57,20 +58,28 @@ plugin/alpaca/
 .claude/skills/alpaca-interview/
 .claude/skills/alpaca-runbook-forge/
 .claude/skills/alpaca-log-review/
+.claude/skills/autoresearch/
+.claude/skills/shield/
+.agents/skills/shield/
+.claude/skills/watchdog/
 docs/manual.html
 docs/release.md
 docs/DEPLOY.md
 docs/projection-ruling.md
 docs/spec-shape.md
 docs/runbook-format.md
+docs/research-engine.md
 docs/intake.md
 docs/interview.md
+docs/intent-fidelity.md
 docs/operators.md
 docs/operations-hub.md
+docs/studio.md
 docs/observability-operations.md
 docs/workspaces.md
 docs/host-hub.md
 docs/shipping.md
+docs/temp-and-scratch.md
 docs/DESIGN.md
 docs/assets/
 [memory]

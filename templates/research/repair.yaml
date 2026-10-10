@@ -1,0 +1,134 @@
+# Research contract, repair mode. Fill every "<FILL:...>" value, copy each item marked "one item
+# per ..." once per item, and delete every line you leave unfilled: an OPTIONAL line you do not
+# need, a REQUIRED-when line whose condition does not hold, and a line whose field the defaults
+# file (research.defaults) already sets. Then check it:
+#   bin/alpaca runbook check <this file> --spec <your spec>
+# Each comment says REQUIRED, REQUIRED-when <condition> or OPTIONAL (with the engine default), what
+# the field means, and the interview slot that asks for it (turn the slots on with
+# bin/alpaca interview use research); "slot: none" means no slot asks for it.
+runbook: 3
+id: "<FILL:id>"                        # REQUIRED short name: a-z, 0-9, . _ -          slot: goal
+title: "<FILL:title>"                  # REQUIRED one line a person reads               slot: goal
+description: "<FILL:description>"      # OPTIONAL what the runs change                  slot: goal
+spec: "<FILL:spec>"                    # REQUIRED the spec this contract covers, in the runbook folder   slot: none
+owner: "<FILL:owner>"                  # OPTIONAL who approves owner gates (a role)     slot: owner-gates
+knobs: "<FILL:knobs>"                  # OPTIONAL format 2 knobs; one that a metric or suite command names must be owner_only   slot: knobs
+
+stages:                                # REQUIRED every stage a research field names    slot: commands
+  - id: "<FILL:stages[].id>"           # one item per stage. REQUIRED unique short name
+    title: "<FILL:stages[].title>"     # OPTIONAL one line a person reads
+    needs: ["<FILL:stages[].needs>"]   # OPTIONAL stage ids that must pass first
+    run: "<FILL:stages[].run>"         # REQUIRED unless the stage is only an owner gate: the command; may use ${WORKTREE}, ${CONTRACT_DIR}, ${EVIDENCE_DIR}
+    timeout: "<FILL:stages[].timeout>" # REQUIRED-when run is set: seconds before the command is stopped   slot: research-gates
+    checks: "<FILL:stages[].checks>"   # REQUIRED-when run is set: the pass checks, in format 2 form; a check shows spec items with covers   slot: done-bar, evidence
+    # The other format 2 stage fields keep their form: description, workdir, env, inputs, outputs,
+    # retry, fails and recovery. A stage that is only an owner gate has owner_gate and no run,
+    # timeout or checks, and no research field names it (slot: owner-gates).
+
+research:
+  mode: repair                         # REQUIRED improve | repair                      slot: research-mode
+  defaults: "<FILL:research.defaults>" # OPTIONAL the pack defaults file, in the runbook folder   slot: none
+  repo:                                # OPTIONAL default: this project at HEAD         slot: research-mode
+    path: "<FILL:research.repo.path>"  # OPTIONAL the repository the run works on; it holds the runbook folder
+    ref: "<FILL:research.repo.ref>"    # OPTIONAL the ref the run starts from; default HEAD
+  accept:                              # slot: research-accept
+    rule: repair                                           # REQUIRED fixed in repair mode: fail-to-pass and pass-to-pass
+    covers: ["<FILL:research.accept.covers>"]              # OPTIONAL the SC or EC ids the accept rule shows
+    source: "<FILL:research.accept.source>"                # OPTIONAL spec:<item id>, owner:<ref> or default
+  paths:
+    editable: ["<FILL:research.paths.editable>"]           # REQUIRED rules an attempt may change   slot: research-editable
+    protected: ["<FILL:research.paths.protected>"]         # REQUIRED contract paths no attempt may change; holds the runbook folder   slot: research-protected
+    hidden: ["<FILL:research.paths.hidden>"]               # OPTIONAL published results and notes kept from agents   slot: research-protected
+    tests: ["<FILL:research.paths.tests>"]                 # OPTIONAL where the tests live   slot: research-protected
+    read: ["<FILL:research.paths.read>"]                   # OPTIONAL folders outside the repository the eval reads   slot: research-protected
+    keep: ["<FILL:research.paths.keep>"]                   # OPTIONAL ignored outputs the purge keeps   slot: research-protected
+    outputs: ["<FILL:research.paths.outputs>"]             # OPTIONAL ignored outputs the eval may create   slot: research-protected
+    covers: ["<FILL:research.paths.covers>"]               # OPTIONAL
+    source: "<FILL:research.paths.source>"                 # OPTIONAL
+  fingerprint:                         # slot: research-protected
+    tools: ["<FILL:research.fingerprint.tools>"]           # REQUIRED tools on PATH to hash; [] only when the eval runs none
+    shared: ["<FILL:research.fingerprint.shared>"]         # OPTIONAL shared checkouts outside the repository to hash
+    covers: ["<FILL:research.fingerprint.covers>"]         # OPTIONAL
+    source: "<FILL:research.fingerprint.source>"           # OPTIONAL
+  gates:                               # REQUIRED at least one, in gate order           slot: research-gates
+    - stage: "<FILL:research.gates[].stage>"               # one item per gate stage. REQUIRED a stage id
+      heavy: "<FILL:research.gates[].heavy>"               # OPTIONAL true | false (default): takes the machine lock
+      lock_timeout: "<FILL:research.gates[].lock_timeout>" # OPTIONAL seconds a heavy stage waits for the lock; default 14400
+  stop:                                # slot: research-stop
+    # No extension field: at N the run always halts, and only the owner's grant extends it.
+    rounds: "<FILL:research.stop.rounds>"                  # REQUIRED N, 1 to 100; at N the run halts and asks the owner
+    slots: "<FILL:research.stop.slots>"                    # REQUIRED K, 1 to 16 attempts per round, run at the same time
+    covers: ["<FILL:research.stop.covers>"]                # OPTIONAL the SC or EC ids the stop rules show
+    source: "<FILL:research.stop.source>"                  # OPTIONAL
+  budget:                              # slot: research-budget
+    usd: "<FILL:research.budget.usd>"                      # OPTIONAL the most one run may spend, in US dollars; leave the whole budget out for an uncapped run
+    tokens: "<FILL:research.budget.tokens>"                # OPTIONAL the most one run may spend, in tokens
+    wall: "<FILL:research.budget.wall>"                    # OPTIONAL wall-time cap in seconds; reaching it opens a budget hold
+    covers: ["<FILL:research.budget.covers>"]              # OPTIONAL
+    source: "<FILL:research.budget.source>"                # OPTIONAL
+  disk: "<FILL:research.disk>"         # REQUIRED free disk in GiB where the worktrees land, a number such as 20   slot: research-budget
+  proposal:                            # OPTIONAL the pack's own proposal fields; never a base field name   slot: research-proposal
+    - field: "<FILL:research.proposal[].field>"            # one item per pack field. REQUIRED a-z, 0-9, _
+      type: "<FILL:research.proposal[].type>"              # REQUIRED str | text | int | float | bool | enum | list | paths
+      required: "<FILL:research.proposal[].required>"      # OPTIONAL true (default) | false
+      values: ["<FILL:research.proposal[].values>"]        # REQUIRED-when type is enum: the allowed words
+      max: "<FILL:research.proposal[].max>"                # OPTIONAL most characters or items
+      description: "<FILL:research.proposal[].description>"  # OPTIONAL what the field asks, shown to the proposer
+  categories:                          # OPTIONAL in repair mode; slot s tries category s modulo the count   slot: research-proposal
+    - id: "<FILL:research.categories[].id>"                 # one item per category. OPTIONAL with the list; then REQUIRED a-z, 0-9, _ -
+      text: "<FILL:research.categories[].text>"            # OPTIONAL with the list; then REQUIRED the kind of change, as the proposer reads it
+  lessons:                             # OPTIONAL                                       slot: research-proposal
+    file: "<FILL:research.lessons.file>"                   # OPTIONAL the pack's lessons, in the runbook folder
+    note_chars: "<FILL:research.lessons.note_chars>"       # OPTIONAL longest note line, 40 to 2000; default 300
+  controls:                            # slot: research-controls
+    noop_rounds: "<FILL:research.controls.noop_rounds>"    # REQUIRED 2 to 10 rounds of the do-nothing control first
+    random: "<FILL:research.controls.random>"              # REQUIRED true | false: also run the random-edit control
+    mutate: "<FILL:research.controls.mutate>"              # REQUIRED-when random is true: the mutation script, in the runbook folder
+    syntax: "<FILL:research.controls.syntax>"              # REQUIRED-when random is true: the gate stage a mutation must pass
+    seed: "<FILL:research.controls.seed>"                  # OPTIONAL the random control's first seed; default 0
+    covers: ["<FILL:research.controls.covers>"]            # OPTIONAL
+    source: "<FILL:research.controls.source>"              # OPTIONAL
+  holdout:                             # OPTIONAL checks on the final champion only    slot: research-controls
+    stages: ["<FILL:research.holdout.stages>"]             # OPTIONAL stage ids run on the final champion only
+    paths: ["<FILL:research.holdout.paths>"]               # OPTIONAL held-out data, stripped from every attempt; a generated set keeps its recipe.json here
+    covers: ["<FILL:research.holdout.covers>"]             # OPTIONAL
+    source: "<FILL:research.holdout.source>"               # OPTIONAL
+  coupled:                             # OPTIONAL files that must change together       slot: research-repair
+    - id: "<FILL:research.coupled[].id>"                   # one item per group. REQUIRED a-z, 0-9, _ -
+      files: ["<FILL:research.coupled[].files>"]           # REQUIRED two or more rules
+      note: "<FILL:research.coupled[].note>"               # OPTIONAL why they change together
+  repair:                              # REQUIRED in repair mode                        slot: research-repair
+    prepare: "<FILL:research.repair.prepare>"              # OPTIONAL a stage run once per case on its base; its output is the case baseline
+    pass_to_pass:                      # REQUIRED the old suite every fix must keep passing
+      command: "<FILL:research.repair.pass_to_pass.command>"      # REQUIRED run from ${CONTRACT_DIR}
+      min_tests: "<FILL:research.repair.pass_to_pass.min_tests>"  # REQUIRED fewest tests that must pass on the base
+      timeout: "<FILL:research.repair.pass_to_pass.timeout>"      # REQUIRED seconds per run of the suite
+      covers: ["<FILL:research.repair.pass_to_pass.covers>"]      # OPTIONAL
+      source: "<FILL:research.repair.pass_to_pass.source>"        # OPTIONAL
+    cases:                             # REQUIRED at least one bug case
+      - id: "<FILL:research.repair.cases[].id>"                   # one item per case. REQUIRED a-z, 0-9, _ -
+        bug_report: "<FILL:research.repair.cases[].bug_report>"   # REQUIRED the owner's bug report, in the runbook folder
+        base: "<FILL:research.repair.cases[].base>"               # OPTIONAL the 40-digit commit the case starts from; default the run's base
+        fail_to_pass:                  # REQUIRED the reproducer
+          origin: "<FILL:research.repair.cases[].fail_to_pass.origin>"    # REQUIRED store (proved, in the store) | generate (written and reviewed by agents)
+          command: "<FILL:research.repair.cases[].fail_to_pass.command>"  # OPTIONAL how the gate runs it; default sh ${REPRODUCER_DIR}/run.sh
+          tests: ["<FILL:research.repair.cases[].fail_to_pass.tests>"]    # REQUIRED-when origin is store: tests that fail on the base and pass on a fix
+          timeout: "<FILL:research.repair.cases[].fail_to_pass.timeout>"  # OPTIONAL seconds per run; default 1200
+          repeats: "<FILL:research.repair.cases[].fail_to_pass.repeats>"  # OPTIONAL runs per tree, 1 to 20; default 1
+        suspect_files: ["<FILL:research.repair.cases[].suspect_files>"]   # OPTIONAL localization hints
+        covers: ["<FILL:research.repair.cases[].covers>"]                 # REQUIRED the SC or EC ids this case shows
+        source: "<FILL:research.repair.cases[].source>"                   # OPTIONAL
+  runtime:                             # OPTIONAL agent launches; engine defaults otherwise   slot: none
+    timeouts: "<FILL:research.runtime.timeouts>"           # OPTIONAL seconds per role: proposer, implementer, notes, audit, reproducer, reviewer
+    effort: "<FILL:research.runtime.effort>"               # OPTIONAL low | medium | high per role
+    retries: "<FILL:research.runtime.retries>"             # OPTIONAL infrastructure retries per launch, 0 to 10; default 2
+  verifier:                            # OPTIONAL                                       slot: none
+    timeout: "<FILL:research.verifier.timeout>"            # OPTIONAL seconds for one verifier pass; default 1800
+    rerun_timeout: "<FILL:research.verifier.rerun_timeout>"  # OPTIONAL seconds for each command a verifier re-runs; default 1200
+  audit:                               # OPTIONAL                                       slot: none
+    hints: "<FILL:research.audit.hints>"                   # OPTIONAL what test-targeting and a build bypass look like in this domain
+    assert_tokens: ["<FILL:research.audit.assert_tokens>"] # OPTIONAL tokens that mark an assertion in the pack's languages
+    build_files: ["<FILL:research.audit.build_files>"]     # OPTIONAL build files whose edit the audit reads as a possible bypass
+    steering: ["<FILL:research.audit.steering>"]           # OPTIONAL extra phrases that mark text written to sway a reviewer
+  egress:                              # OPTIONAL                                       slot: none
+    allow: ["<FILL:research.egress.allow>"]                # OPTIONAL hosts an agent may reach on port 443 beyond its runtime's provider hosts; a new host needs the owner's loosen grant

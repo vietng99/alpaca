@@ -81,10 +81,10 @@ def run(action, root, session=None, *, operator=None, level=None, goal="",
             from alpaca.hooks import session_start
             result.update(session_start.handle(payload))
         elif action == "checkpoint":
+            # FR-7, OA-4: the Stop hook's capture step for a session that has no Stop hook
             from alpaca.hooks import pre_compact
-            payload["event_kind"] = "session-checkpoint"
             payload["trigger"] = reason or "explicit"
-            result.update(pre_compact.handle(payload))
+            result.update(pre_compact.checkpoint(payload))
         elif action == "end":
             from alpaca.hooks import session_end
             result.update(session_end.handle(payload))
@@ -100,12 +100,25 @@ def run(action, root, session=None, *, operator=None, level=None, goal="",
                 raise SessionError("beat requires --tool")
             payload.update(tool_name=tool, tool_input={"description": ref})
             result.update(post_tool.handle(payload))
+        elif action == "done":
+            from alpaca.posture import loops
+            result["done"] = loops.mark_done(conn, session, ref=ref or None,
+                                             actor=selected_operator, reason=reason, root=root)
+        elif action == "gate":
+            from alpaca.posture import loops
+            try:
+                result["gate"] = loops.mark_gate(conn, session, tool, ref=ref, reason=reason,
+                                                 actor=selected_operator, root=root)
+            except ValueError as exc:
+                raise SessionError(str(exc))
         elif action == "level":
             from alpaca.posture import level as posture
             posture.set_local(conn, session, level, goal, actor=selected_operator, root=root)
             from alpaca import pad
             pad.write(root)
             result["level"] = "L%d" % posture.in_force(conn, session, root=root)
+            if str(level).upper() == posture.OFF:
+                result["autodrive"] = posture.OFF
         else:
             raise SessionError("unknown session action %r" % action)
         return result
@@ -159,8 +172,16 @@ def _parser(sub):
     beat.add_argument("--tool", required=True)
     beat.add_argument("--ref", default="")
     level = verbs.add_parser("level", help="record an owner-authorized session level")
-    level.add_argument("level", choices=["L%d" % n for n in range(1, 7)])
+    level.add_argument("level", choices=["L%d" % n for n in range(1, 7)] + ["OFF"])
     level.add_argument("--goal", default="")
+    done = verbs.add_parser("done", help="record that the autodrive goal is reached (L6 may stop)")
+    done.add_argument("--reason", required=True)
+    done.add_argument("--ref", default="")
+    from alpaca.posture import loops
+    gate = verbs.add_parser("gate", help="record an owner-only gate this turn stops at (L6 may stop)")
+    gate.add_argument("tool", metavar="gate", choices=loops.GATES)
+    gate.add_argument("--ref", required=True)
+    gate.add_argument("--reason", required=True)
 
 
 cli.register_parser("session", _parser)

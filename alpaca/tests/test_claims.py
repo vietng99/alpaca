@@ -46,7 +46,7 @@ def _row(conn, rid, *, op=None, phase="build", step="s1",
 
 def _make_task(project):
     cli.main(["op", "new", "x"])
-    cli.main(["task", "add", "--title", "task", "op-001", "s"])   # yields t-001
+    cli.main(["task", "add", "--title", "task", "op-001", "s", "--phase", "build"])   # yields t-001
 
 
 def _kinds_for(conn, rid):
@@ -229,6 +229,6 @@ def test_alpaca_task_claim_moves_onto_claims(project):
 def test_alpaca_task_claim_still_refuses_a_non_open_task(project):
     conn = _setup(project)
     cli.main(["op", "new", "x"])
-    cli.main(["task", "add", "--title", "task", "op-001", "s"])
+    cli.main(["task", "add", "--title", "task", "op-001", "s", "--phase", "build"])
     cli.main(["task", "move", "t-001", "done", "--proof", proofkit.seal_for(project, "t-001")])
     assert cli.main(["task", "claim", "t-001", "--by", "w1"]) == vc.FAIL

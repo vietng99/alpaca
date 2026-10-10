@@ -47,19 +47,8 @@ re-derived from the leaf bytes by `alpaca/gates/doctrine_registration_check.py`.
 
 ## Temp and scratch files
 
-`/tmp` on the host is a RAM-backed tmpfs with a per-user quota (80% of its size). Filling it
-stalls tools with `Disk quota exceeded` while the disk still has room. Rules:
-1. Large scratch output (copies of the tree, extracted archives, build trees, big logs) goes under
-   the session scratchpad path named in the system prompt, or under a gitignored dir in this
-   project root. Both are disk-backed. Never put it under `/tmp`.
-2. Small, commit-heavy temp stays on the default temp dir (RAM): pytest's basetemp and the sqlite
-   stores the tests create. On the disk the same tests run about 100 times slower (one 16-test
-   file: 0.3 s on RAM, 40.9 s on disk). Do not pass `--basetemp` under `/var/tmp` or the
-   scratchpad, and do not export `TMPDIR` to a disk path.
-3. Claude's own temp root is set at the account level, not here: `env.CLAUDE_CODE_TMPDIR` in the
-   account `settings.json`, value `/var/tmp`. A project `.claude/settings.json` cannot set it;
-   Claude Code drops that key from project env. Check: the scratchpad path in the system prompt
-   starts with `/var/tmp/`. If it starts with `/tmp/`, tell the owner before writing anything large.
+`/tmp` is RAM. Large output goes to the session scratchpad, never `/tmp`; delete what you create
+when the task closes. Read `docs/temp-and-scratch.md` before any task that writes big output.
 
 ## Operation
 

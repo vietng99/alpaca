@@ -215,6 +215,10 @@ def _record_fixes(root, node_id, session):
             if task['link_kind'] != 'fix' or task['status'] != 'done' or not task.get('completed_at') or not task.get('proof'): continue
             if any(c['ts'] < task['completed_at'] for c in node['checks']): continue
             if not proof.verify(conn, root, task['id'])[0]: continue
+            # a done task sealed again in the two-agent scope earns no credit until verified (t-094)
+            from alpaca.research import verify_gate
+            seal_ev = proof.latest_seal(conn, task['id'])
+            if seal_ev is None or not verify_gate.check(conn, root, task['id'], seal_ev)[0]: continue
             prior = conn.execute("SELECT id FROM events WHERE kind='mission-fix' AND ref=? AND json_extract(data,'$.task')=?",
                                  (node_id, task['id'])).fetchone()
             if prior: continue

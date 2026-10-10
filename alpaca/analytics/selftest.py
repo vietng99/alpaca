@@ -52,8 +52,13 @@ PUBLISHED = {
     "claude-sonnet-5": ("2", "0.20", "2.50", "4", None, "10"),
     "claude-haiku-4-5-20251001": ("1", "0.10", "1.25", "2", None, "5"),
     "claude-haiku-4-5": ("1", "0.10", "1.25", "2", None, "5"),
+    # Claude Haiku 5.5 is priced by prompt length: this is its "up to 100,000 tokens" row (pricing
+    # page read on 2026-10-08); PUBLISHED_LONG holds its "over 100,000 tokens" row.
+    "claude-haiku-5-5": ("0.10", "0.01", "0.125", "0.20", None, "0.50"),
     "gpt-6-astra": ("10", "1", None, None, "12.50", "50"),
 }
+# Built-in cards with a second published row for long prompts: (boundary in tokens, the row).
+PUBLISHED_LONG = {"claude-haiku-5-5": (100000, ("0.50", "0.05", "0.625", "1", None, "2.50"))}
 # Fast mode multipliers from the page's Fast mode pricing table ($8/$40 over $4/$20, $10/$50 over $5/$25).
 PUBLISHED_FAST = {"claude-opus-5-5": "2", "claude-opus-5": "2", "claude-opus-4-8": "2"}
 # Hand-computed from the official price page on 2026-09-25 for ANTHROPIC_VECTOR.
@@ -86,8 +91,8 @@ def _cards(cards):
     return rows
 
 
-def _expected(card):
-    counts = _VECTOR_COUNTS[card["provider"]]
+def _expected(card, counts=None):
+    counts = counts or _VECTOR_COUNTS[card["provider"]]
     parts = {category: Decimal(counts[category]) * Decimal(rate) / _MILLION
              for category, rate in zip(pricing._CATEGORIES, card["rates"]) if rate is not None}
     return sum(parts.values(), Decimal(0)), parts
@@ -114,6 +119,8 @@ def _pinned():
                 and (fast is None or Decimal(fast) == Decimal(PUBLISHED_FAST[model])))
         items.append(dict(item, provider=provider, expected_usd=_text(total), estimated_usd=result.get("total_usd"),
                           status="pass" if good else "fail"))
+        if PUBLISHED_LONG.get(model) or card.get("long_context_rates") is not None:
+            items.append(_pinned_long(model, card, provider))
         if PUBLISHED_FAST.get(model):
             expected = total * Decimal(PUBLISHED_FAST[model])
             fast_result = pricing.estimate(model, dict(vector, speed="fast"))
@@ -122,6 +129,22 @@ def _pinned():
                           "estimated_usd": fast_result.get("total_usd"),
                           "status": "pass" if _close(fast_result.get("total_usd"), expected) else "fail"})
     return items
+
+
+def _pinned_long(model, card, provider):
+    """The long row of a card priced by prompt length, on the vector moved just over its boundary."""
+    item = {"kind": "pinned-long", "model": model, "origin": "built-in", "provider": provider}
+    threshold, published = PUBLISHED_LONG.get(model) or (None, None)
+    if published is None or card.get("long_context_rates") is None or card.get("context_threshold_tokens") != threshold:
+        return dict(item, status="fail", detail="The card and PUBLISHED_LONG in alpaca/analytics/selftest.py "
+                    "disagree on the long-prompt row or its boundary.")
+    vector = dict(ANTHROPIC_VECTOR, input_tokens=ANTHROPIC_VECTOR["input_tokens"] + threshold,
+                  uncached_input_tokens=ANTHROPIC_VECTOR["uncached_input_tokens"] + threshold)
+    counts = dict(_VECTOR_COUNTS[provider], uncached_input=_VECTOR_COUNTS[provider]["uncached_input"] + threshold)
+    total, _parts = _expected({"provider": provider, "rates": published}, counts)
+    result = pricing.estimate(model, vector)
+    return dict(item, threshold=threshold, expected_usd=_text(total), estimated_usd=result.get("total_usd"),
+                status="pass" if _close(result.get("total_usd"), total) else "fail")
 
 
 def arithmetic(cards):
@@ -155,19 +178,22 @@ def arithmetic(cards):
     count = lambda *kinds: sum(item["kind"] in kinds for item in items)
     detail = ("%d card(s) priced on a vector with every category nonzero, %d fast mode check(s), "
               "%d built-in card(s) pinned to the published prices, %d hand-computed answer(s)"
-              % (count("card"), count("fast", "pinned-fast"), count("pinned"), len(KNOWN_ANSWERS)))
+              % (count("card"), count("fast", "pinned-fast"), count("pinned", "pinned-long"), len(KNOWN_ANSWERS)))
     if failed:
         detail += "; %d disagree: %s" % (len(failed), ", ".join("%s (%s)" % (i["model"], i["kind"]) for i in failed))
     return _check("arithmetic", "fail" if failed else "pass", detail + ".", items)
 
 
 def _bounds(entry, card):
-    rates = {category: Decimal(rate) for category, rate in zip(pricing._CATEGORIES, card["rates"]) if rate is not None}
-    base = (Decimal(entry["input_tokens"]) * rates["uncached_input"]
-            + Decimal(entry["cache_read_tokens"]) * rates["cached_input"]
-            + Decimal(entry["output_tokens"]) * rates["output"])
-    writes = Decimal(entry["cache_write_tokens"])
-    return (base + writes * rates["cache_write_5m"]) / _MILLION, (base + writes * rates["cache_write_1h"]) / _MILLION
+    """(low, high): every write at the 5 minute rate of the short row, or at the 1 hour rate of the
+    long row when the card is priced by prompt length (a session total cannot tell the tiers apart)."""
+    def cost(row, write_category):
+        rates = {category: Decimal(rate) for category, rate in zip(pricing._CATEGORIES, row) if rate is not None}
+        return (Decimal(entry["input_tokens"]) * rates["uncached_input"]
+                + Decimal(entry["cache_read_tokens"]) * rates["cached_input"]
+                + Decimal(entry["output_tokens"]) * rates["output"]
+                + Decimal(entry["cache_write_tokens"]) * rates[write_category]) / _MILLION
+    return cost(card["rates"], "cache_write_5m"), cost(card.get("long_context_rates") or card["rates"], "cache_write_1h")
 
 
 def snapshot_items(sid, reported, cards):
@@ -188,7 +214,9 @@ def snapshot_items(sid, reported, cards):
             card_model = model[:-len("[1m]")]
             card, origin = pricing.card_for(card_model, cards)
             note = ("The client's [1m] context label was dropped: the price page bills the full 1M "
-                    "context window at standard rates for these models.")
+                    "context window at standard rates for these models." if card is None or
+                    card.get("long_context_rates") is None else "The client's [1m] context label was "
+                    "dropped: this model is priced by prompt length, so the bounds span both of its rows.")
         if card is None or card["provider"] != "anthropic":
             continue
         low, high = _bounds(entry, card)
@@ -263,9 +291,18 @@ def _online_check(root, cards, fetch):
             items.append(dict(item, status="warn", detail="Not compared: %s" % exc))
             continue
         mismatches = []
-        for category, ours, theirs in zip(pricing._CATEGORIES, card["rates"], parsed["rates"]):
-            if (ours is None) != (theirs is None) or (ours is not None and Decimal(ours) != Decimal(theirs)):
-                mismatches.append({"category": category, "card": ours, "page": theirs})
+        rows = [("", card["rates"], parsed["rates"])]
+        if card.get("long_context_rates") is not None or parsed.get("long_context_rates") is not None:
+            if (card.get("long_context_rates") is None or parsed.get("long_context_rates") is None
+                    or card.get("context_threshold_tokens") != parsed.get("context_threshold_tokens")):
+                mismatches.append({"category": "context_threshold_tokens", "card": card.get("context_threshold_tokens"),
+                                   "page": parsed.get("context_threshold_tokens")})
+            else:
+                rows.append(("long_context:", card["long_context_rates"], parsed["long_context_rates"]))
+        for prefix, ours_row, theirs_row in rows:
+            for category, ours, theirs in zip(pricing._CATEGORIES, ours_row, theirs_row):
+                if (ours is None) != (theirs is None) or (ours is not None and Decimal(ours) != Decimal(theirs)):
+                    mismatches.append({"category": prefix + category, "card": ours, "page": theirs})
         fast = pricing.fast_multiplier(model, card, origin)
         if fast is not None and (parsed["fast_multiplier"] is None
                                  or Decimal(fast) != Decimal(parsed["fast_multiplier"])):

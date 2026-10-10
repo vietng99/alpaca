@@ -29,15 +29,7 @@
     }));
   }
 
-  // Colors cross-fade only while the switch is pressed, never on first paint.
-  let fade = 0;
-  function crossFade() {
-    try { if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return; } catch (_) { return; }
-    root.classList.add('theme-fading');
-    clearTimeout(fade);
-    fade = setTimeout(() => root.classList.remove('theme-fading'), 450);
-  }
-
+  // The theme flips in one frame: animating every color on a large page made the switch lag.
   apply();
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', apply, {once: true});
@@ -46,7 +38,6 @@
     if (!event.target.closest?.('[data-theme-control]')) return;
     preference = preference === 'dark' ? 'light' : 'dark';
     try { storage?.setItem(key, preference); } catch (_) { /* Page setting remains usable. */ }
-    crossFade();
     apply();
   });
   window.addEventListener('storage', event => {

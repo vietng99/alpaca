@@ -270,3 +270,71 @@ def test_recorded_cards_outside_the_bounds_are_not_used(broken):
     result = estimate("claude-opus-4-7", usage(), cards={"claude-opus-4-7": recorded_card(**broken)})
     assert result["total_usd"] is None
     assert result["reason_code"] == "unverified_model"
+
+
+# --- t-427: Claude Haiku 5.5 is priced by prompt length (two published rows, split at 100,000 tokens) ---
+
+HAIKU_5_5 = "claude-haiku-5-5"
+HAIKU_OVER_100K = (".5", ".05", ".625", "1", None, "2.5")   # the row the record holds today (event 134071)
+
+
+def prompt(n_in, read=0, w5=0, w1=0, n_out=1000, **extra):
+    return usage(input_tokens=n_in, cached_input_tokens=read, cache_write_input_tokens=w5 + w1,
+                 cache_creation_5m_tokens=w5, cache_creation_1h_tokens=w1, output_tokens=n_out, **extra)
+
+
+# Hand-computed from the page rows: up to 100K = .10 in, .01 read, .125 5m, .20 1h, .50 out;
+# over 100K = .50, .05, .625, 1, 2.50 (USD per million tokens).
+@pytest.mark.parametrize("n_in,read,w5,w1,want,tier", [
+    (50000, 0, 0, 0, 0.0055, "standard"),             # 50000*.1 + 1000*.5
+    (50000, 20000, 6000, 4000, 0.00425, "standard"),  # 20000*.1 + 20000*.01 + 6000*.125 + 4000*.2 + 1000*.5
+    (100000, 0, 0, 0, 0.0105, "standard"),            # exactly 100,000 is not "over"
+    (100001, 0, 0, 0, 0.0525005, "long"),             # 100001*.5 + 1000*2.5
+    (150000, 0, 0, 0, 0.0775, "long"),                # 150000*.5 + 1000*2.5
+    (150000, 60000, 18000, 12000, 0.05875, "long"),   # 60000*.5 + 60000*.05 + 18000*.625 + 12000*1 + 1000*2.5
+    (110000, 60000, 0, 0, 0.0305, "long"),            # 50000*.5 + 60000*.05 + 1000*2.5: cache reads count
+])
+def test_haiku_5_5_prices_each_prompt_at_the_row_of_its_size(n_in, read, w5, w1, want, tier):
+    result = estimate(HAIKU_5_5, prompt(n_in, read, w5, w1))
+    assert result["status"] == "estimated"
+    assert result["total_usd"] == pytest.approx(want, rel=1e-12)
+    card = result["rate_card"]
+    assert card["origin"] == "built-in" and card["context_tier"] == tier
+    assert card["context_threshold_tokens"] == 100000
+    assert (card["input_multiplier"], card["output_multiplier"]) == (1, 1)
+    assert card["rates_per_million"]["uncached_input"] == (0.1 if tier == "standard" else 0.5)
+    assert card["rates_per_million"]["output"] == (0.5 if tier == "standard" else 2.5)
+
+
+def test_haiku_5_5_built_in_card_wins_over_the_recorded_over_100k_card():
+    cards = {HAIKU_5_5: recorded_card(rates=HAIKU_OVER_100K)}
+    result = estimate(HAIKU_5_5, prompt(50000), cards=cards)
+    assert result["total_usd"] == pytest.approx(0.0055)      # not 0.0275, the over-100K row
+    assert result["rate_card"]["origin"] == "built-in"
+
+
+@pytest.mark.parametrize("n_in,want", [(50000, 0.00275), (150000, 0.03875)])
+def test_haiku_5_5_batch_halves_the_row_that_applies(n_in, want):
+    # The Batch table rows: up to 100K .05 in / .25 out, over 100K .25 / 1.25.
+    result = estimate(HAIKU_5_5, prompt(n_in, service_tier="batch"))
+    assert result["total_usd"] == pytest.approx(want, rel=1e-12)
+
+
+@pytest.mark.parametrize("extra,code", [({"usage_scope": "session"}, "request_boundaries_required"),
+                                        ({"speed": "fast"}, "unverified_service_tier")])
+def test_haiku_5_5_refuses_summed_usage_and_fast_mode(extra, code):
+    result = estimate(HAIKU_5_5, prompt(50000, **extra))
+    assert result["total_usd"] is None and result["reason_code"] == code
+
+
+def test_a_recorded_threshold_card_keeps_the_x2_x1_5_step():
+    card = recorded_card(context_threshold_tokens=1000)
+    result = estimate("claude-opus-4-7", usage(input_tokens=1001), cards={"claude-opus-4-7": card})
+    assert result["total_usd"] == pytest.approx(0.01376)     # 1001*10 + 100*37.5
+    assert (result["rate_card"]["input_multiplier"], result["rate_card"]["output_multiplier"]) == (2, 1.5)
+
+
+def test_a_recorded_card_cannot_carry_a_second_rate_row():
+    card = recorded_card(context_threshold_tokens=1000, long_context_rates=HAIKU_OVER_100K)
+    result = estimate("claude-opus-4-7", usage(input_tokens=1001), cards={"claude-opus-4-7": card})
+    assert result["total_usd"] is None and result["reason_code"] == "unverified_model"

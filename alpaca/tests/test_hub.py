@@ -289,3 +289,37 @@ def test_the_work_feed_treats_profile_side_effects_as_no_work(record, monkeypatc
     assert start["id"] in {e["id"] for e in hub.history(root, kind="work")["items"]}
     use(monkeypatch, Fake(events=lambda: {"side_effect_kinds": ["domain-receipt"]}))
     assert start["id"] not in {e["id"] for e in hub.history(root, kind="work")["items"]}
+
+
+def test_subagent_and_session_bookkeeping_stay_out_of_the_progress_feed(record):
+    from alpaca import hub
+    root, conn = record
+    move = event(conn, "task-move", ref="t-001", data={"to": "doing"})
+    sub = event(conn, "subagent-stop", session="s1")
+    start = event(conn, "session-start", session="s1")
+    note = event(conn, "msg", session="s1", data={"body": "hello"})
+    broken = event(conn, "subagent-stop", session="s1", data={"error": "agent crashed"})
+    progress = {e["id"] for e in hub.history(root, kind="progress")["items"]}
+    assert progress == {move["id"], broken["id"]}
+    work = {e["id"] for e in hub.history(root, kind="work")["items"]}
+    assert sub["id"] not in work and {move["id"], start["id"], note["id"], broken["id"]} <= work
+    assert sub["id"] in {e["id"] for e in hub.history(root, kind="all")["items"]}
+
+
+def test_activity_day_filter_and_hour_counts(record):
+    from alpaca import hub
+    root, conn = record
+    rows = [event(conn, "task-move", ref="t-%03d" % i, data={"to": "done"}) for i in range(4)]
+    stamps = ["2026-09-29T08:10:00+07:00", "2026-09-30T08:20:00+07:00",
+              "2026-09-30T08:40:00+07:00", "2026-09-30T23:59:00+07:00"]
+    for row, ts in zip(rows, stamps):
+        conn.execute("UPDATE events SET ts = ? WHERE id = ?", (ts, row["id"]))
+    conn.commit()
+    day = hub.history(root, kind="progress", day="2026-09-30", calendar=True)
+    assert [e["id"] for e in day["items"]] == [rows[3]["id"], rows[2]["id"], rows[1]["id"]]
+    assert day["total"] == 3
+    counts = {(h["day"], h["hour"]): h["count"] for h in day["hours"]}
+    assert counts == {("2026-09-29", 8): 1, ("2026-09-30", 8): 2, ("2026-09-30", 23): 1}
+    assert "hours" not in hub.history(root, kind="progress")
+    with pytest.raises(ValueError):
+        hub.history(root, day="30-09-2026")
