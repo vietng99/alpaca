@@ -28,6 +28,7 @@ import os
 import re
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote
 
 from ..clock import now_iso
 from ..config import Config
@@ -42,6 +43,36 @@ MAP_NAME = "map.md"
 EDGES_NAME = "edges.jsonl"
 SNAPSHOT_NAME = "snapshot.md"
 GAPS_NAME = "gaps-candidates.md"
+
+# the names the projection's own artifacts hold; a node page never takes one of them
+_ARTIFACT_NAMES = frozenset({MAP_NAME, EDGES_NAME, SNAPSHOT_NAME, GAPS_NAME})
+_NAME_MAX = 255                      # bytes in one file name (POSIX NAME_MAX on the common file systems)
+
+
+def page_name(node_id: str) -> str:
+    """The file name of a node's projected page: `<node id>.md` when that is one plain file name,
+    else `%` + the percent-encoded id + `.md`.
+
+    A node id may hold a path separator (every proof node: `proof:<path>`, ingest/record_extract.py),
+    which `_write` refuses. Kept as `<id>.md`: an id with no `/`, `\\`, NUL or other control
+    character, that is not `.` or `..`, does not start with `%`, whose name is not one an artifact
+    holds and fits in one file name. Every other id is encoded with `urllib.parse.quote(id, safe="")`,
+    which leaves only `[A-Za-z0-9_.~-]` and `%XX`, so the encoded name starts with `%` and meets no
+    kept name, and two ids never share one (the encoding is one to one). An encoded name too long
+    for the file system is `%=` + the id's sha256 + `.md` (`quote` writes no `=`). The name depends on
+    the id alone, so it is stable across builds; map.md names the same file.
+    """
+    nid = str(node_id)
+    kept = f"{nid}.md"
+    if (nid not in ("", ".", "..") and not nid.startswith("%")
+            and not any(ch in "/\\" or not ch.isprintable() for ch in nid)
+            and kept not in _ARTIFACT_NAMES and len(kept.encode("utf-8")) <= _NAME_MAX):
+        return kept
+    encoded = f"%{quote(nid, safe='')}.md"
+    if len(encoded.encode("utf-8")) <= _NAME_MAX:
+        return encoded
+    return f"%={sha256_hex(nid)}.md"
+
 
 # lines a freshness byte-diff must ignore (wall-clock / hotness churn)
 _VOLATILE_PREFIXES = ("Generated:", "Hotness:")
@@ -238,7 +269,7 @@ def build_map(cfg: Config, write: bool = True) -> str:
                     summary = srow["text"].splitlines()[0]
             updated = (n["recorded_at"] or "")[:10]
             public_name = aliases[0] if aliases else nid
-            fields = [nid, f"{nid}.md", n["node_type"] or "", domain, tier, community,
+            fields = [nid, page_name(nid), n["node_type"] or "", domain, tier, community,
                       updated, public_name, ",".join(aliases), tags, keywords, summary]
             lines.append("|".join(_cell(f) for f in fields))
         content = "\n".join(lines) + ("\n" if lines else "")

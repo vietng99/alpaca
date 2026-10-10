@@ -19,15 +19,25 @@ all clients together close sign-in for everyone for the same window. The global 
 bounds a distributed guess against a short pin; the cost is that a flood can lock the owner
 out for one window.
 
+Authenticator codes (TOTP, RFC 6238): when `.alpaca/totp-secret` holds a base32 secret
+(written by `alpaca serve --totp-enroll`), the `/login` page accepts the current 6-digit code
+from an authenticator app instead of the fixed `files-auth` code. One 30 s step of clock drift
+either way is accepted, and a code that already signed in is refused for the rest of its
+window. The cookie MAC then also covers a digest of the secret, so re-enrolling signs every
+browser out. HTTP Basic keeps using `files-auth`: a script cannot read a rotating code.
+
 This module never writes the record. The key file is runtime state beside `files-auth`.
 """
+import base64
 import hashlib
 import hmac
 import os
 import re
 import secrets
+import struct
 import threading
 import time
+from urllib.parse import quote
 
 from alpaca import paths
 
@@ -37,6 +47,10 @@ WINDOW_S = 15 * 60           # throttle window
 CLIENT_MAX = 8               # failures one client may make per window
 GLOBAL_MAX = 60              # failures all clients together may make per window
 KEY_FILE = "web-session-key"
+TOTP_FILE = "totp-secret"
+TOTP_STEP = 30               # seconds per code
+TOTP_DIGITS = 6
+TOTP_DRIFT = 1               # steps of clock drift accepted either way
 
 
 # A sign-in redirect target (?next=): "/" then printable ASCII with no backslash, never "//" or
@@ -104,6 +118,82 @@ def credential_ok(credential, user, password):
         return False
     return hmac.compare_digest(("%s:%s" % (user or "", password or "")).encode("utf-8"),
                                credential.encode("utf-8"))
+
+
+def user_ok(credential, user):
+    """Constant-time check of a submitted user against the user part of `user:pass`."""
+    want = (credential or "").partition(":")[0]
+    return hmac.compare_digest((user or "").encode("utf-8"), want.encode("utf-8"))
+
+
+def totp_secret(root):
+    """The enrolled base32 authenticator secret, or None when codes are not enabled."""
+    try:
+        with open(os.path.join(paths.runtime_dir(root), TOTP_FILE), "r", encoding="ascii") as fh:
+            value = fh.read().strip().upper()
+        base64.b32decode(value + "=" * (-len(value) % 8))
+    except (OSError, ValueError, UnicodeDecodeError):
+        return None
+    return value or None
+
+
+def totp_enroll(root):
+    """Write a fresh 160-bit secret (0600) and return it. Refuses to replace an existing one."""
+    path = os.path.join(paths.runtime_dir(root), TOTP_FILE)
+    if os.path.exists(path):
+        raise FileExistsError(path)
+    value = base64.b32encode(secrets.token_bytes(20)).decode("ascii").rstrip("=")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd = os.open(path + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="ascii") as fh:
+        fh.write(value + "\n")
+    os.replace(path + ".tmp", path)
+    return value
+
+
+def totp_uri(secret, account):
+    """The otpauth:// URI an authenticator app imports (issuer Alpaca)."""
+    return "otpauth://totp/%s?secret=%s&issuer=Alpaca&digits=%d&period=%d" % (
+        quote("Alpaca:" + account), secret, TOTP_DIGITS, TOTP_STEP)
+
+
+def totp_code(secret, counter):
+    """The RFC 4226 code for one counter value."""
+    key = base64.b32decode(secret + "=" * (-len(secret) % 8))
+    digest = hmac.new(key, struct.pack(">Q", counter), hashlib.sha1).digest()
+    offset = digest[-1] & 0x0F
+    value = struct.unpack(">I", digest[offset:offset + 4])[0] & 0x7FFFFFFF
+    return "%0*d" % (TOTP_DIGITS, value % (10 ** TOTP_DIGITS))
+
+
+class TotpGuard:
+    """Accepts a current code once. The newest accepted step is remembered in memory, so a code
+    (or an older one) cannot sign in twice; a restart forgets it, which reopens at most one
+    30 s window."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.last = -1
+
+    def check(self, secret, code, now=None):
+        code = (code or "").replace(" ", "")
+        if not secret or len(code) != TOTP_DIGITS or not code.isdigit():
+            return False
+        step = int((time.time() if now is None else now) // TOTP_STEP)
+        with self.lock:
+            for counter in range(step - TOTP_DRIFT, step + TOTP_DRIFT + 1):
+                if counter > self.last and hmac.compare_digest(totp_code(secret, counter), code):
+                    self.last = counter
+                    return True
+        return False
+
+
+def session_credential(credential, secret):
+    """What the cookie MAC covers: the credential, plus a digest of the authenticator secret
+    when one is enrolled, so a re-enroll invalidates every issued cookie."""
+    if not credential or not secret:
+        return credential
+    return "%s|totp:%s" % (credential, hashlib.sha256(secret.encode("ascii")).hexdigest())
 
 
 def needs_user(credential):

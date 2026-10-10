@@ -47,10 +47,12 @@ def test_live_reports_stale_fold_and_recovers_after_the_next_success(project, mo
     conn.close()
 
 
-def test_live_page_includes_explicit_dashboard_health_indicator(project):
-    page = serve._serve_html(project)
-    assert 'id="alpaca-serve-health"' in page
-    assert "/health.json" in page
+def test_the_workspace_polls_dashboard_health():
+    # The served legacy analytics page (and its health badge) is retired (t-136); the workspace
+    # shows the same health from /health.json in its connection indicator.
+    web = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
+    with open(os.path.join(web, "hub.js"), encoding="utf-8") as fh:
+        assert "/health.json" in fh.read()
 
 
 # ------------------------------------------------- the analytics page reads in either theme
@@ -70,8 +72,6 @@ def test_the_analytics_page_ships_a_visible_theme_toggle(project):
     assert "localStorage" in text, "the choice is remembered"
     assert re.search(r"try\s*\{[^}]*localStorage", text), "storage access is wrapped in try/catch"
     assert "prefers-color-scheme: dark" in text, "with nothing remembered the OS decides"
-    # the served page carries it too, so the toggle is there whether the page is written or served.
-    assert 'id="theme-toggle"' in serve._serve_html(project)
 
 
 def test_the_analytics_page_declares_both_theme_token_blocks_over_one_palette():

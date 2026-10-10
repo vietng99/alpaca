@@ -58,7 +58,7 @@ def smoke(root):
         cli('onboard', '--name', 'Release smoke', '--who', 'Tester:owner', '--what', 'Validate a fresh installation.', '--tier', 'public')
         cli('doctor')
         op = cli('op', 'new', 'Exercise release installation', '--done-when', 'A sealed proof completes a task.').split()[0]
-        task = cli('task', 'add', op, 'Check fresh installation lifecycle.', '--title', 'Release smoke', '--expected', 'A sealed proof.', '--done-bar', 'Doctor and proof cycle succeed.').split()[0]
+        task = cli('task', 'add', op, 'Check fresh installation lifecycle.', '--title', 'Release smoke', '--expected', 'A sealed proof.', '--done-bar', 'Doctor and proof cycle succeed.', '--phase', 'build').split()[0]
         cli('task', 'move', task, 'doing')
         cli('proof', 'new', task)
         rel = '.alpaca/proofs/' + op + '/' + task + '.md'

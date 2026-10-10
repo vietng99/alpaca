@@ -7,45 +7,64 @@ fails the build. These are the ranking/seed primitives; plain by-id lookups live
 """
 from __future__ import annotations
 
-from .adjacency import build_ppr_edges
-from .asof import AsOf
+from ..api import Filters
+from .adjacency import build_ppr_edges, count_ppr_edges
+from .asof import AsOf, block_where
 from .db import DB
+from .filters import block_clause
 from .fts import search_bm25
-from .textnorm import norm_surface
+from .textnorm import norm_surface, surface_in_question
 from .vec import knn_blocks, knn_nodes
 
 
 # ---- the four arms' data access -------------------------------------------
 
-def bm25(db: DB, question: str, limit: int = 50) -> list[tuple[str, float]]:
-    return search_bm25(db, question, limit)
+def bm25(db: DB, question: str, limit: int = 50, asof: AsOf | None = None,
+         filters: Filters | None = None) -> list[tuple[str, float]]:
+    return search_bm25(db, question, limit, asof, block_clause(filters, "b", db))
 
 
 def vector(db: DB, qvec: list[float], limit: int = 50) -> list[tuple[str, float]]:
     return knn_blocks(db, qvec, limit)
 
 
-def exact_floor(db: DB, question: str, linked_nodes: list[str]) -> list[str]:
+def exact_floor(db: DB, question: str, linked_nodes: list[str],
+                asof: AsOf | None = None, filters: Filters | None = None,
+                entity_cap: int | None = None, lexical_rank: dict[str, int] | None = None) -> list[str]:
     """The PERMANENT, un-overridable exact-match floor: guaranteed hits PPR/cosine may reorder
     but can NEVER evict. Sources: (a) blocks defining/claiming a linked entity, (b) exact
-    case-insensitive phrase hits on the raw question."""
+    case-insensitive phrase hits on the raw question. Blocks are read under the as-of clause
+    (architecture.md 5.2); `status='active'` when no as-of is given."""
     floor: list[str] = []
     if linked_nodes:
-        marks = ",".join("?" * len(linked_nodes))
+        names = {f"n{i}": node for i, node in enumerate(linked_nodes)}
+        marks = ",".join(":" + name for name in names)
+        visible, params = block_where(asof, "bl")
+        narrow, narrow_params = block_clause(filters, "bl", db)
         rows = db.conn.execute(
             f"SELECT DISTINCT nb.block_id AS b FROM node_blocks nb "
             f"JOIN blocks bl ON bl.block_id=nb.block_id "
             f"WHERE nb.node_id IN ({marks}) AND nb.role IN ('definition','claim') "
-            f"AND bl.status='active' ORDER BY b",
-            tuple(linked_nodes),
+            f"AND {visible} AND {narrow} ORDER BY b",
+            {**names, **params, **narrow_params},
         ).fetchall()
-        floor.extend(r["b"] for r in rows)
+        members = [r["b"] for r in rows]
+        if entity_cap is not None and len(members) > entity_cap:
+            # An identifier that many notes name (a task has a dozen) would fill the whole top of the answer
+            # with its own header blocks and push out the notes the rest of the question is about. The floor
+            # keeps the entity-claim blocks the question's words reached first (their BM25 rank), then the
+            # rest by block id, up to the cap; the others stay ordinary candidates.
+            rank = lexical_rank or {}
+            members = sorted(members, key=lambda b: (rank.get(b, len(rank) + 1), b))[:entity_cap]
+        floor.extend(members)
     phrase = question.strip().lower()
     if len(phrase) >= 4:
+        visible, params = block_where(asof, "blocks")
+        narrow, narrow_params = block_clause(filters, "blocks", db)
         rows = db.conn.execute(
-            "SELECT block_id FROM blocks WHERE status='active' AND instr(lower(text), ?)>0 "
-            "ORDER BY block_id LIMIT 20",
-            (phrase,),
+            f"SELECT block_id FROM blocks WHERE {visible} AND {narrow} "
+            "AND instr(lower(text), :phrase)>0 ORDER BY block_id LIMIT 20",
+            {**params, **narrow_params, "phrase": phrase},
         ).fetchall()
         floor.extend(r["block_id"] for r in rows)
     # stable de-dup
@@ -60,11 +79,10 @@ def link_entities(db: DB, question: str, qnode_vec: list[float] | None = None) -
     """Query-entity linking: exact alias match + optional vec_nodes cosine. Returns canonical nodes."""
     linked: list[str] = []
     nq = norm_surface(question)
-    tokens = set(nq.split())
-    rows = db.conn.execute("SELECT node_id, norm_surface FROM aliases WHERE status='bound'").fetchall()
+    rows = db.conn.execute(
+        "SELECT node_id, norm_surface, kind FROM aliases WHERE status='bound'").fetchall()
     for r in rows:
-        ns = r["norm_surface"]
-        if ns and (ns in nq or ns in tokens):
+        if surface_in_question(r["norm_surface"], nq, r["kind"]):
             linked.append(r["node_id"])
     if qnode_vec:
         for nid, cos in knn_nodes(db, qnode_vec, limit=10):
@@ -109,26 +127,39 @@ def ppr_edges(db: DB, asof: AsOf,
     )
 
 
-def asof_visible_blocks(db: DB, asof: AsOf) -> set[str]:
+def ppr_edge_count(db: DB, asof: AsOf,
+                   authorized_domains: set[str] | None = None,
+                   visible_blocks: set[str] | None = None) -> int:
+    """The demand-gate input (architecture.md 8.2): the as-of active edges `ppr_edges` would read."""
+    return count_ppr_edges(
+        db, asof, authorized_domains=authorized_domains, visible_blocks=visible_blocks,
+    )
+
+
+def asof_visible_blocks(db: DB, asof: AsOf, filters: Filters | None = None) -> set[str]:
     """Block-level as-of currency guard (F4): the set of block_ids whose bitemporal window contains
     T under the same frozen four-axis predicate used for edges. Retrieval intersects every arm with
-    this set so a past-as-of read never surfaces a future/non-current block."""
-    clause = asof.clause("blocks")
-    rows = db.conn.execute(f"SELECT block_id FROM blocks WHERE {clause}", asof.params()).fetchall()
+    this set so a past-as-of read never surfaces a future/non-current block. The FR-11 filters
+    (store/filters.py) narrow it in the same query, so every arm reads only blocks inside them."""
+    narrow, narrow_params = block_clause(filters, "blocks", db)
+    rows = db.conn.execute(f"SELECT block_id FROM blocks WHERE {asof.clause('blocks')} AND {narrow}",
+                           {**asof.params(), **narrow_params}).fetchall()
     return {r["block_id"] for r in rows}
 
 
-def block_rows(db: DB, block_ids: list[str]) -> dict[str, dict]:
+def block_rows(db: DB, block_ids: list[str], asof: AsOf | None = None) -> dict[str, dict]:
     if not block_ids:
         return {}
-    marks = ",".join("?" * len(block_ids))
+    names = {f"i{i}": block_id for i, block_id in enumerate(block_ids)}
+    marks = ",".join(":" + name for name in names)
+    visible, params = block_where(asof, "b")
     rows = db.conn.execute(
         f"SELECT block_id, text, context_header, page_bandish, valid_from FROM ("
         f"  SELECT b.block_id, b.text, b.context_header, b.valid_from, "
         f"         COALESCE((SELECT MAX(n.page_band) FROM node_blocks nb "
         f"                   JOIN nodes n ON n.node_id=nb.node_id WHERE nb.block_id=b.block_id),0) AS page_bandish "
-        f"  FROM blocks b WHERE b.block_id IN ({marks}) AND b.status='active')",
-        tuple(block_ids),
+        f"  FROM blocks b WHERE b.block_id IN ({marks}) AND {visible})",
+        {**names, **params},
     ).fetchall()
     return {r["block_id"]: dict(r) for r in rows}
 

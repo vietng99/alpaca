@@ -14,7 +14,7 @@ ENV_SESSION_VARS = ("ALPACA_SESSION_ID", "CLAUDE_CODE_SESSION_ID")
 # M4.12: the verb modules whose import registers the rest of the dispatch table. main() imports
 # these (reporting a shortfall) and surface.lint reads the resulting table via registered_verbs.
 # A domain profile adds its own verb modules (alpaca/profile.py `verbs`), see _profile_verb_modules.
-VERB_MODULES = ('ops', 'onboard', 'doctor', 'analytics_cli', 'serve', 'questions', 'board', 'messages', 'decisions', 'sort', 'export', 'review', 'upgrade', 'barrier', 'operator', 'proof', 'observability.cli', 'artifacts', 'backup', 'workspace', 'spec_kits', 'runbook', 'intake', 'start', 'note', 'interview', 'hub_publish', 'mission_cli', 'release.cli')
+VERB_MODULES = ('ops', 'onboard', 'new', 'doctor', 'analytics_cli', 'serve', 'questions', 'board', 'messages', 'decisions', 'sort', 'export', 'review', 'upgrade', 'barrier', 'operator', 'proof', 'observability.cli', 'artifacts', 'backup', 'workspace', 'spec_kits', 'runbook', 'intake', 'start', 'note', 'interview', 'hub_publish', 'mission_cli', 'release.cli', 'research.cli', 'ownerword', 'brief', 'orders', 'selfcheck', 'oob', 'batch', 'watchdog.cli')
 
 
 def _profile_verb_modules():
@@ -121,6 +121,35 @@ def cmd_phase(args):
     print("GATE alpaca-phase: BLOCKED (unknown phase verb; use enter or gate)")
     return BLOCKED
 
+_WIKI_FILTER_FLAGS = (("op", "--op"), ("task", "--task"), ("operator", "--operator"),
+                      ("session", "--filter-session"), ("source_kind", "--source-kind"),
+                      ("fact_kind", "--fact-kind"))
+
+
+def _wiki_filters(args):
+    """The FR-11 structured filters named on a `wiki query` or `wiki context` line, or None."""
+    from alpaca.wiki.api import Filters
+    chosen = {name: getattr(args, "filter_" + name) for name, _ in _WIKI_FILTER_FLAGS
+              if getattr(args, "filter_" + name, None) is not None}
+    if getattr(args, "include_bookkeeping", False):
+        chosen["include_bookkeeping"] = True
+    return Filters(**chosen) if chosen else None
+
+
+def _wiki_record_appender(session):
+    """The `RecordAppender` of alpaca/wiki/api.py: appends one record event as actor `alpaca-wiki`
+    in the caller's session and returns its id. Rune2 calls it where architecture.md 10.2 says and
+    never writes the record itself."""
+    def append(kind, data):
+        conn = db.connect(_root())
+        try:
+            return db.append_event(conn, session=session, actor="alpaca-wiki", kind=kind,
+                                   data=data)["id"]
+        finally:
+            conn.close()
+    return append
+
+
 @command("wiki")
 def cmd_wiki(args):
     """M2.15: `alpaca wiki extract <root> <out>` emits the project wiki as a portable Rune-2 vault.
@@ -137,20 +166,135 @@ def cmd_wiki(args):
             if args.wiki_verb == "status":
                 result = service.status(_root())
             elif args.wiki_verb == "ingest":
-                result = service.ingest(_root(), args.source, doc_id=args.doc_id)
+                result = service.ingest(_root(), args.source, doc_id=args.doc_id, session=args.session)
             else:
                 if args.refresh:
                     from alpaca.wiki import recovery
                     refresh_report = recovery.run(_root(), session=args.session or 'cli')
+                filters = _wiki_filters(args)
                 if args.wiki_verb == "context":
-                    print(service.context(_root(), args.question, max_chars=args.max_chars))
+                    print(service.context(_root(), args.question, max_chars=args.max_chars,
+                                          filters=filters))
                     return vc.BLOCKED if refresh_report and refresh_report['status'] != 'ok' else vc.PASS
                 result = service.query(_root(), args.question, as_of=args.as_of,
-                                       knowledge_as_of=args.knowledge_as_of)
+                                       knowledge_as_of=args.knowledge_as_of, filters=filters)
             if refresh_report is not None:
                 result['refresh'] = refresh_report
             print(json.dumps(result, indent=2))
             return vc.BLOCKED if refresh_report and refresh_report['status'] != 'ok' else vc.PASS
+        except Exception as exc:
+            print(json.dumps({'error': f'{type(exc).__name__}: {exc}'}), file=sys.stderr)
+            return vc.FAIL
+    if args.wiki_verb == "briefing":
+        # FR-19: built on demand from Rune2 evidence and never stored; it writes nothing
+        from alpaca.wiki import service
+        try:
+            result = service.briefing(_root(), task=args.task, op=args.op,
+                                      max_chars=args.max_chars)
+        except Exception as exc:
+            print(json.dumps({'error': f'{type(exc).__name__}: {exc}'}), file=sys.stderr)
+            return vc.FAIL
+        print(json.dumps(result.to_dict(), indent=2) if args.json else result.text)
+        return vc.PASS
+    if args.wiki_verb == "record-facts":
+        if not args.dry_run:
+            print(json.dumps({'error': 'wiki record-facts runs only as --dry-run; the rules write '
+                              'when the drain captures an event note'}), file=sys.stderr)
+            return vc.BLOCKED
+        import dataclasses
+        from alpaca.wiki import service
+        try:
+            rows = service.record_facts_preview(_root(), from_event=args.from_event,
+                                                through_event=args.through)
+        except service.StoreBehindRecord as held:
+            # the store has not processed a removal act of the record (t-070 round 3, R2-B1)
+            print(json.dumps(dict(held.detail, outcome='unavailable'), indent=2))
+            return vc.BLOCKED
+        except Exception as exc:
+            print(json.dumps({'error': f'{type(exc).__name__}: {exc}'}), file=sys.stderr)
+            return vc.FAIL
+        print(json.dumps([dataclasses.asdict(r) for r in rows], indent=2))
+        return vc.PASS
+    if args.wiki_verb in ("admit", "withdraw-candidate"):
+        from alpaca.wiki import service
+        try:
+            if not args.session:
+                raise ValueError("wiki %s needs --session <sid>: the actor is the live session" % args.wiki_verb)
+            appender = _wiki_record_appender(args.session)
+            if args.wiki_verb == "admit":
+                receipt = service.admit(_root(), args.candidate_id, session=args.session,
+                                        record=appender, probe=args.probe)
+            else:
+                receipt = service.withdraw_candidate(_root(), args.candidate_id, session=args.session,
+                                                     record=appender, reason=args.reason, by=args.by)
+            print(json.dumps(receipt.to_dict(), indent=2))
+            return vc.PASS if receipt.status in ("applied", "duplicate") else vc.BLOCKED
+        except Exception as exc:
+            print(json.dumps({'error': f'{type(exc).__name__}: {exc}'}), file=sys.stderr)
+            return vc.FAIL
+    if args.wiki_verb in ("correct", "withdraw"):
+        from alpaca.wiki import service
+        try:
+            if not args.session:
+                raise ValueError("wiki %s needs --session <sid>: the actor is the live session" % args.wiki_verb)
+            appender = _wiki_record_appender(args.session)
+            if args.wiki_verb == "withdraw":
+                receipt = service.withdraw_source(_root(), args.source_ref, session=args.session,
+                                                  record=appender, reason=args.reason)
+            else:
+                target = args.target
+                if target.endswith(".json"):
+                    with open(target, encoding="utf-8") as fh:
+                        target = json.load(fh)
+                replacement = None
+                if args.obj is not None or args.replacement_file:
+                    if args.replacement_file:
+                        with open(args.replacement_file, encoding="utf-8") as fh:
+                            replacement = json.load(fh)
+                    else:
+                        replacement = {"obj": args.obj, "obj_datatype": args.obj_datatype}
+                        for key in ("subject", "predicate"):
+                            if getattr(args, key):
+                                replacement[key] = getattr(args, key)
+                receipt = service.correct(_root(), target, args.action, session=args.session,
+                                          record=appender, reason=args.reason, replacement=replacement,
+                                          effective_at=args.effective_at, by=args.by)
+            print(json.dumps(receipt.to_dict(), indent=2))
+            return vc.PASS if receipt.status in ("applied", "duplicate") else vc.BLOCKED
+        except Exception as exc:
+            print(json.dumps({'error': f'{type(exc).__name__}: {exc}'}), file=sys.stderr)
+            return vc.FAIL
+    if args.wiki_verb == "consolidate":
+        from alpaca.wiki import consolidate
+        try:
+            # the caller of the job writes its checkpoint and one failure event per tried item
+            # that failed (architecture.md 9.2, OB-23); the step itself only proposes
+            result = consolidate.run_step(_root(), deadline_s=args.deadline_s)
+            print(json.dumps(result.to_dict(), indent=2))
+            return vc.PASS
+        except Exception as exc:
+            print(json.dumps({'error': f'{type(exc).__name__}: {exc}'}), file=sys.stderr)
+            return vc.FAIL
+    if args.wiki_verb in ("propose", "candidates"):
+        from alpaca.wiki import service
+        try:
+            if args.wiki_verb == "candidates":
+                try:
+                    views = service.candidates(_root(), status=args.status,
+                                               session=args.filter_session, kind=args.kind)
+                except service.StoreBehindRecord as held:
+                    print(json.dumps(dict(held.detail, outcome='unavailable'), indent=2))
+                    return vc.BLOCKED
+                print(json.dumps([v.to_dict() for v in views], indent=2))
+                return vc.PASS
+            if not args.session:
+                raise ValueError("wiki propose needs --session <sid>: the proposer is the live session")
+            with open(args.file, encoding="utf-8") as fh:
+                proposal = json.load(fh)
+            receipt = service.propose(_root(), proposal, session=args.session,
+                                      record=_wiki_record_appender(args.session))
+            print(json.dumps(receipt.to_dict(), indent=2))
+            return vc.PASS
         except Exception as exc:
             print(json.dumps({'error': f'{type(exc).__name__}: {exc}'}), file=sys.stderr)
             return vc.FAIL
@@ -161,26 +305,50 @@ def cmd_wiki(args):
                 print("wiki recovery: %d/%d sessions, %d ingested, %d unchanged" %
                       (done, total, report['ingested'], report['skipped']), file=sys.stderr)
         try:
-            result = recovery.run(_root(), session=args.session or 'cli', progress=progress)
+            result = recovery.run(_root(), session=args.session or 'cli', progress=progress,
+                                  rerender_notes=args.rerender_notes)
         except Exception as exc:
+            # the error text may quote what failed: the one screen before the record (t-070 round 2 C-C)
+            from alpaca import capture_runner
+            error = capture_runner._describe(exc)
             conn = db.connect(_root())
             try:
                 db.append_event(conn, session=args.session or 'cli', actor='alpaca-wiki',
                                 kind='drain-failed', data={'where': 'wiki-recover',
-                                'error': f'{type(exc).__name__}: {exc}',
-                                'recovery': 'alpaca wiki recover'})
+                                'error': error, 'recovery': 'alpaca wiki recover'})
             finally:
                 conn.close()
-            return vc.emit_verdict('alpaca-wiki-recover', vc.FAIL, f'{type(exc).__name__}: {exc}')
+            return vc.emit_verdict('alpaca-wiki-recover', vc.FAIL, error)
         print(json.dumps(result, indent=2))
         return vc.PASS if result['status'] == 'ok' else vc.BLOCKED
+    if args.wiki_verb in ("export", "import"):
+        # FR-23: the rune2-portable/1 export reads the store; the import pours an empty store from
+        # the export and the record. Neither writes the record.
+        from alpaca.wiki import portable, service
+        try:
+            if args.wiki_verb == "export":
+                result = portable.export_store(_root(), args.path, include_private=args.private)
+            else:
+                result = portable.import_store(_root(), args.path)
+        except service.StoreBehindRecord as held:
+            # the store has not processed a removal act of the record (t-070 round 2 C-E)
+            print(json.dumps(dict(held.detail, outcome='unavailable'), indent=2))
+            return vc.BLOCKED
+        except Exception as exc:
+            print(json.dumps({'error': f'{type(exc).__name__}: {exc}'}), file=sys.stderr)
+            return vc.FAIL
+        print(json.dumps(result, indent=2))
+        return vc.BLOCKED if result.get('status') in ('refused', 'incomplete') else vc.PASS
     if args.wiki_verb == "extract":
-        from alpaca.wiki import extract
+        from alpaca.wiki import extract, service
         try:
             manifest = extract.emit(args.root, args.out)
+        except service.StoreBehindRecord as held:
+            return vc.emit_verdict("alpaca-wiki-extract", vc.BLOCKED,
+                                   "unavailable: %s" % held.detail['reason'])
         except Exception as e:
-            return vc.emit_verdict("alpaca-wiki-extract", vc.FAIL,
-                                   "%s: %s" % (type(e).__name__, e))
+            from alpaca import capture_runner
+            return vc.emit_verdict("alpaca-wiki-extract", vc.FAIL, capture_runner._describe(e))
         c = manifest["counts"]; p = manifest["parity"]
         return vc.emit_verdict(
             "alpaca-wiki-extract", vc.PASS,
@@ -188,7 +356,7 @@ def cmd_wiki(args):
             "docs=%d nodes=%d edges=%d unaccounted=%d" % (
                 c["docs"], c["nodes"], c["edges"], p["unaccounted"]),
             evidence=[args.out])
-    print("GATE alpaca-wiki: BLOCKED (unknown wiki verb; use extract or recover)")
+    print("GATE alpaca-wiki: BLOCKED (unknown wiki verb; use extract, recover, record-facts, briefing, propose, candidates or consolidate)")
     return vc.BLOCKED
 
 @command("style")
@@ -284,7 +452,7 @@ def cmd_day(args):
 def build_parser():
     p = argparse.ArgumentParser(prog="alpaca", add_help=True)
     p.add_argument("--session", default=None, help="session id (hooks pass it)")
-    p.add_argument("--version", action="store_true", help="print this Alpaca's version (dev or release) and exit")
+    p.add_argument("--version", action="store_true", help="print the Alpaca version and exit")
     sub = p.add_subparsers(dest="verb")
     sub.add_parser("init"); sub.add_parser("verify")
     s = sub.add_parser("status"); s.add_argument("--json", action="store_true")
@@ -294,7 +462,12 @@ def build_parser():
     dy.add_argument("--json", action="store_true")
     wk = sub.add_parser("wiki", help="wiki engine verbs (the extract leaves alpaca; nothing writes back)")
     wkv = wk.add_subparsers(dest="wiki_verb")
-    wkv.add_parser("recover", help="replay all recorded sessions and verify wiki capture through a fixed cutoff")
+    wr = wkv.add_parser("recover", help="replay all recorded sessions and verify wiki capture through a fixed cutoff")
+    # Merge of op-008 into main, review B4: stored event notes keep their rendering unless the
+    # owner runs this job (docs/operators.md); --refresh on query/context never passes it.
+    wr.add_argument("--rerender-notes", action="store_true",
+                    help="owner job: rewrite stored event notes in place in the current note format "
+                         "(slow on a large store; time it on a copy first)")
     wkv.add_parser("status", help="show corpus, providers and capture gaps separately from decision pages")
     wq = wkv.add_parser("query", help="ask the wiki for a cited evidence-only answer (JSON)")
     wq.add_argument("question")
@@ -305,6 +478,81 @@ def build_parser():
     wc.add_argument("question")
     wc.add_argument("--max-chars", type=int, default=2500)
     wc.add_argument("--refresh", action="store_true")
+    for sub_parser in (wq, wc):
+        # FR-11 structured filters: they narrow retrieval and never authorize
+        for name, flag in _WIKI_FILTER_FLAGS:
+            sub_parser.add_argument(flag, dest="filter_" + name, default=None,
+                                    help="keep only %s matching this value" % name.replace("_", " "))
+        sub_parser.add_argument("--include-bookkeeping", action="store_true",
+                                help="read heartbeat notes too (left out by default)")
+    wbr = wkv.add_parser("briefing", help="FR-19: a cited, budgeted briefing of one task or op, "
+                                          "built on demand from Rune2 evidence (evidence-only; "
+                                          "never stored)")
+    wbr_subject = wbr.add_mutually_exclusive_group(required=True)
+    wbr_subject.add_argument("--task", default=None, help="the task id (t-NNN)")
+    wbr_subject.add_argument("--op", default=None, help="the op id (op-NNN)")
+    wbr.add_argument("--max-chars", type=int, default=2500)
+    wbr.add_argument("--json", action="store_true",
+                     help="the items, their sources and the text as JSON")
+    wrf = wkv.add_parser("record-facts", help="FR-14: show what the record rules would extract from "
+                                              "an event range, writing nothing (--dry-run)")
+    wrf.add_argument("--dry-run", action="store_true", help="required: the verb only previews")
+    wrf.add_argument("--from", dest="from_event", type=int, required=True, help="first event id")
+    wrf.add_argument("--through", type=int, required=True, help="last event id")
+    wp = wkv.add_parser("propose", help="FR-33: propose a fact, observation or summary candidate "
+                                        "from a JSON file; each anchor is checked against its cited "
+                                        "span (the proposer is --session)")
+    wp.add_argument("--file", required=True, help="the proposal JSON (kind, anchors, context, ...)")
+    wco = wkv.add_parser("consolidate", help="FR-16, FR-18: one bounded, model-free step that turns "
+                                             "repeated failure signatures and superseded decisions "
+                                             "into observation candidates (proposes; never admits)")
+    wco.add_argument("--deadline-s", dest="deadline_s", type=float, default=20.0,
+                     help="seconds the step may run before it stops and resumes from its checkpoint")
+    wcd = wkv.add_parser("candidates", help="list candidates with their anchors (quotes the "
+                                            "servable predicate hides are null)")
+    wcd.add_argument("--status", default=None)
+    wcd.add_argument("--kind", default=None)
+    wcd.add_argument("--filter-session", dest="filter_session", default=None,
+                     help="only candidates this session proposed")
+    wad = wkv.add_parser("admit", help="FR-33: admit a checked fact candidate as a graph edge; the "
+                                       "admitting session (--session) must differ from the proposer")
+    wad.add_argument("candidate_id")
+    wad.add_argument("--probe", default=None, help="probe corpus for an observation (not read for a fact)")
+    wwd = wkv.add_parser("withdraw-candidate", help="withdraw a candidate (the proposer or the owner); an "
+                                                     "admitted one is retracted and only its net effect is undone")
+    wwd.add_argument("candidate_id")
+    wwd.add_argument("--reason", required=True)
+    wwd.add_argument("--by", default=None, choices=["owner"], help="declare the owner (not verified)")
+    wcr = wkv.add_parser("correct", help="FR-21: the owner corrects a fact (supersede, world-change, "
+                                         "retract or revert); anyone else is refused and should propose")
+    wcr.add_argument("target", help="an edge id, or the path of a .json file holding a FactIdentity")
+    wcr.add_argument("--action", required=True, choices=["supersede", "world-change", "retract", "revert"])
+    wcr.add_argument("--reason", required=True)
+    wcr.add_argument("--by", default=None, choices=["owner"], help="declare the owner (not verified)")
+    wcr.add_argument("--effective-at", dest="effective_at", default=None,
+                     help="when the world changed (required for world-change)")
+    wcr.add_argument("--obj", default=None, help="the replacement object (supersede, world-change)")
+    wcr.add_argument("--obj-datatype", dest="obj_datatype", default="string",
+                     choices=["node", "date", "number", "string", "bool"])
+    wcr.add_argument("--subject", default=None, help="replacement subject (default: the target's)")
+    wcr.add_argument("--predicate", default=None, help="replacement predicate (default: the target's)")
+    wcr.add_argument("--replacement-file", dest="replacement_file", default=None,
+                     help="a JSON file with the replacement (obj, obj_datatype, subject, predicate)")
+    wwsr = wkv.add_parser("withdraw", help="FR-22: withdraw a source and everything derived from it "
+                                           "(an exclusion, not a purge)")
+    wwsr.add_argument("source_ref", help="event:<id>, transcript:<session>, document:<doc-id> (or "
+                                         "wiki:<doc-id>), ...; the document of a captured note, "
+                                         "transcript or source copy withdraws the source it stands "
+                                         "for, which the receipt names")
+    wwsr.add_argument("--reason", required=True)
+    wxp = wkv.add_parser("export", help="FR-23: write the store's accepted state as rune2-portable/1 "
+                                        "JSON lines (no text a source may not serve)")
+    wxp.add_argument("path", help="the export file to write (mode 0600)")
+    wxp.add_argument("--private", action="store_true",
+                     help="keep the text of private and quarantined sources; withdrawn text never leaves")
+    wim = wkv.add_parser("import", help="FR-23: pour an empty store from a rune2-portable/1 export and "
+                                        "the record; rows the record does not back are refused")
+    wim.add_argument("path", help="the export file to read")
     wi = wkv.add_parser("ingest", help="index a local wiki document as evidence")
     wi.add_argument("source")
     wi.add_argument("--doc-id", required=True, help="stable wiki/... .md identity")
@@ -337,7 +585,7 @@ def main(argv=None) -> int:
     # `alpaca --version` answers before any verb module loads, so it works in a broken tree too.
     if list(sys.argv[1:] if argv is None else argv) == ["--version"]:
         from alpaca import version
-        print("alpaca %s" % version.string())
+        print("Alpaca %s" % version.string())
         return PASS
     parser, sub = build_parser()
     for mod in VERB_MODULES:
@@ -373,7 +621,7 @@ def main(argv=None) -> int:
         return USAGE if e.code not in (0,) else PASS
     if getattr(args, "version", False) and not args.verb:
         from alpaca import version
-        print("alpaca %s" % version.string())
+        print("Alpaca %s" % version.string())
         return PASS
     if not args.verb or args.verb not in COMMANDS:
         parser.print_usage(sys.stderr)
@@ -382,6 +630,10 @@ def main(argv=None) -> int:
     # the `cli` writer's. The SessionStart hook exports ALPACA_SESSION_ID and Claude Code exports
     # CLAUDE_CODE_SESSION_ID into every Bash call, so read them in that order before dispatch;
     # every verb reads `args.session or "cli"`, so filling it here attributes all of them at once.
+    # op-019: the real session and agent markers are read BEFORE --session overwrites
+    # ALPACA_SESSION_ID below, so owner words are bound to the process's own session
+    from alpaca import ownerword
+    ownerword.capture(os.environ)
     if not getattr(args, "session", None):
         for name in ENV_SESSION_VARS:
             value = (os.environ.get(name) or "").strip()
@@ -400,6 +652,7 @@ def main(argv=None) -> int:
         print("GATE alpaca-%s: FAIL (internal: %s: %s)" % (args.verb, type(e).__name__, e), file=sys.stderr)
         return INTERNAL
     finally:
+        ownerword.release()
         if previous_session is None:
             os.environ.pop("ALPACA_SESSION_ID", None)
         else:

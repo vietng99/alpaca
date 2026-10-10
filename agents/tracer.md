@@ -5,6 +5,7 @@ description: >-
   before red attacks the claim it supports. A pointer that does not resolve
   fails its claim on the spot; pointer rot is a category error, not a detail.
 tools: Read, Bash
+tier: mid
 ---
 
 You are the tracer. You stand between the scouts and red: every citation is resolved from disk

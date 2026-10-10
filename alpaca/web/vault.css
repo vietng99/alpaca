@@ -312,12 +312,9 @@ button, input { font: inherit; }
 .submit:active { transform: translateY(1px); }
 .submit:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(var(--v-hot-rgb), 0.45), 0 8px 22px -8px rgba(var(--v-acc-rgb), 0.6); }
 .submit:disabled { opacity: 0.6; cursor: default; }
-.spin {
-  width: 16px; height: 16px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent;
-  animation: spin 800ms linear infinite; display: none;
-}
+/* Busy sign-in: the working orb (orb.js) inked in the button's text color. */
+.submit .spin { display: none; color: currentColor; }
 .submit.busy .spin { display: inline-block; }
-@keyframes spin { to { transform: rotate(360deg); } }
 
 .error {
   margin-top: 14px; padding: 9px 12px; border-radius: 10px;
@@ -444,13 +441,19 @@ button, input { font: inherit; }
 .loading { display: flex; flex-direction: column; align-items: center; gap: 11px; width: 288px; max-width: 100%; margin-top: 4px; animation: fade 280ms ease both; }
 .loading[hidden] { display: none; }
 .loadingLabel { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--v-glow); text-shadow: 0 0 14px rgba(var(--v-acc-rgb), 0.4); }
+.loadHead { display: flex; align-items: center; gap: 12px; width: 100%; }
+.loadHead alpaca-orb { color: var(--v-glow); }
+.loadHead .loadingLabel { flex: 1; }
+.loadPct { font-family: var(--v-mono); font-size: 13px; font-weight: 700; color: var(--v-text-strong); font-variant-numeric: tabular-nums; }
 .loadBar { position: relative; width: 100%; height: 4px; border-radius: 3px; overflow: hidden; background: rgba(var(--v-acc-rgb), 0.14); box-shadow: inset 0 0 0 1px rgba(var(--v-acc-rgb), 0.2); }
+/* The fill is the share of the workspace reads received (vault.js prefetchWorkspace), not a timer. */
 .loadFill {
-  position: absolute; inset: 0 auto 0 0; width: 42%; border-radius: 3px;
-  background: linear-gradient(90deg, transparent, var(--v-hot), var(--v-glow), var(--v-hot), transparent);
-  box-shadow: 0 0 12px rgba(var(--v-hot-rgb), 0.6); animation: loadSweep 1.05s ease-in-out infinite;
+  position: absolute; inset: 0 auto 0 0; width: 0; border-radius: 3px;
+  background: linear-gradient(90deg, var(--v-acc), var(--v-hot), var(--v-glow));
+  box-shadow: 0 0 12px rgba(var(--v-hot-rgb), 0.6); transition: width 160ms linear;
 }
-@keyframes loadSweep { 0% { transform: translateX(-130%); } 100% { transform: translateX(320%); } }
+.loadNote { align-self: flex-start; font-family: var(--v-mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--v-faint); min-height: 1.4em; }
+.loadNone .loadBar, .loadNone .loadPct { display: none; }
 
 /* ---------- workspace hub ---------- */
 .hub { position: relative; z-index: 2; width: min(1080px, 100%); margin: 0 auto; padding: 64px 0 48px; }
@@ -481,6 +484,9 @@ button, input { font: inherit; }
   font-family: var(--v-mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--v-faint);
 }
 .tile-live i { width: 7px; height: 7px; border-radius: 50%; background: var(--v-dim); }
+/* While the summary is read the tile shows the searching orb (orb.js) instead of the dot. */
+.tile-live alpaca-orb { --orb-px: 14px; color: var(--v-glow); }
+.tile-live.checking i, .tile-live:not(.checking) alpaca-orb { display: none; }
 .tile-live.on { color: var(--v-ok); }
 .tile-live.on i { background: var(--v-ok); box-shadow: 0 0 8px rgba(16, 185, 129, 0.8); animation: sysPulse 1.8s ease-in-out infinite; }
 .tile-op { font-size: 13.5px; line-height: 1.45; color: var(--v-text); margin: 0 0 10px; min-height: 2.9em; }
@@ -518,6 +524,6 @@ button, input { font: inherit; }
   .ring1, .ring2, .ring3, .scan, .stageActive::before, .spin, .card.denied, .sysbarDot, .unlockBlink, .brandPulse,
   .syslogDot, .syslogLine, .gridGlow, .card::before, .card::after, .loadFill, .runBorder, .relayHeadDot,
   .relayDot, .tile-live.on i { animation: none !important; }
-  .vault, .shackle, .result, .scan, .tile { transition: none !important; }
+  .vault, .shackle, .result, .scan, .tile, .loadFill { transition: none !important; }
   .scan, .scanline, .cardScan { opacity: 0 !important; animation: none !important; }
 }

@@ -30,9 +30,8 @@ def cmd_collect(args):
         from .maintenance import backup_once
         result=backup_once(root,budget_bytes=args.budget_bytes)
     elif args.collect_action == 'enable':
-        folder = Path(root)/'.alpaca/observability'
-        folder.mkdir(parents=True,exist_ok=True,mode=0o700)
-        (folder/'enabled').touch(mode=0o600)
+        from alpaca import _nofollow
+        os.close(_nofollow.open_file_below(root, ('observability',), 'enabled', os.O_CREAT | os.O_WRONLY, 0o600))
         result = {'enabled':True,'next':'collect watch --interval 15'}
     elif args.collect_action == 'watch':
         os.environ['ALPACA_COLLECTOR_WATCH'] = '1'
@@ -41,12 +40,12 @@ def cmd_collect(args):
             signal.signal(sig,lambda *_:stop.set())
         with collector_lock(root):
             while not stop.is_set():
-                result = _run(root,max_records=args.max_records)
+                result = _run(root,max_records=args.max_records,source_batch=args.source_batch,event_batch=args.event_batch,preservation_batch=args.preservation_batch,stop_requested=stop.is_set,warm=True)
                 print(json.dumps(result),flush=True)
                 stop.wait(max(0.1,args.interval))
         return cli.PASS
     else:
-        result = run_once(root,max_records=args.max_records)
+        result = run_once(root,max_records=args.max_records,source_batch=args.source_batch,event_batch=args.event_batch,preservation_batch=args.preservation_batch,retry_consumers=args.retry_consumer)
     print(json.dumps(result,indent=2))
     return cli.FAIL if result.get('errors') or result.get('ok') is False else cli.PASS
 
@@ -57,6 +56,11 @@ def _parser(sub):
     for name in ('once','watch'):
         item=verbs.add_parser(name)
         item.add_argument('--max-records',type=int,default=1000)
+        item.add_argument('--source-batch',type=int,default=200,help='records per source on multi-source collections (cap 10000); larger batches amortize catch-up prefix checks')
+        item.add_argument('--preservation-batch',type=int,default=8,help='maximum independent preservation jobs per cycle (cap 256); shares the wiki index within a batch')
+        item.add_argument('--event-batch',type=int,default=200,help='maximum operation events per consumer (cap 10000)')
+        if name=='once':
+            item.add_argument('--retry-consumer',action='append',default=[],choices=['wiki','snapshot-requests','projection','profile','mission'],help='retry a selected consumer now through normal checks; requires the watcher to be stopped')
         if name=='watch':
             item.add_argument('--interval',type=float,default=15)
     verbs.add_parser('status')

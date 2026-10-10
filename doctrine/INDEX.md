@@ -36,7 +36,7 @@ a leaf that exists.
 | 19 | [heartbeat-os-kicker](leaves/heartbeat-os-kicker.md) | Re-entry is guarded across a restart by an account-independent timer, not by a lock a crash could strand. | 1e66cc95ace3 |
 | 20 | [quota-reset-recovery](leaves/quota-reset-recovery.md) | A run waits out a quota reset from the real reset header, not a guessed delay, then resumes cost-aware. | 802ada9f6fef |
 | 21 | [worker-pool-recovery](leaves/worker-pool-recovery.md) | A worker that dies mid-hold releases its claim by lease expiry; the pool refills without a stranded step. | 485f1b936e6e |
-| 22 | [autodrive-levels](leaves/autodrive-levels.md) | One unified ladder names the autonomy postures; a level is granted by a human and never self-raised. | 4a1bd01abfef |
+| 22 | [autodrive-levels](leaves/autodrive-levels.md) | One unified ladder names the autonomy postures; a level is granted by a human and never self-raised. | d9adacc51d67 |
 | 23 | [lessons-write-gate](leaves/lessons-write-gate.md) | A lesson is admitted only through a gate with a shrink floor; the store grows on evidence, not on every thought. | 026062db7771 |
 | 24 | [spec-driven-checklist](leaves/spec-driven-checklist.md) | Work is driven by a checklist derived from the spec; a discharged item moves to the discharged store, never a signed sink. | 3414b7d6169e |
 | 25 | [context-clearing](leaves/context-clearing.md) | An agent evicts spent context in-window the same way file-as-truth evicts it across a boundary: keep the pointer, drop the body. | afd351664d34 |
@@ -52,4 +52,5 @@ a leaf that exists.
 | 35 | [two-change-classes](leaves/two-change-classes.md) | Every write is agent-writable or human-owned by path; a human-owned write is a review card up to L4 and a recorded diff at L5+. | 97be037698f3 |
 | 36 | [operate-in-place](leaves/operate-in-place.md) | The store is history the operator is mutating past, not a clone to promote from; a pre-image is snapshotted with a mandatory note before any non-idempotent act. | ae7c4074419f |
 | 37 | [dumb-capture-agentic-sort](leaves/dumb-capture-agentic-sort.md) | Capture writes raw with zero judgment; only the sort pass judges, surfaces the unsorted bucket with a reason, and never drops a note. | 85f3e641ef9e |
+| 38 | [intent-fidelity](leaves/intent-fidelity.md) | An agent may not invent intent and call it the owner's: the signed brief, the owner's answers and the owner's orders are the authority, and an agent's own choice is labelled as the agent's. | c398fcff3925 |
 

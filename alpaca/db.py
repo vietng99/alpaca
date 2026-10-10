@@ -34,6 +34,11 @@ def connect_readonly(root_dir: str) -> sqlite3.Connection:
         conn.executescript(SCHEMA)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA query_only=ON")
+    # Sorts and temporary indexes stay in memory. With file temp storage an ORDER BY that spills
+    # creates an etilqs_* file in /var/tmp, and the name check before it (access(2) in a shared,
+    # busy directory) stalled hub reads for up to a minute (t-353). Read results are small enough
+    # that an in-memory sort costs nothing measurable.
+    conn.execute("PRAGMA temp_store=MEMORY")
     return conn
 
 def connect(root_dir: str) -> sqlite3.Connection:
@@ -42,6 +47,8 @@ def connect(root_dir: str) -> sqlite3.Connection:
     conn = sqlite3.connect(p, timeout=10, isolation_level=None)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    # As in connect_readonly: no etilqs_* temp files in /var/tmp, whose disk journal stalls (t-353).
+    conn.execute("PRAGMA temp_store=MEMORY")
     # Initialize only a new record; migration owns all subsequent schema changes.
     if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table'").fetchone():
         with transaction(conn):

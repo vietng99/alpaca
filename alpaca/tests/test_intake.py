@@ -507,11 +507,11 @@ def test_obligation_template_reads_a_table_cell():
 def test_task_add_keeps_its_cli_behaviour(project, capsys):
     from alpaca import db
     _op(capsys)
-    rc, out = _cli(["task", "add", "op-001", "do the thing", "--title", "Thing"], capsys)
+    rc, out = _cli(["task", "add", "op-001", "do the thing", "--title", "Thing", "--phase", "build"], capsys)
     assert rc == 0 and "t-001 added" in out
     conn = db.connect(project)
     ev = db.events(conn, kind="task-add")[-1]
-    assert ev["data"] == {"statement": "do the thing", "title": "Thing", "phase": None, "why": None}
+    assert ev["data"] == {"statement": "do the thing", "title": "Thing", "phase": "build", "why": None}
 
 
 # ------------------------------------------------------------------------------ review fixes (t-008 REVIEW.md)

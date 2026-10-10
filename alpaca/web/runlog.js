@@ -1,5 +1,6 @@
 // Runs & logs dashboard. The log scan only points at lines; the receipt verdict stays the result.
 import {icon} from './icons.js';
+import {orb} from './orb.js';
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const n=v=>Number(v||0).toLocaleString();
 const href=(route,params={})=>'#'+route+(Object.keys(params).length?'?'+new URLSearchParams(params):'');
@@ -55,7 +56,7 @@ ${steps}
 <div class="rl-meta"><span>Started <b>${esc(when(a.started_at||r.started_at))}</b></span><span>Duration <b>${esc(span(a.elapsed_s??r.elapsed_s))}</b></span><span>Receipt <b class="mono">${esc(short(a.receipt_id||r.receipt_id||'none',14))}</b></span></div>
 <div id="rl-review"></div>
 <div id="rl-contract" class="rl-contract-wrap"></div>
-<div id="rl-kpis" class="rl-kpis"><div class="rl-kpi tone-quiet"><span>Log scan</span><strong><span class="spinner"></span></strong><small>Reading the captured output</small></div></div>
+<div id="rl-kpis" class="rl-kpis"><div class="rl-kpi tone-quiet"><span>Log scan</span><strong>${orb('searching',20)}</strong><small>Reading the captured output</small></div></div>
 <div id="rl-callout"></div>
 <div id="rl-map"></div>
 <div class="rl-body"><aside class="rl-findings" id="rl-findings" aria-label="Lines to check"></aside>

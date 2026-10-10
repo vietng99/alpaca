@@ -14,12 +14,16 @@ import json
 import os
 import re
 import subprocess
+from pathlib import Path
 
 from alpaca import manifest
 from alpaca.tests.conftest import REPO
+from alpaca.tests.devfiles import names_as_data
+
+names_as_data("docs/alpaca-bootstrap")           # a prefix the stale-path scan passes over
 
 SKILLS = ("alpaca-first-chat", "alpaca-onboard", "alpaca-op", "alpaca-runbook-forge",
-          "alpaca-from-notes", "alpaca-interview", "alpaca-log-review")
+          "alpaca-from-notes", "alpaca-interview", "alpaca-log-review", "shield")
 CLAUDE_SKILLS = os.path.join(REPO, ".claude", "skills")
 
 
@@ -39,9 +43,23 @@ def test_every_product_skill_is_a_claude_code_project_skill():
         assert meta.get("description"), name
 
 
+def test_codex_shield_entry_reaches_the_canonical_skill_and_native_adapter():
+    entry = Path(REPO) / ".agents/skills/shield/SKILL.md"
+    assert entry.is_file() and not entry.is_symlink()
+    meta, text = _front_matter(entry)
+    assert meta["name"] == "shield" and meta["description"]
+    targets = [(entry.parent / p).resolve() for p in re.findall(r"\]\(([^)]+)\)", text)]
+    assert set(targets) == {
+        Path(CLAUDE_SKILLS) / "shield/SKILL.md", Path(CLAUDE_SKILLS) / "shield/codex.md"}
+    assert all(p.is_file() for p in targets)
+    mechanism = {p.rstrip("/") for p in manifest.mechanism(REPO)}
+    assert ".agents/skills/shield" in mechanism
+    assert ".agents/skills" not in mechanism
+
+
 def test_one_copy_only():
     assert not os.path.exists(os.path.join(REPO, "skills")), "a second copy under skills/"
-    on_disk = {d for d in os.listdir(CLAUDE_SKILLS) if d.startswith("alpaca-")}
+    on_disk = {d for d in os.listdir(CLAUDE_SKILLS) if d.startswith("alpaca-") or d in SKILLS}
     assert on_disk == set(SKILLS)
 
 

@@ -14,6 +14,13 @@ A QUOTE is a row id followed by a DOUBLE-QUOTED string via `:`, `=`, `->` or a t
 `AC-01: "the parser reads a clean table"`. A bare status word is NOT a quote (that is
 record_check's surface), so the two checkers partition the lines cleanly.
 
+A contract line labelled `owner-quote` (op-019 t-201, design section 2) is checked here too, by
+`check_source_quote`: the line must be a byte-for-byte substring of its source, which is the signed
+copy of an op's brief, one owner message of a session's transcript (`session:<sid>`), or the owner
+words of an owner-proved decision (`dec:<id>`). A line that is not in its source is
+QUOTE-SOURCE-MISMATCH; a source that is no signed brief, no owner-proved decision or no readable
+transcript is QUOTE-SOURCE-UNSIGNED.
+
 HONEST LIMIT: faithfulness is compared on the trimmed statement text; a document that quotes only
 a FRAGMENT of a statement is not matched to it (a quote must reproduce the whole statement to
 count as faithful here - disclosed residual).
@@ -34,6 +41,8 @@ INSTRUMENT = "quote-check"
 R_MISQUOTE = "QUOTE-MISMATCH"
 R_NO_SOURCE = "QUOTE-NO-SOURCE"
 R_NO_QUOTES = "QUOTE-NO-QUOTES"
+R_SOURCE_MISMATCH = "QUOTE-SOURCE-MISMATCH"
+R_SOURCE_UNSIGNED = "QUOTE-SOURCE-UNSIGNED"
 
 Quote = namedtuple("Quote", "row_id text line raw")
 Result = namedtuple("Result", "verdict reasons info")
@@ -80,6 +89,52 @@ def check_quotes(conn, quotes) -> Result:
         else:
             verdicts.append(vc.PASS)
     return Result(contract.worst(verdicts), reasons, info)
+
+
+def check_source_quote(conn, text, source, root) -> Result:
+    """Adjudicate one owner-quote line `text` against its `source` (see the module text). PASS when
+    the trimmed line is a substring of the source's bytes; FAIL with QUOTE-SOURCE-MISMATCH when it
+    is not, FAIL with QUOTE-SOURCE-UNSIGNED when the source holds no owner words to read."""
+    from alpaca import brief, ownerword
+    needle = (text or "").strip()
+    src = (source or "").strip()
+    info = {"source": src}
+
+    def fail(reason, detail):
+        return Result(vc.FAIL, ["%s: %s" % (reason, detail)], info)
+
+    if not needle:
+        return fail(R_SOURCE_MISMATCH, "an empty line quotes nothing")
+    if not src:
+        return fail(R_SOURCE_UNSIGNED, "an owner-quote line needs a source")
+    if src.startswith("session:"):
+        sid = src[len("session:"):].strip()
+        try:
+            word = ownerword.find_quote(conn, sid, needle, root)
+        except ownerword.OwnerWordRefusal as exc:
+            reason = R_SOURCE_UNSIGNED if exc.reason == ownerword.R_NO_TRANSCRIPT \
+                else R_SOURCE_MISMATCH
+            return fail(reason, "%s (%s)" % (exc.detail, exc.reason))
+        info["owner_word"] = word
+        return Result(vc.PASS, [], info)
+    if src.startswith("dec:"):
+        dec = src[len("dec:"):].strip()
+        words = ownerword.decision_words(conn, dec, root)
+        if words is None:
+            return fail(R_SOURCE_UNSIGNED, "%s is not an owner-proved decision" % dec)
+        if needle not in words:
+            return fail(R_SOURCE_MISMATCH, "the line is not in the owner words of %s" % dec)
+        return Result(vc.PASS, [], info)
+    signed = brief.signed_text(conn, root, src)
+    if signed is None:
+        return fail(R_SOURCE_UNSIGNED, "%s is not the signed brief of any op (alpaca brief sign)"
+                    % src)
+    body, sha = signed
+    info["sha256"] = sha
+    if needle not in body:
+        return fail(R_SOURCE_MISMATCH, "the line is not in the signed copy of %s (sha256 %s)"
+                    % (src, sha[:12]))
+    return Result(vc.PASS, [], info)
 
 
 def check_document(conn, text) -> Result:

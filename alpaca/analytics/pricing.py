@@ -6,9 +6,21 @@ records must be normalized before calling this function. Client cost-state
 values and imported reported costs are separate evidence, never inputs here.
 
 Rate cards come from two places. _CARDS holds the cards verified when this code
-was written. A model released later is priced from a card an agent recorded
-from the official price page (alpaca.analytics.ratecards), passed in as `cards`.
-A built-in card always wins over a recorded one for the same model ID.
+was written, plus any model whose official page prices it by prompt length. A
+model released later with one published row is priced from a card an agent
+recorded from the official price page (alpaca.analytics.ratecards), passed in as
+`cards`. A built-in card always wins over a recorded one for the same model ID.
+
+A card prices a request from one row. When the page lists two rows split by
+prompt size (today only Claude Haiku 5.5: up to 100,000 tokens, over 100,000
+tokens), the built-in card keeps the up-to row in `rates`, the boundary in
+`context_threshold_tokens` and the over row in `long_context_rates`, each copied
+from the page. A request whose total input (uncached plus cache reads plus cache
+writes) is over the boundary is priced entirely at the over row, with no
+multiplier. A card with a boundary and no second row applies the fixed
+long-context step instead (input x2, output x1.5; gpt-6-astra). Either way,
+summed usage is refused with request_boundaries_required. A recorded card cannot
+hold a second row.
 """
 import math
 from decimal import Decimal
@@ -58,6 +70,16 @@ _CARDS = {
     "claude-sonnet-5": _claude("sonnet-5", "2", ".2", "2.5", "4", "10"),
     "claude-haiku-4-5-20251001": _claude("haiku-4-5", "1", ".1", "1.25", "2", "5"),
     "claude-haiku-4-5": _claude("haiku-4-5", "1", ".1", "1.25", "2", "5"),
+    # Haiku 5.5 is priced by prompt length (pricing page "Long context pricing"): one published row
+    # for prompts up to 100,000 tokens (`rates`) and one for prompts over it (`long_context_rates`).
+    # The over row replaces the rates; the x2/x1.5 step of a threshold-only card never applies.
+    "claude-haiku-5-5": {"provider": "anthropic", "source_url": CLAUDE_PRICING,
+                         "source_urls": [CLAUDE_PRICING,
+                                         "https://platform.claude.com/docs/en/models/haiku-5-5/overview"],
+                         "rates": (".1", ".01", ".125", ".2", None, ".5"),
+                         "context_threshold_tokens": 100000,
+                         "long_context_rates": (".5", ".05", ".625", "1", None, "2.5"),
+                         "verified_at": "2026-10-08"},
     "gpt-6-astra": {
         "provider": "openai",
         "source_url": "https://developers.openai.com/api/docs/models/gpt-6-astra",
@@ -126,6 +148,10 @@ def _usable(card):
             fast_text(card["fast_multiplier"])
         threshold = card.get("context_threshold_tokens")
         if threshold is not None and (type(threshold) is not int or threshold <= 0):
+            return False
+        if card.get("long_context_rates") is not None:
+            # Only a built-in card may carry a second rate row; a recorded one is refused, never
+            # priced as if it had one row.
             return False
         urls = card.get("source_urls")
         return (_https(card.get("source_url")) and isinstance(urls, (list, tuple)) and all(_https(u) for u in urls)
@@ -241,6 +267,9 @@ def estimate(model, usage, *, provider=None, cards=None):
     TTL data leaves the total unavailable. The result uses
     the current rate card, not a historical invoice or subscription payment.
     `cards` maps model IDs to recorded cards (ratecards.load); built-in cards win.
+    A card with a context boundary prices the whole request at one tier, picked by
+    its total input: the card's own over row when it has `long_context_rates`, else
+    the x2/x1.5 step.
     """
     card, origin = card_for(model, cards)
     verified_at = card.get("verified_at", VERIFIED_AT) if card else VERIFIED_AT
@@ -277,11 +306,18 @@ def estimate(model, usage, *, provider=None, cards=None):
         service_tier, service_multiplier = _service(usage, expected_provider, fast_multiplier(model, card, origin),
                                                     result["assumptions"])
         long_context = threshold is not None and input_count > threshold
-        input_multiplier = Decimal(2 if long_context else 1)
-        output_multiplier = Decimal("1.5" if long_context else "1")
+        long_rates = card.get("long_context_rates") if origin == "built-in" else None
+        if long_rates is not None:
+            # A published row per prompt size: the long row replaces the rates, no multiplier.
+            base_rates = long_rates if long_context else card["rates"]
+            input_multiplier = output_multiplier = Decimal(1)
+        else:
+            base_rates = card["rates"]
+            input_multiplier = Decimal(2 if long_context else 1)
+            output_multiplier = Decimal("1.5" if long_context else "1")
         rates = {}
         costs = {}
-        for category, base_rate in zip(_CATEGORIES, card["rates"]):
+        for category, base_rate in zip(_CATEGORIES, base_rates):
             multiplier = output_multiplier if category == "output" else input_multiplier
             rate = Decimal(base_rate) * multiplier * service_multiplier if base_rate is not None else None
             rates[category] = float(rate) if rate is not None else None

@@ -41,19 +41,19 @@ const CSS = `
 .sys-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
 .sys-head>div{min-width:0}
 .sys-head p{overflow-wrap:anywhere}
-.sys-live{display:inline-flex;align-items:center;gap:7px;font-size:10px;color:var(--green);white-space:nowrap}
+.sys-live{display:inline-flex;align-items:center;gap:7px;font-size:var(--fs-xs);color:var(--green);white-space:nowrap}
 .sys-live i{width:6px;height:6px;border-radius:50%;background:currentColor;box-shadow:0 0 0 4px var(--green-bg)}
 .sys-live.sys-stale{color:var(--muted)}
 .sys-live.sys-stale i{box-shadow:none}
 .sys-body{padding:16px 18px 18px;display:grid;gap:18px;min-width:0}
-.sys-err{font-size:11px;color:var(--muted);margin:0}
+.sys-err{font-size:var(--fs-xs);color:var(--muted);margin:0}
 .sys-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:12px}
 .sys-stat{border:1px solid var(--line);border-radius:var(--radius,8px);padding:12px;min-width:0;background:var(--surface-raised,var(--surface))}
 .sys-stat-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
-.sys-label{font-size:10px;letter-spacing:1.2px;color:var(--muted);font-weight:500;text-transform:uppercase}
-.sys-big{font-size:26px;font-weight:500;line-height:1.1;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
-.sys-big small{font-size:13px;color:var(--muted);margin-left:1px}
-.sys-sub{font-size:11px;color:var(--muted);overflow-wrap:anywhere}
+.sys-label{font-size:var(--fs-xs);letter-spacing:1.2px;color:var(--muted);font-weight:500;text-transform:uppercase}
+.sys-big{font-size:var(--fs-2xl);font-weight:500;line-height:1.1;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
+.sys-big small{font-size:var(--fs-sm);color:var(--muted);margin-left:1px}
+.sys-sub{font-size:var(--fs-xs);color:var(--muted);overflow-wrap:anywhere}
 .sys-bar{height:6px;border-radius:3px;background:var(--surface-muted);overflow:hidden;margin:7px 0 5px}
 .sys-bar>b{display:block;height:100%;border-radius:3px;background:var(--accent);transition:width .4s ease}
 .sys-bar.sys-thin{height:4px;margin:6px 0 4px}
@@ -65,28 +65,30 @@ const CSS = `
 .sys-spark path.sys-a{fill:var(--chart-area,var(--accent-soft));stroke:none}
 .sys-spark path.sys-l{fill:none;stroke:var(--chart-input,var(--accent));stroke-width:1.5;vector-effect:non-scaling-stroke;stroke-linejoin:round}
 .sys-spark.sys-mem path.sys-l{stroke:var(--chart-output,var(--green))}
+.sys-spark.sys-net path.sys-l{stroke:var(--chart-cache,var(--accent))}
 .sys-spark line{stroke:var(--line);stroke-width:1;vector-effect:non-scaling-stroke;stroke-dasharray:2 3}
-.sys-sec h3{font-size:12px;font-weight:500;margin:0 0 8px;display:flex;justify-content:space-between;gap:8px;align-items:baseline}
-.sys-sec h3 small{font-size:10px;color:var(--muted);font-weight:400}
+.sys-sec h3{font-size:var(--fs-xs);font-weight:500;margin:0 0 8px;display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.sys-sec h3 small{font-size:var(--fs-xs);color:var(--muted);font-weight:400}
 .sys-rows{display:grid;gap:10px}
 .sys-row{min-width:0}
-.sys-row-top{display:flex;justify-content:space-between;gap:10px;font-size:12px;align-items:baseline}
+.sys-row-top{display:flex;justify-content:space-between;gap:10px;font-size:var(--fs-xs);align-items:baseline}
 .sys-row-top>span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.sys-row-top>span:last-child{white-space:nowrap;color:var(--muted);font-variant-numeric:tabular-nums;font-size:11px}
-.sys-note{font-size:10px;color:var(--muted);display:block}
-.sys-mono{font-family:var(--mono,monospace);font-size:11px}
+.sys-sub-row{margin-top:var(--sp-2);color:var(--muted)}
+.sys-row-top>span:last-child{white-space:nowrap;color:var(--muted);font-variant-numeric:tabular-nums;font-size:var(--fs-xs)}
+.sys-note{font-size:var(--fs-xs);color:var(--muted);display:block}
+.sys-mono{font-family:var(--mono,monospace);font-size:var(--fs-xs)}
 .sys-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:var(--radius,8px);max-width:100%}
-.sys-table{width:100%;border-collapse:collapse;font-size:12px;min-width:460px}
-.sys-table th{font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);font-weight:500;text-align:left;padding:7px 10px;background:var(--surface-muted);white-space:nowrap}
+.sys-table{width:100%;border-collapse:collapse;font-size:var(--fs-xs);min-width:460px}
+.sys-table th{font-size:var(--fs-xs);letter-spacing:.8px;text-transform:uppercase;color:var(--muted);font-weight:500;text-align:left;padding:7px 10px;background:var(--surface-muted);white-space:nowrap}
 .sys-table td{padding:7px 10px;border-top:1px solid var(--line);vertical-align:top}
 .sys-table .sys-n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .sys-table td.sys-proc{max-width:260px}
 .sys-table td.sys-proc strong{font-weight:500}
-.sys-table td.sys-proc .sys-cmd{display:block;color:var(--muted);font-family:var(--mono,monospace);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sys-toggle{margin-top:8px;font-size:11px;color:var(--accent);padding:4px 0}
-.sys-notes{margin:0;padding:0;list-style:none;font-size:10px;color:var(--muted)}
-.sys-empty{font-size:12px;color:var(--muted);padding:6px 0}
-@media (max-width:480px){.sys-body{padding:14px 12px 14px}.sys-big{font-size:22px}}
+.sys-table td.sys-proc .sys-cmd{display:block;color:var(--muted);font-family:var(--mono,monospace);font-size:var(--fs-xs);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sys-toggle{margin-top:8px;font-size:var(--fs-xs);color:var(--accent);padding:4px 0}
+.sys-notes{margin:0;padding:0;list-style:none;font-size:var(--fs-xs);color:var(--muted)}
+.sys-empty{font-size:var(--fs-xs);color:var(--muted);padding:6px 0}
+@media (max-width:480px){.sys-body{padding:14px 12px 14px}.sys-big{font-size:var(--fs-2xl)}}
 `;
 
 function injectStyle() {
@@ -102,8 +104,8 @@ function bar(p, cls = '') {
   return `<div class="sys-bar ${cls} sys-${tone(v)}" role="presentation"><b style="width:${num(v, 1)}%"></b></div>`;
 }
 
-function spark(key, cls) {
-  const pts = history.map(h => pct(h[key]));
+function spark(key, cls, scale = 1) {
+  const pts = history.map(h => pct((+h[key] || 0) * scale));
   if (!pts.length) return `<svg class="sys-spark ${cls}" viewBox="0 0 100 44" preserveAspectRatio="none" aria-hidden="true"></svg>`;
   if (pts.length === 1) pts.push(pts[0]);
   const n = pts.length - 1;
@@ -128,10 +130,14 @@ function header(s) {
 function stats(s) {
   const c = s.cpu || {}, m = s.mem || {};
   const cp = pct(c.pct), mp = pct(m.pct);
-  const swap = m.swap_total_b ? ` &middot; swap ${esc(bytes(m.swap_used_b))}` : '';
+  const sp = pct(m.swap_pct);
+  const net = s.net;
+  const ntone = !net || net.status === 'unknown' ? 'ok' : net.status === 'offline' ? 'bad' : net.status === 'degraded' || net.ms > 150 ? 'warn' : 'ok';
   return `<div class="sys-stats">
 <div class="sys-stat"><div class="sys-stat-top"><span class="sys-label">CPU</span><span class="sys-sub">${esc(num(c.count))} cores</span></div><div class="sys-big sys-t-${tone(cp)}">${esc(num(cp))}<small>%</small></div>${bar(cp)}<div class="sys-sub">whole machine</div>${spark('cpu', 'sys-cpu')}</div>
-<div class="sys-stat"><div class="sys-stat-top"><span class="sys-label">RAM</span><span class="sys-sub">${esc(bytes(m.available_b))} free</span></div><div class="sys-big sys-t-${tone(mp)}">${esc(num(mp))}<small>%</small></div>${bar(mp)}<div class="sys-sub">${esc(bytes(m.used_b))} used of ${esc(bytes(m.total_b))}${swap}</div>${spark('mem', 'sys-mem')}</div>
+<div class="sys-stat"><div class="sys-stat-top"><span class="sys-label">RAM</span><span class="sys-sub">${esc(bytes(m.available_b))} free</span></div><div class="sys-big sys-t-${tone(mp)}">${esc(num(mp))}<small>%</small></div>${bar(mp)}<div class="sys-sub">${esc(bytes(m.used_b))} used of ${esc(bytes(m.total_b))}</div>${spark('mem', 'sys-mem')}</div>
+${net ? `<div class="sys-stat"><div class="sys-stat-top"><span class="sys-label">Internet</span><span class="sys-sub">${esc(net.status)}</span></div><div class="sys-big sys-t-${ntone}">${net.ms != null ? esc(num(net.ms)) + '<small>ms</small>' : '&mdash;'}</div><div class="sys-sub" title="TCP connect time, close to a ping; checked every 10 s">${(net.targets || []).map(t => esc(t.name) + ' ' + (t.ms != null ? esc(num(t.ms)) + ' ms' : 'no answer')).join(' &middot; ')}</div>${spark('net', 'sys-net', 0.5)}</div>` : ''}
+${m.swap_total_b ? `<div class="sys-stat"><div class="sys-stat-top"><span class="sys-label">Swap</span><span class="sys-sub">${esc(bytes(m.swap_total_b - m.swap_used_b))} free</span></div><div class="sys-big sys-t-${tone(sp)}">${esc(num(sp))}<small>%</small></div>${bar(sp)}<div class="sys-sub">${esc(bytes(m.swap_used_b))} used of ${esc(bytes(m.swap_total_b))}</div></div>` : ''}
 </div>`;
 }
 
@@ -140,7 +146,10 @@ function disks(s) {
     const p = pct(d.pct);
     const label = d.mount === '/tmp' ? '/tmp' : (d.paths || []).map(x => x === 'project' ? 'project' : x).join(', ') || d.mount;
     const tmp = d.mount === '/tmp' ? '<span class="sys-note">RAM-backed tmpfs, per-user quota</span>' : `<span class="sys-note">${esc(d.mount)} &middot; ${esc(d.fs)}</span>`;
-    return `<div class="sys-row"><div class="sys-row-top"><span class="sys-mono" title="${esc(d.path)}">${esc(label)}</span><span>${esc(gib(d.used_b))} / ${esc(gib(d.total_b))} GiB &middot; ${esc(num(p))}%</span></div>${bar(p, 'sys-thin')}${tmp}</div>`;
+    const q = d.quota, qp = q && q.limit_b ? pct(q.used_b * 100 / q.limit_b) : null;
+    const quota = q && q.limit_b ? `<div class="sys-row-top sys-sub-row"><span>Your quota</span><span>${esc(gib(q.used_b))} / ${esc(gib(q.limit_b))} GiB &middot; ${esc(num(qp))}%</span></div>${bar(qp, 'sys-thin')}` : '';
+    const inodes = d.inodes_total ? `<div class="sys-row-top sys-sub-row"><span>Inodes${q && q.inode_limit ? ' (your limit ' + esc(num(q.inode_limit)) + ')' : ''}</span><span>${esc(num(d.inodes_used))} / ${esc(num(d.inodes_total))} &middot; ${esc(num(pct(d.inodes_pct)))}%</span></div>${bar(pct(d.inodes_pct), 'sys-thin')}` : '';
+    return `<div class="sys-row"><div class="sys-row-top"><span class="sys-mono" title="${esc(d.path)}">${esc(label)}</span><span>${esc(gib(d.used_b))} / ${esc(gib(d.total_b))} GiB &middot; ${esc(num(p))}%</span></div>${bar(p, 'sys-thin')}${quota}${inodes}${tmp}</div>`;
   });
   return `<div class="sys-sec"><h3>Disks</h3><div class="sys-rows">${rows.join('') || '<div class="sys-empty">No disks read.</div>'}</div></div>`;
 }
@@ -193,7 +202,7 @@ async function tick(force = false) {
     if (s && s.error) throw new Error(s.error);
     const prev = history[history.length - 1];
     if (!prev || prev.t !== s.ts) {
-      history.push({t: s.ts, cpu: +(s.cpu && s.cpu.pct) || 0, mem: +(s.mem && s.mem.pct) || 0});
+      history.push({t: s.ts, cpu: +(s.cpu && s.cpu.pct) || 0, mem: +(s.mem && s.mem.pct) || 0, net: s.net && s.net.ms != null ? +s.net.ms : 0});
       if (history.length > HISTORY) history = history.slice(-HISTORY);
     }
     last = s;

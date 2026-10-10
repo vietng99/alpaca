@@ -331,6 +331,165 @@ def build_checker(root):
 
 
 # ------------------------------------------------------------------------------ the schema
+#: the definitions of the research block, one per part (design/research-engine/runbook-format-3.md
+#: section 13.3); each is also written as `<name>_layered`, the shape alone, for a block that
+#: names a defaults file
+RESEARCH_DEFS = ("research", "research_repo", "research_metric", "research_accept", "research_paths",
+                 "research_fingerprint", "research_gate", "research_stop", "research_budget",
+                 "research_proposal_field", "research_category", "research_lessons", "research_controls",
+                 "research_holdout", "research_repair", "research_case", "research_fail_to_pass",
+                 "research_pass_to_pass", "research_coupled", "research_runtime", "research_verifier",
+                 "research_audit", "research_egress")
+
+
+def _research_defs(block, ref, whole, slug, strict):
+    """{name: definition} of the research block (format 3), generated from the checker's research
+    tables as the format 2 definitions are. `strict` is a block that names no defaults file: it
+    holds every field its tables require (the engine layer fills only optional fields). The
+    layered form (`strict` False, names ending in `_layered`) is for a block that names one: the
+    file may give any field and any keyed-list item, so it states the shape of what the runbook
+    writes, and none of the requirements the merge could meet. A rule on two fields of one part
+    holds in both forms when the runbook writes both, since the runbook's value wins the merge."""
+    sfx = "" if strict else "_layered"
+    part = lambda name: ref("research_%s%s" % (name, sfx))                # noqa: E731
+    need = lambda *keys: {"required": list(keys)} if strict else {}       # noqa: E731
+    text, texts, path = ref("text"), ref("texts"), ref("path")
+
+    def table(tbl, props, extra=None):
+        return block(tbl, props, extra, required=strict)
+
+    def keyed(item, least=True):
+        # a keyed list merges by key, so a layered one may be empty: its items come from the file
+        out = {"type": "array", "items": item}
+        if least and strict:
+            out["minItems"] = 1
+        return out
+
+    def listed(item, least=0):
+        # a plain list replaces the file's whole, so its length is the runbook's
+        out = {"type": "array", "items": item}
+        if least:
+            out["minItems"] = least
+        return out
+
+    def above(low, high):
+        return {"type": "number", "minimum": low, "not": {"const": low}, "maximum": high}
+
+    timeout = whole(runbook.STAGE_TIMEOUT_RANGE)
+    no_var = {"not": {"pattern": runbook.VAR.pattern}}
+    # a root rule (section 2.2 of the design): the grammar _rule_problem of the checker reads
+    bad = ("^/", "\\\\", "\\*\\*", "~", "\\$\\{", "(^|/)\\.\\.(/|$)")
+    rule = {"type": "string", "pattern": "\\S", "not": {"anyOf": [{"pattern": p} for p in bad]},
+            "description": "a root rule: from the root of the repository the run works on, never "
+                           "absolute, with no `..` part, backslash, `**`, `~` or `${`"}
+    editable = {"allOf": [rule, {"not": {"enum": [".", "./", "*", "*/"]}}]}
+    rules = listed(rule)
+    location = {"type": "string", "pattern": "\\S", "not": {"anyOf": [{"pattern": "~"}, {"pattern": "\\$\\{"}]},
+                "description": "a folder on the host: absolute, or from the project root"}
+    extras = {"covers": texts, "source": text}
+    target_source = "^(spec|owner):\\S(.*\\S)?$"
+    roles = {role: False for role in runbook.AGENT_ROLES}
+    out = {}
+
+    out["research_repo" + sfx] = table(runbook.REPO_KEYS, {"path": location, "ref": text})
+    out["research_metric" + sfx] = table(runbook.METRIC_KEYS, dict(
+        extras, id=slug, description=text, command=text, workdir=path, parser={"enum": list(runbook.PARSERS)},
+        path=path, field=text, unit=text, direction={"enum": list(runbook.DIRECTIONS)},
+        kind={"enum": list(runbook.METRIC_KINDS)}, repeats=whole((1, 50)), min_ok=whole((1, 50)),
+        median={"enum": list(runbook.MEDIANS)}, margin={"type": "number", "minimum": 0},
+        seeds={"type": "array", "items": {"type": "integer"}}, timeout=timeout, target={"type": "number"},
+        artifact=text), {"allOf": [
+            # a markers metric reads a METRIC: line; a json-field metric names its file and field
+            {"if": {"required": ["parser"], "properties": {"parser": {"const": "markers"}}},
+             "then": {"properties": {"path": False, "field": False}}},
+            {"if": {"required": ["parser"], "properties": {"parser": {"const": "json-field"}}},
+             "then": need("path", "field")},
+            # a noisy metric declares its repeats, min_ok and margin, and needs two repeats
+            {"if": {"required": ["kind"], "properties": {"kind": {"const": "noisy"}}},
+             "then": dict(need("repeats", "min_ok", "margin"), properties={
+                 "repeats": {"minimum": 2}, "min_ok": {"minimum": 2}, "margin": {"not": {"const": 0}}})},
+            # a target names where it comes from: a spec item or an owner decision
+            {"if": {"required": ["target"]},
+             "then": {"required": ["source"], "properties": {"source": {"pattern": target_source}}}}]})
+    out["research_accept" + sfx] = table(runbook.ACCEPT_KEYS, dict(
+        extras, rule={"enum": list(runbook.ACCEPT_RULES)}, after_targets={"enum": list(runbook.AFTER_TARGETS)}))
+    out["research_paths" + sfx] = table(runbook.PATHS_KEYS, dict(
+        extras, editable=listed(editable, 1), protected=listed(rule, 1), hidden=rules, tests=rules,
+        read=listed(location), keep=rules, outputs=rules))
+    out["research_fingerprint" + sfx] = table(runbook.FINGERPRINT_KEYS, dict(
+        extras, tools={"type": "array", "items": {"type": "string", "pattern": runbook.TOOL.pattern}},
+        shared=listed(location)))
+    out["research_gate" + sfx] = table(runbook.GATE_ENTRY_KEYS, {
+        "stage": text, "heavy": {"type": "boolean"}, "lock_timeout": timeout})
+    out["research_stop" + sfx] = table(runbook.STOP_KEYS, dict(extras, rounds=whole((1, 100)),
+                                                                 slots=whole((1, 16))))
+    out["research_budget" + sfx] = table(runbook.BUDGET_KEYS, dict(
+        extras, usd=above(0, 1000000), tokens=whole((1000, 10 ** 12)), wall=whole((60, 30 * 24 * 3600))))
+    capped = sorted(runbook.PROPOSAL_MAX)
+    out["research_proposal_field" + sfx] = table(runbook.PROPOSAL_FIELD_KEYS, {
+        "field": {"type": "string", "pattern": runbook.PROPOSAL_FIELD.pattern},
+        "type": {"enum": list(runbook.PROPOSAL_TYPES)}, "required": {"type": "boolean"},
+        "values": listed(text, 1), "max": whole((1, 100000)), "description": text}, {"allOf": [
+            # an enum field lists its values, no other field has any; max caps a text or a list
+            {"if": {"required": ["type"], "properties": {"type": {"const": "enum"}}},
+             "then": need("values"), "else": {"if": {"required": ["type"]},
+                                              "then": {"properties": {"values": False}}}},
+            {"if": {"required": ["type"], "properties": {"type": {"not": {"enum": capped}}}},
+             "then": {"properties": {"max": False}}}]})
+    out["research_category" + sfx] = table(runbook.CATEGORY_KEYS, {"id": slug, "text": text})
+    out["research_lessons" + sfx] = table(runbook.LESSONS_KEYS, {"file": path, "note_chars": whole((40, 2000))})
+    out["research_controls" + sfx] = table(runbook.CONTROLS_KEYS, dict(
+        extras, noop_rounds=whole((2, 10)), random={"type": "boolean"}, mutate={"allOf": [path, no_var]},
+        syntax=text, seed=whole((0, 2 ** 31))),
+        # the random-edit control needs its mutation script and the gate stage a mutation must pass
+        {"if": {"required": ["random"], "properties": {"random": {"const": True}}}, "then": need("mutate", "syntax")})
+    out["research_holdout" + sfx] = table(runbook.HOLDOUT_KEYS, dict(extras, stages=texts, paths=rules))
+    out["research_fail_to_pass" + sfx] = table(runbook.F2P_KEYS, {
+        "origin": {"enum": list(runbook.F2P_ORIGINS)}, "command": text, "tests": texts, "timeout": timeout,
+        "repeats": whole((1, 20))},
+        # a store case names the tests its reproducer turns from FAIL to PASS
+        {"if": {"required": ["origin"], "properties": {"origin": {"const": "store"}}}, "then": need("tests")})
+    out["research_pass_to_pass" + sfx] = table(runbook.P2P_KEYS, dict(
+        extras, command=text, min_tests=whole((1, 100000)), timeout=timeout))
+    out["research_case" + sfx] = table(runbook.CASE_KEYS, dict(
+        extras, id=slug, bug_report=path, base={"type": "string", "pattern": runbook.COMMIT.pattern},
+        fail_to_pass=part("fail_to_pass"), suspect_files=rules))
+    out["research_repair" + sfx] = table(runbook.REPAIR_KEYS, {
+        "cases": keyed(part("case")), "pass_to_pass": part("pass_to_pass"), "prepare": text})
+    out["research_coupled" + sfx] = table(runbook.COUPLED_KEYS, {"id": slug, "files": listed(rule, 2), "note": text})
+    out["research_runtime" + sfx] = table(runbook.RUNTIME_KEYS, {
+        "timeouts": block(roles, {role: timeout for role in roles}),
+        "effort": block(roles, {role: {"enum": list(runbook.EFFORTS)} for role in roles}),
+        "retries": whole((0, 10))})
+    out["research_verifier" + sfx] = table(runbook.VERIFIER_KEYS, {"timeout": timeout, "rerun_timeout": timeout})
+    out["research_audit" + sfx] = table(runbook.AUDIT_KEYS, {
+        "hints": text, "assert_tokens": texts, "build_files": rules, "steering": texts})
+    out["research_egress" + sfx] = table(runbook.EGRESS_KEYS, {
+        "allow": {"type": "array", "items": {"type": "string", "pattern": runbook.HOST.pattern}}})
+
+    # the block: which parts each mode needs and allows, and the proposal fields it reserves
+    modes = []
+    for mode, bound in runbook.MODE_KEYS.items():
+        then = {"properties": {key: False for key, req in bound.items() if req is None}}
+        then.update(need(*[key for key, req in bound.items() if req]))
+        then["properties"]["proposal"] = {"items": {"properties": {"field": {"not": {
+            "enum": list(runbook.PROPOSAL_BASE[mode])}}}}}
+        modes.append({"if": {"required": ["mode"], "properties": {"mode": {"const": mode}}}, "then": then})
+    out["research" + sfx] = table(runbook.RESEARCH_KEYS, {
+        "mode": {"enum": list(runbook.MODES)}, "defaults": path, "repo": part("repo"),
+        "metrics": keyed(part("metric")), "accept": part("accept"), "paths": part("paths"),
+        "fingerprint": part("fingerprint"), "gates": listed(part("gate"), 1), "stop": part("stop"),
+        "budget": part("budget"), "disk": above(0, 100000), "proposal": keyed(part("proposal_field"), least=False),
+        "categories": keyed(part("category")), "lessons": part("lessons"), "controls": part("controls"),
+        "holdout": part("holdout"), "repair": part("repair"), "coupled": keyed(part("coupled"), least=False),
+        "runtime": part("runtime"), "verifier": part("verifier"), "audit": part("audit"),
+        "egress": part("egress")}, {"allOf": modes})
+    missing = {name + sfx for name in RESEARCH_DEFS} ^ set(out)
+    if missing:
+        raise KitError("the research definitions and RESEARCH_DEFS differ on %s" % ", ".join(sorted(missing)))
+    return out
+
+
 def schema():
     """runbook.schema.json (draft 2020-12), generated from the checker's field tables."""
     text = {"type": "string", "pattern": "\\S"}
@@ -338,12 +497,14 @@ def schema():
     ref = lambda name: {"$ref": "#/$defs/%s" % name}          # noqa: E731
     slug = {"type": "string", "pattern": runbook.SLUG.pattern}
 
-    def block(table, props, extra=None):
+    def block(table, props, extra=None, required=True):
         missing = set(table) ^ set(props)
         if missing:
             raise KitError("the schema and the checker tables differ on %s" % ", ".join(sorted(missing)))
         out = {"type": "object", "properties": {k: props[k] for k in table},
                "required": [k for k, req in table.items() if req], "additionalProperties": False}
+        if not required:
+            del out["required"]
         out.update(extra or {})
         return out
 
@@ -444,6 +605,8 @@ def schema():
          # a recovery stage runs a command and is never an owner gate
          "allOf": [{"if": {"required": ["recovery"], "properties": {"recovery": {"const": True}}},
                     "then": {"required": ["run"], "not": {"required": ["owner_gate"]}}}]})
+    for strict in (True, False):
+        defs.update(_research_defs(block, ref, whole, slug, strict))
     # a `runbook: 1` file has none of the fields format 2 added
     no = lambda name: {k: False for k in runbook.SINCE_2[name]}      # noqa: E731
     format_1 = {"properties": {
@@ -451,18 +614,36 @@ def schema():
         "stages": {"items": {"properties": dict(
             no("stage"), checks={"items": {"properties": no("check")}},
             fails={"items": {"properties": no("fail")}}, owner_gate={"properties": no("gate")})}}}}
+    version = lambda values: {"required": ["runbook"], "properties": {"runbook": {"enum": values}}}  # noqa: E731
     top = block(runbook.TOP_KEYS, {
-        "runbook": {"enum": list(runbook.FORMATS)}, "id": slug, "title": ref("text"),
+        "runbook": {"enum": list(runbook.READ_FORMATS)}, "id": slug, "title": ref("text"),
         "description": ref("text"), "spec": ref("path"), "owner": ref("text"),
         "knobs": {"type": "array", "items": ref("knob")},
-        "stages": {"type": "array", "minItems": 1, "items": ref("stage")}},
-        {"if": {"required": ["runbook"], "properties": {"runbook": {"const": 1}}}, "then": format_1})
+        "stages": {"type": "array", "minItems": 1, "items": ref("stage")},
+        # the research block of a format 3 runbook: a block that names a defaults file may leave
+        # any field to that file, so only its shape is stated; any other block holds every
+        # required field itself
+        "research": {"if": {"type": "object", "required": ["defaults"]}, "then": ref("research_layered"),
+                     "else": ref("research")}},
+        {"allOf": [
+            {"if": version([1]), "then": format_1},
+            # a plain runbook has no research block; a research runbook has one and names its spec
+            {"if": version(list(runbook.FORMATS)), "then": {"not": {"required": ["research"]}}},
+            # and every stage command of it has a timeout, and no fail case waits for a person
+            {"if": version([runbook.RESEARCH_FORMAT]), "then": {
+                "required": ["research", "spec"],
+                "properties": {"stages": {"items": {
+                    "if": {"required": ["run"]}, "then": {"required": ["timeout"]},
+                    "properties": {"fails": {"items": {"properties": {
+                        "then": {"not": {"const": "ask-owner"}}}}}}}}}}}]})
     out = {"$schema": "https://json-schema.org/draft/2020-12/schema",
            "title": "Alpaca runbook, format %d" % runbook.FORMAT,
            "description": "The shape of runbook.yaml (FORMAT.md), format %d; a `runbook: 1` file is "
-                          "read too, without the fields format %d added. check_runbook.py is the "
-                          "authority: a file this schema accepts can still fail the checker."
-                          % (runbook.FORMAT, runbook.FORMAT),
+                          "read too, without the fields format %d added, and a `runbook: %d` file is "
+                          "a research runbook: format %d plus a `research` block and a `spec`. "
+                          "check_runbook.py is the authority: a file this schema accepts can still "
+                          "fail the checker."
+                          % (runbook.FORMAT, runbook.FORMAT, runbook.RESEARCH_FORMAT, runbook.FORMAT),
            "$comment": "Generated by the kit build from the checker's field tables. A JSON Schema "
                        "cannot state these checker rules: ids unique in the runbook, needs naming "
                        "an earlier stage, ${NAME} naming a knob or built-in variable, retry lists "
@@ -472,7 +653,15 @@ def schema():
                        "path that leaves the folder only after normalising, a whole number written "
                        "as 2.0, keys given twice, a fail case sending to a recovery stage that "
                        "exists and is not itself, no stage needing a recovery stage, the shape of a "
-                       "source, numbered edge cases, and coverage of the spec."}
+                       "source, numbered edge cases, and coverage of the spec. For a research "
+                       "runbook (runbook: 3) it cannot state either: the merge of a defaults file "
+                       "(a block that names one is checked for its shape only, since the file may "
+                       "give any field), coverage by metrics, cases and parts (COVERS-NONE), the "
+                       "stage roles (STAGE-UNKNOWN, STAGE-ROLE, STAGE-UNUSED), GATES-ORDER, "
+                       "PATHS-OVERLAP, TARGET-SOURCE beyond the source a metric with a target "
+                       "carries itself, ACCEPT-RULE-MISMATCH, KNOB-MOVES-BAR, PACK-OUTSIDE-REPO, "
+                       "a template placeholder in a text field (FIELD-UNFILLED), min_ok above "
+                       "repeats, one seed per repeat, and the files a block names."}
     out.update(top)
     out["$defs"] = defs
     return out
@@ -696,8 +885,11 @@ def compose(root):
             name = "example/" + rel[len(EXAMPLE) + 1:]
             files[name] = _guard(_read(root, rel), name, rel, EXAMPLE_ALLOW.get(name, ()))
     files["LICENSE"] = _read(root, "LICENSE")
-    files["VERSION"] = _guard("format: %d\nkit: %s\nproduct_commit: %s\nsources_sha256: %s\n" % (
-        runbook.FORMAT, KIT_NAME, _commit(root), _sources_digest(root)), "VERSION", "the build")
+    # format: the plain format the kit is named for; research_format: the research runbook's
+    files["VERSION"] = _guard(
+        "format: %d\nresearch_format: %d\nkit: %s\nproduct_commit: %s\nsources_sha256: %s\n" % (
+            runbook.FORMAT, runbook.RESEARCH_FORMAT, KIT_NAME, _commit(root), _sources_digest(root)),
+        "VERSION", "the build")
     data = {}
     for rel, text in files.items():
         raw = text.encode("utf-8")

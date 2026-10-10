@@ -1,0 +1,26 @@
+Compare two sorted files line by line.
+
+When FILE1 or FILE2 (not both) is -, read standard input.
+
+With no options, produce three-column output. Column one contains
+lines unique to FILE1, column two contains lines unique to FILE2,
+and column three contains lines common to both files.
+
+Usage: comm [OPTION]... FILE1 FILE2
+
+Arguments:
+  <FILE1>  
+  <FILE2>  
+
+Options:
+  -1                            suppress column 1 (lines unique to FILE1)
+  -2                            suppress column 2 (lines unique to FILE2)
+  -3                            suppress column 3 (lines that appear in both files)
+      --output-delimiter <STR>  separate columns with STR
+  -z, --zero-terminated         line delimiter is NUL, not newline
+      --total                   output a summary
+      --check-order             check that the input is correctly sorted, even if all input lines
+                                are pairable
+      --nocheck-order           do not check that the input is correctly sorted
+  -h, --help                    Print help
+  -V, --version                 Print version

@@ -125,19 +125,19 @@ def select_members(root, *, keep_identity=False):
     The population is the git-tracked set, minus the identity file in template mode. A symlink or any
     non-regular file is refused: a shipment is regular files only. The complete relpath population is
     validated against the shipment path policy (memory class + host-local floor) before any byte is
-    written, so a memory path cannot enter the archive even if the ignore rules ever drift.
+    written, so a memory path cannot enter the archive even if the ignore rules ever drift. The
+    policy reads paths only, so it runs before any file is looked at: a checkout that leaves a
+    tracked memory path off the disk (a sparse worktree) gets the policy refusal too.
     """
     root = os.path.abspath(root)
+    rels = sorted(rel for rel in _tracked_files(root) if keep_identity or rel != IDENTITY_FILE)
+    _policy.validate_staged_paths(rels, forbidden=_policy.forbidden_for_root(root))
     members = {}
-    for rel in _tracked_files(root):
-        if not keep_identity and rel == IDENTITY_FILE:
-            continue
+    for rel in rels:
         full = os.path.join(root, *PurePosixPath(rel).parts)
         if os.path.islink(full) or not os.path.isfile(full):
             raise ReleaseError("release refuses a non-regular or missing tracked file: %s" % rel)
         members[rel] = _mode_of(full)
-    rels = sorted(members)
-    _policy.validate_staged_paths(rels, forbidden=_policy.forbidden_for_root(root))
     return [(rel, members[rel]) for rel in rels]
 
 

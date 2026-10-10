@@ -77,6 +77,70 @@ def test_package_reproducible_clean_and_extracts_with_spaces(tmp_path):
     assert result.returncode == 0 and "alpaca fixture" in result.stdout
 
 
+def test_codex_shield_entry_and_its_targets_survive_shipment(tmp_path):
+    from alpaca import manifest
+    ship = _load("ship")
+    root = _fixture(tmp_path)
+    skill_paths = (".agents/skills/shield/", ".claude/skills/shield/")
+    assert set(skill_paths) <= set(manifest.mechanism(str(REPO)))
+    for rel in skill_paths:
+        shutil.copytree(REPO / rel, root / rel)
+    allowlist = root / "ALPACA-MANIFEST"
+    allowlist.write_text(allowlist.read_text().replace(
+        "[memory]", "\n".join(skill_paths) + "\n[memory]"))
+    archive = tmp_path / "shield.tar.gz"
+    ship.build(root, archive)
+    _manifest, content = ship.verify(archive)
+    expected = (".agents/skills/shield/SKILL.md", ".claude/skills/shield/SKILL.md",
+                ".claude/skills/shield/codex.md")
+    for rel in expected:
+        assert content[rel] == (REPO / rel).read_bytes()
+    extracted = tmp_path / "installed"
+    ship.extract(archive, extracted)
+    import re
+    entry = extracted / expected[0]
+    for target in re.findall(r"\]\(([^)]+)\)", entry.read_text()):
+        assert (entry.parent / target).resolve().is_file()
+
+
+def _commit_fixture(root):
+    for args in (["init", "-q", "-b", "main"], ["config", "user.name", "Fixture"],
+                 ["config", "user.email", "fixture@example.com"], ["config", "commit.gpgsign", "false"],
+                 ["add", "-A"], ["commit", "-qm", "fixture"]):
+        subprocess.run(["git", "-C", str(root), *args], check=True)
+
+
+def test_repository_ships_only_the_source_commit(tmp_path):
+    """In a repository only the source commit's files ship, the boundary the release build uses
+    (t-071 F-1, review M-2): a gitignored store, an untracked file and a file staged (even past an
+    ignore rule) but not committed stay behind."""
+    ship = _load("ship")
+    root = _fixture(tmp_path)
+    (root / ".gitignore").write_text("/alpaca/hidden/\n.alpaca/\n")
+    _commit_fixture(root)
+    (root / "alpaca" / "hidden").mkdir()
+    (root / "alpaca" / "hidden" / "run.sh").write_text("echo reproducer\n")
+    (root / "alpaca" / "scratch.py").write_text("print('not added')\n")
+    (root / "alpaca" / "staged.py").write_text("print('staged, not committed')\n")
+    (root / "alpaca" / "hidden" / "forced.sh").write_text("echo forced\n")
+    subprocess.run(["git", "-C", str(root), "add", "alpaca/staged.py"], check=True)
+    subprocess.run(["git", "-C", str(root), "add", "--force", "alpaca/hidden/forced.sh"], check=True)
+    archive = tmp_path / "tracked.tar.gz"
+    ship.build(root, archive)
+    _manifest, content = ship.verify(archive)
+    assert "alpaca/__init__.py" in content
+    assert not [n for n in content if n.startswith("alpaca/hidden/")
+                or n in ("alpaca/scratch.py", "alpaca/staged.py")]
+
+
+def test_ship_and_release_build_share_the_source_commit_selection():
+    """One helper names the source commit's files for both builders (review M-2)."""
+    policy = _load("shipment_policy")
+    from alpaca.release import build
+    assert build.committed_paths is policy.committed_paths or \
+        build.committed_paths.__code__.co_filename == policy.committed_paths.__code__.co_filename
+
+
 @pytest.mark.parametrize("bad", ["name: inherited-project\n", "project_id: old-id\n",
                                  "people:\n- name: previous-owner\n",
                                  "cwd_history:\n- /old/project\n"])

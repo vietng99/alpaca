@@ -6,6 +6,7 @@ laws are refused and must be rebuilt into a fresh store.
 """
 from __future__ import annotations
 
+import functools
 from importlib import metadata
 import os
 import re
@@ -19,7 +20,7 @@ from ..config import Config
 _SOURCE_SCHEMA_PATH = Path(__file__).resolve().parents[2] / "schema" / "schema.sql"
 _PACKAGED_SCHEMA_PATH = Path(__file__).resolve().parents[1] / "schema.sql"
 _INSTALLED_SCHEMA_SUFFIX = ("share", "rune2", "schema", "schema.sql")
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
 REBUILD_LOCK_NAME = ".rune2-rebuild.lock"
 
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -356,6 +357,35 @@ END;
     return sql[:start] + fallback + sql[end:]
 
 
+_CREATED = re.compile(r"CREATE\s+(?:VIRTUAL\s+)?(?:TABLE|INDEX|TRIGGER|VIEW)\s+IF\s+NOT\s+EXISTS\s+"
+                      r"([A-Za-z_][A-Za-z0-9_]*)\b", re.I)
+
+
+@functools.lru_cache(maxsize=4)
+def _schema_statements(sql: str) -> tuple:
+    """The statements of a schema script, one by one, as (name, statement), so `DB.pour` runs them
+    inside its own transaction (`executescript` commits first). `name` is the object a
+    `CREATE ... IF NOT EXISTS` statement creates, None for any other statement (always run). A
+    statement ends where `sqlite3.complete_statement` says it does, so a trigger body's inner
+    semicolons stay with it. `PRAGMA` lines are left out: the connection sets its pragmas when it
+    opens, and a pragma inside a transaction is a no-op."""
+    out, buf = [], []
+    for line in sql.splitlines(keepends=True):
+        buf.append(line)
+        text = "".join(buf)
+        if sqlite3.complete_statement(text):
+            statement = text.strip()
+            body = "\n".join(l for l in statement.splitlines() if not l.strip().startswith("--")).strip()
+            if body and not body.upper().startswith("PRAGMA"):
+                created = _CREATED.match(body)
+                out.append((created.group(1) if created else None, statement))
+            buf = []
+    tail = "".join(buf).strip()
+    if any(l.strip() and not l.strip().startswith("--") for l in tail.splitlines()):
+        raise RuntimeError("schema script ends inside a statement")
+    return tuple(out)
+
+
 def _table_uses_fts5(conn: sqlite3.Connection) -> bool:
     row = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='blocks_fts'"
@@ -560,7 +590,37 @@ SEED_PREDICATES: list[tuple] = [
     ("born_on",   None,          "person", "date",   "deterministic", "single", "subj+predicate"),
     ("located_in","contains",    "org",    "place",  "deterministic", "single", "subj+predicate"),
     ("related_to",None,          "concept","concept","llm-allowed",   "multi",  "subj+predicate+obj"),
+    # Alpaca predicates (architecture.md 8.1): the record rules of ingest/record_extract.py write
+    # these from structured record fields, with no model. The ones in LLM_ALLOWED_ALPACA may also be
+    # proposed by the live session agent as a fact candidate (architecture.md 7.2 K-3); the rest
+    # (identity, placement and proof links) are the record rules' alone.
+    ("in_op",         None, "task",     "op",          "deterministic", "single", "subj+predicate"),
+    ("sourced_from",  None, "task",     "decision",    "llm-allowed",   "multi",  "subj+predicate+obj"),
+    ("status",        None, "task",     "status",      "llm-allowed",   "single", "subj+predicate"),
+    ("proved_by",     None, "task",     "proof",       "deterministic", "single", "subj+predicate"),
+    ("proves",        None, "proof",    "task",        "deterministic", "multi",  "subj+predicate+obj"),
+    ("choice",        None, "decision", "string",      "llm-allowed",   "single", "subj+predicate"),
+    ("failed_with",   None, "session",  "error-class", "llm-allowed",   "multi",  "subj+predicate+obj"),
+    ("operator",      None, "session",  "string",      "deterministic", "single", "subj+predicate"),
+    ("handed_off_to", None, "session",  "target",      "llm-allowed",   "multi",  "subj+predicate+obj"),
 ]
+
+
+#: The Alpaca predicates an agent fact candidate may use (extraction `llm-allowed`, op-008 t-066).
+LLM_ALLOWED_ALPACA = ("sourced_from", "status", "choice", "failed_with", "handed_off_to")
+
+
+def holds_something(conn) -> bool:
+    """Whether the store behind `conn` holds a document or an accepted row, or an import has claimed
+    it (`Writer.claim_for_import`, the `meta` row `DB.IMPORT_CLAIM_KEY`). `recovery.store_is_empty`
+    and the import claim read this one rule."""
+    for table in ("docs", "candidates", "exclusions", "corrections"):
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                        (table,)).fetchone() and conn.execute(
+                            "SELECT 1 FROM %s LIMIT 1" % table).fetchone():
+            return True
+    return bool(conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='meta'").fetchone()
+                and conn.execute("SELECT 1 FROM meta WHERE key=?", (DB.IMPORT_CLAIM_KEY,)).fetchone())
 
 
 class DB:
@@ -633,17 +693,35 @@ class DB:
 
     # ---- lifecycle -------------------------------------------------------
     def pour(self) -> None:
-        """Apply the schema once and seed meta + predicate vocabulary. Idempotent."""
-        self._assert_existing_schema_constraints()
-        migrated_before_schema = self._migrate_existing_tables()
+        """Apply the schema once and seed meta + predicate vocabulary. Idempotent.
+
+        The additive migrations, every schema statement the store lacks and the seed rows run in one
+        `BEGIN IMMEDIATE` transaction (t-070 fix plan RC1, finding m-adv-5): a second process that opens a fresh store while the first creates it waits
+        for the write lock and then finds the schema whole, and a reader sees either no table or all of
+        them, never `blocks` missing beside `docs`."""
         schema_sql = load_schema_sql()
         if not _fts5_available(self.conn):
             schema_sql = _schema_with_fts_fallback(schema_sql)
-        self.conn.executescript(schema_sql)
-        migrated_after_schema = self._migrate_existing_tables()
-        migrated = migrated_before_schema or migrated_after_schema
+        statements = _schema_statements(schema_sql)
+        # A legacy table that lacks a required constraint is refused before the lock: the canonical
+        # schema a concurrent pour writes always has them, so no commit can make this check fail later.
+        self._assert_existing_schema_constraints()
         self.conn.execute("BEGIN IMMEDIATE")
         try:
+            migrated_before_schema = self._migrate_existing_tables()
+            # Every schema statement is `CREATE ... IF NOT EXISTS <name>`: one that names an object the
+            # store holds is a no-op, so only the missing ones run (the lock is held no longer than
+            # before for a store that is whole).
+            present = {r[0] for r in self.conn.execute("SELECT name FROM sqlite_master")}
+            created = False
+            for name, statement in statements:
+                if name is None or name not in present:
+                    self.conn.execute(statement)
+                    created = True
+            # a table the schema just created may still lack a migration-only column; with nothing
+            # created, the migration above already saw every table
+            migrated_after_schema = self._migrate_existing_tables() if created else False
+            migrated = migrated_before_schema or migrated_after_schema
             if migrated and self._table_exists("blocks_fts") and _table_uses_fts5(self.conn):
                 self.conn.execute("INSERT INTO blocks_fts(blocks_fts) VALUES('rebuild')")
             for k, v in self.cfg.meta.items():
@@ -668,7 +746,9 @@ class DB:
             return False
         changed: set[str] = set()
         added: dict[str, set[str]] = {}
-        self.conn.execute("BEGIN IMMEDIATE")
+        own_transaction = not self.conn.in_transaction
+        if own_transaction:
+            self.conn.execute("BEGIN IMMEDIATE")
         try:
             for table in existing:
                 for column, decl in _MIGRATION_COLUMNS[table]:
@@ -681,11 +761,13 @@ class DB:
                 for sql in _MIGRATION_BACKFILLS.get(table, ()):
                     self.conn.execute(sql)
         except BaseException:
-            self.conn.rollback()
+            if own_transaction:
+                self.conn.rollback()
             raise
         else:
-            self.commit()
-            self._secure_modes()
+            if own_transaction:
+                self.commit()
+                self._secure_modes()
         return bool(changed)
 
     def _assert_existing_schema_constraints(self) -> None:
@@ -752,6 +834,12 @@ class DB:
             " VALUES (?,?,?,?,?,?,?)",
             SEED_PREDICATES,
         )
+        # A store seeded before t-066 holds these rows as 'deterministic' and INSERT OR IGNORE leaves
+        # them: mark them here so the vocabulary does not depend on when the store was created.
+        marks = ",".join("?" * len(LLM_ALLOWED_ALPACA))
+        self.conn.execute(
+            f"UPDATE predicates SET extraction='llm-allowed' WHERE extraction='deterministic' "
+            f"AND predicate IN ({marks})", LLM_ALLOWED_ALPACA)
 
     def migrate_column(self, table: str, column: str, decl: str) -> None:
         """Additive per-column ALTER, guarded against the known-columns list."""
@@ -782,6 +870,24 @@ class DB:
         return True
 
     # ---- meta ------------------------------------------------------------
+    #: The `meta` row of a store built from the record (OB-19; architecture.md 10.2, 10.4): `wiki
+    #: recover` on an empty store and an import (alpaca/wiki/portable.py) land every source at the
+    #: `ts` of its record event, while live capture lags the event and no record event holds the live
+    #: capture time. The value is `record`; a live store has no such row. Written only through
+    #: `Writer.mark_knowledge_time_from_record`; read by the answer door for its trace note.
+    KNOWLEDGE_TIME_KEY = "knowledge_time"
+    #: The `meta` row an import writes first, under the write lock, when it finds the store empty
+    #: (`Writer.claim_for_import`, t-070 RC1): a second import, or a rebuild, then finds it held.
+    IMPORT_CLAIM_KEY = "import_claim"
+    #: The `meta` row holding the id of the last content-removing record act this store has
+    #: processed (a `wiki-withdrawal`, a `wiki-candidate-withdrawn`, an applied `wiki-correction`;
+    #: t-070 round 2 C-E). Written only by `Writer.record_removal_act` (a live door) and
+    #: `Writer.advance_removal_watermark` (the replay); read by the serving doors, which answer
+    #: `unavailable` (`store-behind-record`) while the record holds a later such act
+    #: (`service.removal_acts_pending`). A store without it counts as 0. `digest.accepted_digest`
+    #: reads no `meta`, so it is not part of the accepted state.
+    REMOVAL_ACTS_KEY = "removal_acts_through"
+
     def get_meta(self, key: str) -> Any:
         row = self.conn.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
         return row["value"] if row else None

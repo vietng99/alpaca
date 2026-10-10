@@ -43,7 +43,7 @@ def task(root):
     assert cli.main(['init']) == 0
     assert cli.main(['op', 'new', 'Repair capture', '--done-when', 'Visible evidence is searchable']) == 0
     conn = db.connect(root)
-    tid = ops.add_task(conn, 'op-001', 'Capture the decision substance', 'Capture', session='s')
+    tid = ops.add_task(conn, 'op-001', 'Capture the decision substance', 'Capture', phase='build', session='s')
     return conn, tid
 
 
@@ -121,19 +121,136 @@ def test_transcript_replacement_retires_old_searchable_version_and_survives_vaul
     conn.close()
 
 
-def test_registered_unreadable_transcript_keeps_consumer_checkpoint_for_retry(project):
+def _gap_rows(root):
+    conn = db.connect_readonly(root)
+    try:
+        issues = [dict(r) for r in conn.execute("SELECT * FROM obs_issue WHERE code='transcript-unavailable'")]
+        jobs = {r['session']: dict(r) for r in conn.execute('SELECT * FROM obs_projection_job')}
+        checkpoint = conn.execute("SELECT * FROM obs_consumer_checkpoint WHERE consumer='wiki'").fetchone()
+        failed = [dict(r) for r in conn.execute("SELECT * FROM obs_issue WHERE code='consumer-failed' AND resolved_at IS NULL")]
+        return issues, jobs, dict(checkpoint) if checkpoint else None, failed
+    finally:
+        conn.close()
+
+
+def _transcript_docs(root, sid):
+    import hashlib
+    folder = Path(drain.wiki_vault_dir(root), 'raw/transcripts', hashlib.sha256(sid.encode()).hexdigest()[:16])
+    return sorted(p.name for p in folder.glob('*.md')) if folder.is_dir() else []
+
+
+def test_wiki_consumer_continues_past_missing_source_and_records_gap(project):
+    conn = db.connect(project)
+    transcript(project, 'first', assistant='FIRST_MARKER')
+    transcript(project, 'last', assistant='LAST_MARKER')
+    private = Path(project, 'PRIVATE_HOME_DIR', 'gone.jsonl')
+    observability.expect_source(project, 'gone', 'claude', locator=str(private))
+    db.append_event(conn, session='first', actor='test', kind='session-checkpoint')
+    gone_event = db.append_event(conn, session='gone', actor='test', kind='heartbeat')
+    last_event = db.append_event(conn, session='last', actor='test', kind='session-checkpoint')
+    result = consumers.consume(project, conn)
+    assert result['wiki'] == {'status': 'ok', 'through_event': last_event['id']}
+    text = corpus(project)
+    assert 'FIRST_MARKER' in text and 'LAST_MARKER' in text
+    issues, jobs, checkpoint, failed = _gap_rows(project)
+    assert checkpoint['event_id'] == last_event['id'] and failed == []
+    assert [(i['code'], i['resolved_at']) for i in issues] == [('transcript-unavailable', None)]
+    assert 'gone' in issues[0]['detail']
+    assert jobs['gone']['status'] == 'pending' and jobs['gone']['event_id'] >= gone_event['id']
+    assert _transcript_docs(project, 'gone') == []
+    assert observability.coverage(project, 'gone')['complete'] is False
+    # The gap never leaks the private locator, in the issue or the retry job.
+    stored = json.dumps(issues) + json.dumps(list(jobs.values()))
+    assert 'PRIVATE_HOME_DIR' not in stored and str(private) not in stored
+    conn.close()
+
+
+def test_wiki_gap_replay_is_idempotent(project):
+    conn = db.connect(project)
+    observability.expect_source(project, 'gone', 'claude', locator=str(Path(project, 'absent.jsonl')))
+    db.append_event(conn, session='gone', actor='test', kind='heartbeat')
+    assert consumers.consume(project, conn)['wiki']['status'] == 'ok'
+    db.append_event(conn, session='gone', actor='test', kind='heartbeat')
+    second = db.append_event(conn, session='gone', actor='test', kind='heartbeat')
+    assert consumers.consume(project, conn)['wiki'] == {'status': 'ok', 'through_event': second['id']}
+    issues, jobs, checkpoint, failed = _gap_rows(project)
+    assert len(issues) == 1 and issues[0]['occurrences'] == 2 and issues[0]['resolved_at'] is None
+    assert list(jobs) == ['gone'] and jobs['gone']['event_id'] == second['id']
+    assert failed == [] and _transcript_docs(project, 'gone') == []
+    conn.close()
+
+
+def test_capture_wiki_default_still_raises_for_missing_source(project):
+    observability.expect_source(project, 'gone', 'claude', locator=str(Path(project, 'absent.jsonl')))
+    with pytest.raises(drain.TranscriptUnavailable):
+        consumers._capture_wiki(project, [], ['gone'])
+
+
+@pytest.mark.parametrize('shape', ['directory', 'dangling-link', 'unreadable-file', 'unsearchable-parent'])
+def test_present_but_broken_source_still_stops_wiki_consumer(project, shape):
+    import os
+    conn = db.connect(project)
+    broken = Path(project, 'locked', 'broken.jsonl') if shape == 'unsearchable-parent' else Path(project, 'broken.jsonl')
+    # Register first: registration stores the resolved locator, and the shape appears at it later.
+    observability.expect_source(project, 'odd', 'claude', locator=str(broken))
+    if shape == 'directory':
+        broken.mkdir()
+    elif shape == 'dangling-link':
+        broken.symlink_to(Path(project, 'nowhere.jsonl'))
+    elif shape == 'unsearchable-parent':
+        # A real file in a folder the collector cannot search: lstat fails with EACCES, not
+        # ENOENT, so the source is present but broken, never an absent gap.
+        broken.parent.mkdir()
+        broken.write_text('{"type":"user"}\n')
+        broken.parent.chmod(0)
+        if os.access(broken.parent, os.X_OK):
+            broken.parent.chmod(0o755)
+            pytest.skip('running with privileges that ignore file modes')
+    else:
+        broken.write_text('{"type":"user"}\n')
+        broken.chmod(0)
+        if os.access(broken, os.R_OK):
+            pytest.skip('running with privileges that ignore file modes')
+    db.append_event(conn, session='odd', actor='test', kind='session-checkpoint')
+    try:
+        result = consumers.consume(project, conn)
+    finally:
+        if shape == 'unsearchable-parent':
+            broken.parent.chmod(0o755)
+    assert result['wiki']['status'] == 'failed' and result['wiki']['through_event'] == 0
+    issues, jobs, checkpoint, failed = _gap_rows(project)
+    assert issues == [] and len(failed) == 1
+    conn.close()
+
+
+def test_registered_missing_transcript_is_a_retained_gap_cleared_by_restore(project):
     conn = db.connect(project)
     path = Path(project, 'missing.jsonl')
     observability.expect_source(project, 's', 'claude', locator=str(path))
-    db.append_event(conn, session='s', actor='test', kind='session-checkpoint')
+    event = db.append_event(conn, session='s', actor='test', kind='session-checkpoint')
     result = consumers.consume(project, conn)
-    assert result['wiki']['status'] == 'failed'
-    assert result['wiki']['through_event'] == 0
+    assert result['wiki'] == {'status': 'ok', 'through_event': event['id']}
+    assert consumers.run_snapshot_jobs(project, conn) == {'completed': 0, 'failed': 1}
+    issues, jobs, checkpoint, failed = _gap_rows(project)
+    assert issues[0]['resolved_at'] is None and jobs['s']['status'] == 'retry'
     path.write_text(json.dumps({'type': 'assistant', 'message': {'content': 'RECOVERED_MARKER'}}) + '\n')
-    conn.execute("UPDATE obs_consumer_checkpoint SET next_attempt=NULL WHERE consumer='wiki'")
-    result = consumers.consume(project, conn)
-    assert result['wiki']['status'] == 'ok'
+    conn.execute('UPDATE obs_projection_job SET next_attempt=NULL')
+    assert consumers.run_snapshot_jobs(project, conn) == {'completed': 1, 'failed': 0}
     assert 'RECOVERED_MARKER' in corpus(project)
+    issues, jobs, checkpoint, failed = _gap_rows(project)
+    assert issues[0]['resolved_at'] is not None and jobs['s']['status'] == 'done'
+    assert _transcript_docs(project, 's') != []
+    conn.close()
+
+
+def test_repeated_issue_updates_its_detail(project):
+    conn = db.connect(project)
+    with db.transaction(conn):
+        observability.issue(conn, 'consumer-failed', detail='wiki: PrivatePathViolation', identity='wiki')
+    with db.transaction(conn):
+        observability.issue(conn, 'consumer-failed', detail='wiki: TranscriptUnavailable', identity='wiki')
+    row = conn.execute("SELECT detail, occurrences FROM obs_issue WHERE code='consumer-failed'").fetchone()
+    assert tuple(row) == ('wiki: TranscriptUnavailable', 2)
     conn.close()
 
 

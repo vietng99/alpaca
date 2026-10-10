@@ -10,7 +10,14 @@ The failure and cost contract (M1.5) lives here so all five hooks inherit it:
 - `fail_open(fn)` swallows every exception, prints nothing on failure, and exits 0. It
   also arms a hard wall-clock deadline (SIGALRM) so a handler that wedges past the
   deadline is cut off and still exits 0, and it records the handler's own duration so the
-  analytics can show hook cost per session.
+  analytics can show hook cost per session. A signal reaches the handler only between two
+  bytecodes, and a call asleep in the kernel holds it off until the call returns (t-070 A-4:
+  60 s), so the wiki capture does not rely on it: `capture_step` runs it in a child process
+  that the capture runner stops from outside (alpaca/capture_runner.py). The hooks' other
+  steps that touch files the hook does not bound (pad, data push, hub tile, transcript
+  snapshot, analytics, profile refresh, consolidation) run the same way, through `run_step`
+  (alpaca/hook_steps.py, t-070 RC5): a step stopped at its share of the deadline leaves its
+  own failure record where it has one and turns the hook's outcome into `timeout`.
 """
 import json, os, sys, functools, select, signal, time
 from alpaca import paths, util
@@ -20,6 +27,8 @@ HOOK_DEADLINE_S = float(os.environ.get("ALPACA_HOOK_DEADLINE_S") or 8)  # hard c
 MAX_STDIN_BYTES = 4 * 1024 * 1024          # cap the read so an oversized flood cannot blow memory or time
 
 _STDIN_STASH = {}                          # last payload parsed, for the cost recorder in fail_open
+_WINDOW = {}                               # end (time.monotonic) of the running hook's hard deadline
+_STEP_FAULTS = []                          # (step, status, error type) of this hook run's steps (`run_step`)
 
 
 class _Deadline(BaseException):
@@ -81,8 +90,13 @@ def read_stdin(timeout_s: float = STDIN_DEADLINE_S) -> dict:
 def session_of(payload: dict) -> str:
     return str(payload.get("session_id") or payload.get("sessionId") or "unknown")
 
-def emit_context(event_name: str, text: str) -> None:
-    sys.stdout.write(json.dumps({"hookSpecificOutput": {"hookEventName": event_name, "additionalContext": text}}) + "\n")
+def emit_context(event_name: str, text: str, user_message=None) -> None:
+    """`text` goes to the agent's context; `user_message`, when given, is shown to the person
+    (Claude Code's systemMessage)."""
+    out = {"hookSpecificOutput": {"hookEventName": event_name, "additionalContext": text}}
+    if user_message:
+        out["systemMessage"] = user_message
+    sys.stdout.write(json.dumps(out) + "\n")
     sys.stdout.flush()
 
 def autodrive_level(sid: str, root=None):
@@ -261,6 +275,162 @@ def record_failure(payload, hook, exc):
         print('alpaca capture failed: '+hook+': '+type(exc).__name__,file=sys.stderr)
 
 
+def capture_budget(cap_s: float, share: float = 1.0, margin_s: float = 1.0) -> float:
+    """Seconds a hook may give to wiki capture (FR-8): at most `cap_s`, and at most `share` of what
+    is left of the hook's hard deadline after `margin_s`, so the capture stops itself, records
+    `capture-deferred` and returns before the hard deadline cuts the process. Never below half a
+    second. Outside a `fail_open` hook (a test, a verb) only `cap_s` applies."""
+    end = _WINDOW.get("end")
+    if end is None:
+        return float(cap_s)
+    return max(0.5, min(float(cap_s), share * (end - time.monotonic() - margin_s)))
+
+
+def hook_time_left(margin_s: float = 1.5):
+    """Seconds until `margin_s` before the running hook's hard deadline, never below 0.1, or None
+    outside a `fail_open` hook."""
+    end = _WINDOW.get("end")
+    return None if end is None else max(0.1, end - time.monotonic() - margin_s)
+
+
+#: Seconds before the hook's hard deadline at which the capture runner stops the capture, which
+#: leaves the hook time to record the outcome and finish (t-070 RC4).
+CAPTURE_KILL_MARGIN_S = 1.0
+
+
+class CaptureFailed(RuntimeError):
+    """A capture run under `_strict` (the checkpoint verb) that failed; its outcome is recorded."""
+
+
+def capture_step(payload, hook, *, cap_s: float, share: float = 1.0, transcripts: bool = True):
+    """The capture of the Stop, PreCompact and SessionEnd hooks and the checkpoint verb (FR-8,
+    OB-18), through the one capture runner (`alpaca.capture_runner`, t-070 RC4).
+
+    The session's uncaptured events, then (with `transcripts`) its transcript, land through
+    `service.capture` in a child process. Its cooperative budget is `capture_budget(cap_s, share)`
+    (no document starts after it); it rolls a document back between two blocks `HARD_LEAD_S` before
+    the runner's deadline; and the runner kills it `CAPTURE_KILL_MARGIN_S` before the hook's hard
+    deadline (outside a hook: the budget plus `GRACE_S`), so a call that blocks in the kernel can no
+    longer hold the hook past its deadline (A-4). Every way it ends leaves the same record outcome
+    (`capture_runner.record`): `capture-deferred` {hook, through_event, remaining} when cut short,
+    `drain-failed` {where, error} when it failed or a transcript could not be read (A-6). Returns
+    the `capture_runner.Result`; under `_strict` a failed run raises `CaptureFailed`."""
+    from alpaca import capture_runner, paths
+    root = paths.root(payload.get("cwd"))
+    sid = session_of(payload)
+    now = time.monotonic()
+    budget = capture_budget(cap_s, share)
+    left = hook_time_left(CAPTURE_KILL_MARGIN_S)
+    kill_s = left if left is not None else budget + capture_runner.GRACE_S
+    kwargs = {"sessions": [sid], "session_events": True, "uncaptured_only": True,
+              "transcripts": transcripts, "deadline_at": now + budget,
+              "hard_at": now + max(0.1, kill_s - capture_runner.HARD_LEAD_S)}
+    result = capture_runner.run_process(capture_runner.CAPTURE, kwargs, root=root, kill_s=kill_s,
+                                        progress=True)
+    capture_runner.record(root, sid, hook, result)
+    if result.status == "failed" and payload.get("_strict"):
+        raise CaptureFailed(result.error)
+    return result
+
+
+#: The hook steps `run_step` runs (alpaca/hook_steps.py): the child's target, and the record event a
+#: failed or stopped step leaves, as that step's failure left before (None: the hook outcome only).
+STEPS = {
+    "pad": ("alpaca.hook_steps:pad", None),
+    "export": ("alpaca.hook_steps:export", None),
+    "hub": ("alpaca.hook_steps:hub", "hub-publish-failed"),
+    "snapshot": ("alpaca.hook_steps:snapshot", None),
+    "analytics": ("alpaca.hook_steps:analytics", "analytics-build-failed"),
+    "profile": ("alpaca.hook_steps:profile", "drain-failed"),
+    "consolidate": ("alpaca.hook_steps:consolidate", "drain-failed"),
+}
+
+
+class StepFailed(RuntimeError):
+    """A step run in a child (`run_step`) that failed under `_strict`; its outcome is recorded."""
+
+
+def run_step(payload, hook, name, *, share: float = 0.5, where: str | None = None, **kwargs):
+    """Run one hook step (`STEPS`, alpaca/hook_steps.py) within an enforced budget (t-070 RC5).
+
+    In a `fail_open` hook the step runs in a child process through the capture runner, which kills it
+    at `share` of the time left before the hook's own kill margin (`CAPTURE_KILL_MARGIN_S`), so a call
+    that blocks in the kernel there cannot hold the hook past its deadline (A-4); a `deadline_at`
+    keyword is clipped to that budget. Outside a hook (the `session` verbs, a test) there is no
+    deadline to enforce and the step runs in this process, as it did before.
+
+    Every way a step ends is recorded the same way (`_record_step`): a step that failed or was stopped
+    leaves the record event its failure left before (`analytics-build-failed`, `hub-publish-failed`,
+    `drain-failed` {where}), and the hook's own outcome (`fail_open`) becomes `timeout` for a stopped
+    step, `failed` for a failed step that has no event. Returns the `capture_runner.Result`; under
+    `_strict` a failed step raises its exception (in this process) or `StepFailed`."""
+    from alpaca import capture_runner, paths
+    root = paths.root(payload.get("cwd"))
+    target, _kind = STEPS[name]
+    left = hook_time_left(CAPTURE_KILL_MARGIN_S)
+    if left is None:
+        from alpaca import hook_steps
+        start = time.monotonic()
+        call = dict(kwargs)
+        if "deadline_at" in call:
+            call["deadline_s"] = max(0.0, call.pop("deadline_at") - time.monotonic())
+        try:
+            value = getattr(hook_steps, name)(root, **call)
+        except Exception as exc:
+            result = capture_runner.Result("failed", error=capture_runner._describe(exc), exc=exc,
+                                           seconds=time.monotonic() - start)
+        else:
+            result = capture_runner.Result("ok", value=value, seconds=time.monotonic() - start)
+    else:
+        kill_s = max(0.1, share * left)
+        if "deadline_at" in kwargs:
+            kwargs = dict(kwargs, deadline_at=min(kwargs["deadline_at"],
+                                                  time.monotonic() + max(0.0, kill_s - capture_runner.HARD_LEAD_S)))
+        result = capture_runner.run_process(target, kwargs, root=root, kill_s=kill_s)
+    _record_step(root, session_of(payload), hook, name, result, where)
+    if result.status == "failed" and payload.get("_strict"):
+        raise result.exc if result.exc is not None else StepFailed(result.error)
+    return result
+
+
+def _record_step(root, sid, hook, name, result, where=None):
+    """The one outcome record of a step (`run_step`): nothing for `ok`; else the step's own failure
+    event, when it has one, and a fault the hook's outcome reports (`fail_open`). Never raises."""
+    if result.status == "ok":
+        return
+    error = (result.error if result.status == "failed" else
+             "StepOverrun: %s stopped at the hook deadline after %.1f s" % (name, result.seconds))
+    _STEP_FAULTS.append((name, result.status, (error or "").split(":", 1)[0]))
+    kind = STEPS[name][1]
+    if kind is None:
+        return
+    data = {"where": where or hook, "error": error} if kind == "drain-failed" else {"error": error}
+    try:
+        from alpaca import db
+        conn = db.connect(root)
+        try:
+            db.append_event(conn, session=sid, actor="alpaca", kind=kind, data=data)
+        finally:
+            conn.close()
+    except Exception as exc:
+        print("alpaca step outcome unavailable: " + type(exc).__name__, file=sys.stderr)
+
+
+def _step_outcome(outcome, error_type):
+    """The hook's outcome once its steps are counted: a step stopped at its budget makes an `ok` hook
+    `timeout` (`StepOverrun:<steps>`), as the SIGALRM cut of that step did before; a failed step with
+    no record event of its own makes it `failed` (`StepFailed:<step>:<type>`)."""
+    if outcome != "ok" or not _STEP_FAULTS:
+        return outcome, error_type
+    stopped = [n for n, status, _ in _STEP_FAULTS if status != "failed"]
+    if stopped:
+        return "timeout", "StepOverrun:" + ",".join(stopped)
+    silent = ["%s:%s" % (n, kind) for n, status, kind in _STEP_FAULTS if STEPS[n][1] is None]
+    if silent:
+        return "failed", "StepFailed:" + ",".join(silent)
+    return outcome, error_type
+
+
 def fail_open(fn=None, *, deadline_s: float | None = None, record_cost: bool = True):
     """Wrap a hook's main() so it prints nothing on failure and always exits 0, within a
     hard wall-clock deadline. Usable bare (`@fail_open`) or parametrised
@@ -277,6 +447,8 @@ def fail_open(fn=None, *, deadline_s: float | None = None, record_cost: bool = T
             deadline = HOOK_DEADLINE_S if deadline_s is None else deadline_s
             start = time.monotonic()
             _STDIN_STASH.pop("payload", None)
+            del _STEP_FAULTS[:]
+            _WINDOW["end"] = start + deadline
             _arm_deadline(deadline)
             outcome, error_type = "ok", None
             try:
@@ -287,6 +459,8 @@ def fail_open(fn=None, *, deadline_s: float | None = None, record_cost: bool = T
                 return None
             finally:
                 _disarm_deadline()
+                _WINDOW.pop("end", None)
+                outcome, error_type = _step_outcome(outcome, error_type)
                 # Outcome I/O is inside the same deadline budget, including fsync and
                 # SQLite contention. A failed recorder must never wedge the caller.
                 _arm_deadline(min(0.5,max(0.01,deadline-(time.monotonic()-start))))

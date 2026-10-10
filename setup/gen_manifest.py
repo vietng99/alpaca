@@ -22,8 +22,9 @@ any umask verifies. Other-write, setuid, setgid and the sticky bit are never rec
 refuses a tree that has them, and `--verify` reports them as mode drift (a checkout never makes
 them, so they are someone's change).
 
-Instance-owned files: `alpaca onboard` writes project.yaml and intents/queue.md, and `alpaca upgrade`
-keeps project.yaml and intents/ (alpaca/upgrade.py PRESERVE). Both ship as templates in the
+Instance-owned files: `alpaca onboard` writes project.yaml and intents/queue.md, `alpaca new` writes
+the project's name into README.md, and `alpaca upgrade` keeps project.yaml, intents/ and README.md
+(alpaca/upgrade.py PRESERVE). Both ship as templates in the
 mechanism class. Once a tree is onboarded (its project.yaml no longer carries the template's
 `template: true` line), `--verify` lists a content change or an added file under those paths as
 instance-owned instead of failing. A deleted file, a mode change there, an added symlink or an
@@ -80,7 +81,7 @@ _UNSAFE_NAMES = ((stat.S_IWOTH, "other-write"), (stat.S_ISUID, "setuid"),
 
 #: The paths an onboarded instance owns: onboarding writes project.yaml and intents/queue.md, and
 #: `alpaca upgrade` keeps both (alpaca/upgrade.py PRESERVE; a test keeps the two lists equal).
-INSTANCE_OWNED = ("project.yaml", "intents")
+INSTANCE_OWNED = ("project.yaml", "intents", "README.md")
 _TEMPLATE_MARK = re.compile(r"^template:[ \t]*true[ \t]*(#.*)?$", re.M)
 
 

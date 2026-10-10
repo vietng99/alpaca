@@ -1,11 +1,12 @@
 """Dependency-free deterministic provider defaults.
 
-These are NOT production models. They are reproducible stand-ins that let the whole engine run and
-its tests pass with pure stdlib. Every one is a documented seam:
-  - HashEmbedder     -> swap for a real CPU sentence embedder
-  - LexicalReranker  -> swap for mxbai-rerank-v2 (0.5B CPU)
-  - StructuralEntailer -> swap for the HHEM/MiniCheck/Paladin ensemble
-  - NullLLMExtractor -> swap for an LLM fallback extractor (output stays quarantined)
+These are the only providers Rune2 runs. They are reproducible, pure-stdlib checkers; the registry is
+closed to them (providers/registry.py CLOSED_REGISTRY), so no seam loads a model or makes a network
+call (op-008 re-scope, dec-38324880492c):
+  - HashEmbedder       -> deterministic token hashing, no model
+  - LexicalReranker    -> lexical overlap; IdentityReranker keeps retrieval order
+  - StructuralEntailer -> number/date, polarity and coverage checks
+  - NullLLMExtractor   -> returns nothing; candidates come from the live chat session
 """
 from __future__ import annotations
 
@@ -63,7 +64,7 @@ class IdentityReranker:
 
 
 class StructuralEntailer:
-    """Deterministic, conservative entailment. Real ensemble plugs in here.
+    """Deterministic, conservative entailment.
 
     - number/date mismatch or a polarity flip vs source -> 'contradicted'
     - claim tokens well-covered by source -> 'supported'
@@ -103,8 +104,8 @@ class NullLLMExtractor:
 # ============================================================ oracle-safety.1 abstaining ensemble
 # An entailment ensemble of >=3 DISTINCT deterministic checkers. No lone judge. Each member keeps
 # the (label, score) protocol; the ensemble ABSTAINS (returns 'unsupported') on disagreement or on
-# any 'contradicted' vote - fail-safe by construction. Real HHEM/MiniCheck/Paladin members plug in
-# as additional voters without changing the aggregation rule.
+# any 'contradicted' vote - fail-safe by construction. Members are deterministic checkers only; the
+# closed registry admits no model voter.
 
 class TokenCoverageEntailer:
     """Checker: claim tokens must be well-covered by the source. Aspect = lexical coverage only."""

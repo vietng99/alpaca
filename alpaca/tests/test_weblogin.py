@@ -68,7 +68,7 @@ def test_locked_page_serves_the_login_page_without_a_browser_dialog(server):
         assert call(url, '/login/assets/' + name)[0] == 200, name
     assert call(url, '/login/assets/../serve.py')[0] == 404
     assert call(url, '/login/assets/hub.js')[0] == 404
-    assert json.loads(call(url, '/login/info.json')[2]) == {'configured': True, 'user': False, 'signed_in': False}
+    assert json.loads(call(url, '/login/info.json')[2]) == {'configured': True, 'user': False, 'totp': False, 'signed_in': False}
 
 
 def test_cookie_sign_in_opens_the_hub_and_sign_out_closes_it(server):
@@ -79,7 +79,7 @@ def test_cookie_sign_in_opens_the_hub_and_sign_out_closes_it(server):
     assert status == 200 and b'data-page="hub"' in page and page.isascii()
     assert call(url, '/hub/', headers={'Cookie': cookie})[0] == 200
     listing = json.loads(call(url, '/workspaces.json', headers={'Cookie': cookie})[2])
-    assert listing['workspaces'][0]['name'] == 'Alpaca' and listing['workspaces'][0]['href'] == '/hub/'
+    assert listing['workspaces'][0]['name'] == 'proj' and listing['workspaces'][0]['href'] == '/hub/'
     status, headers, _ = call(url, '/login?next=/hub/', headers={'Cookie': cookie})
     assert status == 302 and headers['Location'] == '/hub/'
     status, headers, _ = call(url, '/login?next=//evil.example', headers={'Cookie': cookie})
@@ -183,3 +183,56 @@ def test_instances_keep_separate_cookie_slots_and_the_old_name_reads_signed_out(
     jar = cookie + '; ' + weblogin.cookie_name(other) + '=x.y'
     assert weblogin.read_cookie(root, jar) == value and weblogin.read_cookie(other, jar) == 'x.y'
     assert call(url, '/health.json', headers={'Cookie': jar})[0] == 200
+
+
+# RFC 6238 appendix B, SHA-1 key "12345678901234567890", last 6 digits.
+RFC_SECRET = base64.b32encode(b'12345678901234567890').decode()
+
+
+def test_totp_matches_rfc_6238_vectors():
+    for t, want in ((59, '287082'), (1111111109, '081804'), (1111111111, '050471'),
+                    (1234567890, '005924'), (2000000000, '279037'), (20000000000, '353130')):
+        assert weblogin.totp_code(RFC_SECRET, t // weblogin.TOTP_STEP) == want
+
+
+def test_totp_guard_allows_one_step_of_drift_and_refuses_replay():
+    now = 1111111111
+    guard = weblogin.TotpGuard()
+    assert not guard.check(RFC_SECRET, '000000', now=now)
+    assert not guard.check(RFC_SECRET, weblogin.totp_code(RFC_SECRET, now // 30 - 2), now=now)
+    old = weblogin.totp_code(RFC_SECRET, now // 30 - 1)
+    assert guard.check(RFC_SECRET, old, now=now)
+    assert not guard.check(RFC_SECRET, old, now=now)              # replay
+    assert guard.check(RFC_SECRET, weblogin.totp_code(RFC_SECRET, now // 30), now=now)
+    assert not guard.check(RFC_SECRET, old, now=now)              # older than the last accepted
+    assert not guard.check(None, '287082', now=59)
+
+
+def test_enroll_writes_a_private_secret_once(tmp_path):
+    root = str(tmp_path)
+    assert weblogin.totp_secret(root) is None
+    secret = weblogin.totp_enroll(root)
+    assert weblogin.totp_secret(root) == secret and len(base64.b32decode(secret)) == 20
+    assert oct(os.stat(os.path.join(root, '.alpaca', weblogin.TOTP_FILE)).st_mode & 0o777) == '0o600'
+    with pytest.raises(FileExistsError):
+        weblogin.totp_enroll(root)
+    assert weblogin.totp_uri(secret, 'demo').startswith('otpauth://totp/Alpaca%3Ademo?secret=' + secret)
+
+
+def test_enrolled_authenticator_replaces_the_fixed_code_on_the_login_page(server):
+    root, url = server
+    status, cookie, _ = sign_in(url, client='10.0.0.20')
+    assert status == 200 and cookie
+    secret = weblogin.totp_enroll(root)
+    # The old cookie is bound to the credential without the secret: signed out.
+    assert call(url, '/health.json', headers={'Cookie': cookie})[0] == 401
+    assert json.loads(call(url, '/login/info.json')[2])['totp'] is True
+    assert sign_in(url, client='10.0.0.21')[0] == 401                     # fixed code refused
+    code = weblogin.totp_code(secret, int(__import__('time').time()) // weblogin.TOTP_STEP)
+    status, cookie, body = sign_in(url, code=code, client='10.0.0.22')
+    assert status == 200 and body == {'ok': True}
+    assert call(url, '/health.json', headers={'Cookie': cookie})[0] == 200
+    assert sign_in(url, code=code, client='10.0.0.23')[0] == 401          # same code twice
+    # Scripts keep the fixed credential over HTTP Basic.
+    basic = 'Basic ' + base64.b64encode(b':246810').decode()
+    assert call(url, '/health.json', headers={'Authorization': basic})[0] == 200

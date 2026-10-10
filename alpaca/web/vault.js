@@ -367,21 +367,48 @@
   // the cockpit paints without it.
   var HUB_FIRST_PAINT = ['/hub/overview.json', '/hub/runs.json', '/hub/history.json?limit=6&kind=progress',
     '/board/data.json'];
+  // Returns a promise for the reads plus progress(): {done, total, fraction}. Each read counts as an
+  // equal share; inside a read the share fills with the bytes received against the decoded size the
+  // server names (X-Body-Length when gzipped, else Content-Length). A read with no size fills when it
+  // ends, and a read whose bytes are all in stays short of full until it is stored. A failed read
+  // counts as ended: the cockpit then reads it itself.
   function prefetchWorkspace(href) {
-    var url;
-    try { url = new URL(href, location.href); } catch (_) { return Promise.resolve(); }
-    if (url.origin !== location.origin || url.pathname.indexOf('/hub') !== 0 || !window.caches) return Promise.resolve();
-    return caches.delete(HANDOFF).then(function () { return caches.open(HANDOFF); }).then(function (cache) {
-      return Promise.all(HUB_FIRST_PAINT.map(function (path) {
-        return fetch(path, {credentials: 'same-origin', cache: 'no-store'}).then(function (r) {
+    var url, reads = [];
+    var progress = function () {
+      var sum = 0, done = 0;
+      reads.forEach(function (r) { sum += r.ended ? 1 : (r.size ? Math.min(0.99, r.got / r.size) : 0); if (r.ended) done++; });
+      return {done: done, total: reads.length, fraction: reads.length ? sum / reads.length : 1};
+    };
+    var none = Promise.resolve();
+    none.progress = progress;
+    try { url = new URL(href, location.href); } catch (_) { return none; }
+    if (url.origin !== location.origin || url.pathname.indexOf('/hub') !== 0 || !window.caches) return none;
+    reads = HUB_FIRST_PAINT.map(function (path) { return {path: path, got: 0, size: 0, ended: false}; });
+    function body(r, read) {
+      read.size = +(r.headers.get('X-Body-Length') || (r.headers.get('Content-Encoding') ? 0 : r.headers.get('Content-Length'))) || 0;
+      if (!r.body || !r.body.getReader) return r.blob();
+      var reader = r.body.getReader(), chunks = [];
+      return (function pump() {
+        return reader.read().then(function (step) {
+          if (step.done) return new Blob(chunks);
+          chunks.push(step.value); read.got += step.value.byteLength;
+          return pump();
+        });
+      })();
+    }
+    var all = caches.delete(HANDOFF).then(function () { return caches.open(HANDOFF); }).then(function (cache) {
+      return Promise.all(reads.map(function (read) {
+        return fetch(read.path, {credentials: 'same-origin', cache: 'no-store'}).then(function (r) {
           if (!r.ok) return;
-          return r.blob().then(function (body) {
-            return cache.put(path, new Response(body, {headers: {'Content-Type': 'application/json',
+          return body(r, read).then(function (blob) {
+            return cache.put(read.path, new Response(blob, {headers: {'Content-Type': 'application/json',
               'X-Handoff-At': String(Date.now())}}));
           });
-        }).catch(function () { /* the cockpit reads it itself */ });
+        }).catch(function () { /* the cockpit reads it itself */ }).then(function () { read.ended = true; });
       }));
-    }).catch(function () { /* no Cache API here: the cockpit loads as before */ });
+    }).catch(function () { reads.forEach(function (r) { r.ended = true; }); /* no Cache API: the cockpit loads as before */ });
+    all.progress = progress;
+    return all;
   }
   // Settles when `ready` does, or after HANDOFF_WAIT_MS so a slow read never holds the takeover.
   function settle(ready) {
@@ -401,13 +428,29 @@
       '<div class="unlock"><div class="unlockBanner">' + opts.verb + ' <b></b></div>' +
       '<div class="unlockStatus"><span class="unlockCaret">&gt;</span> <span class="detail"></span><span class="unlockBlink">_</span></div>' +
       vaultSvg() + '<ul class="stages"></ul><div class="result"></div>' +
-      '<div class="loading" hidden><div class="loadingLabel">' + (opts.loading || 'Loading workspace') +
-      '<span class="unlockBlink">_</span></div><div class="loadBar" aria-hidden="true"><span class="loadFill"></span></div></div></div>';
+      '<div class="loading"><div class="loadHead"><alpaca-orb state="connecting" size="32"></alpaca-orb>' +
+      '<div class="loadingLabel">' + (opts.loading || 'Loading workspace') + '<span class="unlockBlink">_</span></div>' +
+      '<b class="loadPct">0%</b></div><div class="loadBar" role="progressbar" aria-label="Workspace data loaded" aria-valuemin="0" ' +
+      'aria-valuemax="100" aria-valuenow="0"><span class="loadFill"></span></div><div class="loadNote"></div></div></div>';
     document.body.appendChild(el);
     mountBackdrop(el.querySelector('canvas'), 'full');
     var banner = el.querySelector('.unlockBanner b'), detail = el.querySelector('.detail');
     var list = el.querySelector('.stages'), svg = el.querySelector('.vault');
     var result = el.querySelector('.result'), loading = el.querySelector('.loading');
+    // The bar is the real reads (prefetchWorkspace().progress), painted every 100 ms until the page leaves.
+    var bar = loading.querySelector('.loadBar'), fill = loading.querySelector('.loadFill');
+    var pct = loading.querySelector('.loadPct'), note = loading.querySelector('.loadNote');
+    var progress = opts.ready && opts.ready.progress;
+    function meter(final) {
+      var p = progress ? progress() : {done: 0, total: 0, fraction: 1};
+      if (!p.total) { loading.classList.add('loadNone'); note.textContent = final ? 'Opening' : ''; return; }
+      var n = Math.round(p.fraction * 100);
+      fill.style.width = n + '%'; pct.textContent = n + '%'; bar.setAttribute('aria-valuenow', String(n));
+      note.textContent = p.done + ' of ' + p.total + ' reads' +
+        (final && p.done < p.total ? ' ' + MID + ' opening now, the cockpit reads the rest' : '');
+    }
+    meter(false);
+    var meterId = setInterval(function () { meter(false); }, 100);
     var items = opts.stages.map(function (s) { var li = document.createElement('li'); li.className = 'stage'; li.textContent = s; list.appendChild(li); return li; });
     function setActive(n) {
       items.forEach(function (li, i) { li.className = 'stage' + (i < n ? ' stageDone' : i === n ? ' stageActive' : ''); });
@@ -416,14 +459,22 @@
     var timers = [];
     var push = function (fn, ms) { timers.push(setTimeout(fn, ms)); };
     var handle = opts.handle, gate = settle(opts.ready);
-    function finish() { gate.then(opts.done); }
+    // The last stage stays active, and the vault stays shut, until the reads settle: the checks,
+    // the open vault and the ready line then say what has really happened.
+    function settled(openAt, readyAt, leaveAt) {
+      gate.then(function () {
+        clearInterval(meterId); meter(true);
+        setActive(items.length);
+        push(function () { svg.classList.add('vaultOpen'); }, openAt);
+        push(function () { result.textContent = opts.result; result.classList.add('resultOn'); }, readyAt);
+        push(opts.done, leaveAt);
+      });
+    }
     setActive(-1);
     if (reduced()) {
       banner.textContent = handle;
-      push(function () { setActive(items.length); svg.classList.add('vaultOpen'); }, 0);
-      push(function () { result.textContent = opts.result; result.classList.add('resultOn'); }, 360);
-      push(function () { loading.hidden = false; }, 900);
-      push(finish, 1200);
+      setActive(items.length - 1);
+      settled(0, 0, 600);
       return;
     }
     var STEP = opts.step || 320, base = 300, allDone = base + items.length * STEP, start = performance.now();
@@ -437,11 +488,7 @@
       if (p < 1) requestAnimationFrame(tick); else banner.textContent = handle;
     })();
     items.forEach(function (_, i) { push(function () { setActive(i); }, base + i * STEP); });
-    push(function () { setActive(items.length); }, allDone);
-    push(function () { svg.classList.add('vaultOpen'); }, allDone + 120);
-    push(function () { result.textContent = opts.result; result.classList.add('resultOn'); }, allDone + 560);
-    push(function () { loading.hidden = false; }, allDone + 980);
-    push(finish, allDone + 1300);
+    push(function () { settled(120, 400, 900); }, allDone);
   }
 
   /* ---------- sign-in page ---------- */
@@ -479,6 +526,10 @@
     fetch('/login/info.json', {credentials: 'same-origin', cache: 'no-store'}).then(function (r) { return r.json(); }).then(function (info) {
       if (info.signed_in) { location.replace(destination()); return; }
       if (info.user) userField.hidden = false;
+      if (info.totp) {
+        document.querySelector('.stepSub').textContent = 'Enter the 6-digit code from your authenticator app.';
+        code.setAttribute('autocomplete', 'one-time-code'); code.maxLength = 6;
+      }
       if (!info.configured) fail('No web login is configured on this server. Set .alpaca/files-auth first.');
     }).catch(function () { /* the form still works; the server answers on submit */ });
 
@@ -546,6 +597,7 @@
 
   function fillTile(tile, s) {
     var live = tile.querySelector('.tile-live');
+    live.classList.remove('checking');
     live.classList.toggle('on', s.active > 0);
     live.lastChild.textContent = s.active ? s.active + ' live' : 'idle';
     var op = tile.querySelector('.tile-op');
@@ -579,7 +631,7 @@
     a.setAttribute('aria-label', 'Open the ' + ws.name + ' ' + (ws.kind || 'Operations workspace').toLowerCase());
     a.innerHTML = '<span class="runBorder" aria-hidden="true"></span><span class="cardScan" aria-hidden="true"></span>' +
       '<div class="tile-top"><span class="tile-mark" aria-hidden="true"></span><div><div class="tile-name"></div><div class="tile-kind"></div></div>' +
-      '<span class="tile-live"><i></i><span>checking</span></span></div>' +
+      '<span class="tile-live checking"><alpaca-orb state="searching" size="20" label="Checking"></alpaca-orb><i></i><span>checking</span></span></div>' +
       '<p class="tile-op skeleton">Reading the record</p><div class="bar"><span></span></div><div class="bar-note"></div>' +
       '<div class="stats"><div class="stat"><b>-</b><span>Open ops</span></div><div class="stat"><b>-</b><span>Doing</span></div>' +
       '<div class="stat"><b>-</b><span>Queued</span></div><div class="stat"><b>-</b><span>Done</span></div></div>' +
@@ -602,6 +654,7 @@
   function refreshTile(tile, ws) {
     var op = tile.querySelector('.tile-op');
     if (!ws.summary) {
+      tile.querySelector('.tile-live').classList.remove('checking');
       op.classList.remove('skeleton');
       op.textContent = 'No live summary for this workspace. Open it to see its cockpit.';
       return Promise.resolve();
@@ -617,6 +670,7 @@
       if (ws.self !== false) { fillTile(tile, summarize(data)); return; }
       op.classList.remove('skeleton');
       var live = tile.querySelector('.tile-live');
+      live.classList.remove('checking');
       live.classList.toggle('on', !!(data && data.reachable));
       live.lastChild.textContent = data && data.reachable ? 'up' : 'down';
       op.textContent = data && data.reachable
@@ -624,6 +678,7 @@
         : 'Workspace not answering. It may be stopped.';
     }).catch(function (err) {
       if (err.message === 'signed out') return;
+      tile.querySelector('.tile-live').classList.remove('checking');
       op.classList.remove('skeleton');
       op.textContent = 'Live summary unavailable (' + err.message + '). The workspace may still open.';
     });

@@ -5,7 +5,7 @@ from collections import OrderedDict
 import threading
 from alpaca import db, determinism, paths, project, render, sessions_view, util
 from alpaca.analytics import parse_session as ps
-from alpaca.analytics import usage
+from alpaca.analytics import children, usage
 
 _PARSE_CACHE = OrderedDict()
 _PARSE_LOCK = threading.RLock()
@@ -124,7 +124,12 @@ def collect(root, force=False, only=None):
         result = []
         sources = _transcripts(root, conn)
         view = sessions_view.classify(conn)
-        sessions = {r["sid"] for r in db.rows(conn, "sessions")} | set(sources)
+        # t-143: a subagent's transcript copy sits beside the session copies, so it would read as
+        # a session of its own. Fold each child under its parent instead: the parent row names
+        # its children, and metrics_index adds their measurements to the parent and the totals.
+        families = children.discover(root, conn)
+        folded = children.parents(families)
+        sessions = ({r["sid"] for r in db.rows(conn, "sessions")} | set(sources)) - set(folded)
         for sid in sorted(sessions):
             if only is not None and sid != only:
                 continue
@@ -180,6 +185,12 @@ def collect(root, force=False, only=None):
                     d['cost_provenance'] = 'reported-provider-usage'
             if imported['partial']:
                 d['usage_import_error'] = 'invalid or incomplete explicit usage events'
+            kids = families.get(sid) or {}
+            d['subagent_ids'] = sorted(kids)
+            d['subagent_kinds'] = {kind: sum(entry['kind'] == kind for entry in kids.values())
+                                   for kind in ('workflow', 'subagent')}
+            # The fold's revision moves when a child transcript grows, so the index is recomputed.
+            d['subagents_rev'] = util.sha256_hex(util.canonical_json(children.revision(kids))) if kids else None
             d['record'] = _record_summary(conn, sid)
             d['class'] = sessions_view.class_of(view, sid)
             if d['class'] == sessions_view.PROBE and (d.get('turns') or d.get('tool_calls')):

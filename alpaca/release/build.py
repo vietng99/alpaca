@@ -1,5 +1,6 @@
-"""Allowlisted staging with explicit overlays and input/output drift detection."""
+"""Allowlisted staging of the source commit's files, with explicit overlays and drift detection."""
 import hashlib
+import importlib.util
 import os
 from pathlib import Path
 import shutil
@@ -43,9 +44,24 @@ def is_memory(rel, memory):
     return any(rel == item or rel.startswith(item + '/') for item in memory)
 
 
+def _shipment_policy():
+    """setup/shipment_policy.py of this installation, which setup/ship.py loads too."""
+    path = Path(__file__).resolve().parents[2] / 'setup' / 'shipment_policy.py'
+    spec = importlib.util.spec_from_file_location('alpaca_release_shipment_policy', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+#: The source commit's file paths, the only paths a release may ship; one helper for this build and
+#: setup/ship.py (setup/shipment_policy.py committed_paths).
+committed_paths = _shipment_policy().committed_paths
+
+
 def selected(root, cfg):
     root = Path(root).resolve()
     entries, memory = allowlist(root, cfg)
+    committed = committed_paths(root)
     out = {}
     for entry in entries:
         if forbidden(entry) or is_memory(entry, memory):
@@ -63,9 +79,11 @@ def selected(root, cfg):
                         raise ValueError('symlink in release member')
                 dirs[:] = sorted(d for d in dirs if not forbidden((Path(base) / d).relative_to(root).as_posix()) and not is_memory((Path(base) / d).relative_to(root).as_posix(), memory))
                 paths.extend(Path(base) / f for f in sorted(files))
+        elif entry not in committed:
+            raise ValueError('release member is not in the source commit: ' + entry)
         for member in paths:
             rel = member.relative_to(root).as_posix()
-            if forbidden(rel) or is_memory(rel, memory):
+            if forbidden(rel) or is_memory(rel, memory) or rel not in committed:
                 continue
             if not stat.S_ISREG(member.lstat().st_mode):
                 raise ValueError('non-regular release member')
@@ -76,6 +94,8 @@ def selected(root, cfg):
         path = contained(root, source)
         if not path.is_file():
             raise ValueError('missing overlay source')
+        if relative(source) not in committed:
+            raise ValueError('overlay source is not in the source commit: ' + source)
         out[dest] = path
     return dict(sorted(out.items()))
 

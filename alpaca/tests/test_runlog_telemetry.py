@@ -86,7 +86,11 @@ def test_the_sampler_thread_appends_one_json_line_per_interval(tmp_path):
     path = tmp_path / "jobs" / "abc.telemetry.jsonl"
     sampler = telemetry.start(path, interval=0.02)
     sampler.stage = "test"
-    time.sleep(0.25)
+    end = time.monotonic() + 10                     # a loaded host may delay the first samples
+    while time.monotonic() < end:
+        if path.exists() and path.read_text().count("\n") >= 3:
+            break
+        time.sleep(0.02)
     sampler.stop()
     rows = [json.loads(line) for line in path.read_text().splitlines()]
     # positive: several samples landed, each with the full key set and the current stage.

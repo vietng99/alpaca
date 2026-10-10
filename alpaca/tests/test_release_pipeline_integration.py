@@ -5,6 +5,9 @@ import yaml
 from alpaca.tests.test_release_pipeline_build import source, api
 from alpaca.tests.test_release_pipeline_checks import project
 from alpaca.tests.test_release_pipeline_publish import ready, git
+from alpaca.tests.devfiles import names_as_data
+
+names_as_data(".github/workflows/alpaca-dev.yml")   # written by release init in the fixture's tree
 
 
 def test_complete_cli_flow_for_non_python_project(ready, monkeypatch, capsys):

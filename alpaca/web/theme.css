@@ -1,83 +1,107 @@
-/* Shared palette. Keep this sheet after hub, analytics, and cockpit styles. */
+/* Keep this sheet after every other /hub/ stylesheet. */
+/* Workspace design system. Tokens only; every /hub/ stylesheet reads these. The values and
+   the rules for using them are in design/web-redesign/design-system.md. Light is the default; dark
+   comes only from the theme switch. */
 :root,
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg: #f4f6fa;
+  --font-sans: "IBM Plex Sans", Plex, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", PlexMono, ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --fs-xs: 12px; --fs-sm: 13px; --fs-md: 14px; --fs-lg: 16px; --fs-xl: 20px; --fs-2xl: 24px;
+  --lh-xs: 16px; --lh-sm: 18px; --lh-md: 20px; --lh-lg: 24px; --lh-xl: 28px; --lh-2xl: 32px;
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-12: 48px;
+  --r-sm: 4px; --r-md: 6px; --r-lg: 10px;
+  --ease: 150ms ease;
+
+  --bg: #f6f6f4;
   --surface: #ffffff;
   --surface-raised: #ffffff;
-  --surface-muted: #edf1f7;
-  --surface-hover: #e8eef9;
-  --text: #19263b;
-  --muted: #526176;
-  --line: #d8e1ec;
-  --control-border: #77879e;
-  --accent: #3e55c8;
-  --accent-soft: #eaf0ff;
+  --surface-muted: #f1f1ee;
+  --surface-hover: #ebebe7;
+  --text: #22262b;
+  --text-strong: #15181c;
+  --muted: #5c636b;
+  --faint: #80868d;
+  --line: #e3e3de;
+  --line-strong: #d3d3cd;
+  --control-border: #8e939a;
+  --accent: #3b5b86;
+  --accent-soft: #edf1f6;
   --text-on-accent: #ffffff;
-  --focus: #2448c7;
-  --green: #176947;
-  --green-bg: #eaf6ef;
-  --amber: #815314;
-  --amber-bg: #fff4dc;
-  --red: #a83741;
-  --red-bg: #fff0f1;
-  --sidebar: #f8faff;
-  --sidebar-text: #26364f;
-  --sidebar-muted: #53627b;
-  --sidebar-active: #e1e9ff;
-  --sidebar-line: #d4deed;
-  --sidebar-accent: #354cbb;
-  --chart-input: #3e55c8;
-  --chart-cache: #246bb1;
-  --chart-write: #8350ac;
-  --chart-output: #167c70;
-  --chart-reason: #966216;
-  --chart-cost: #3e55c8;
-  --chart-area: #3e55c817;
-  --shadow: 0 16px 48px #182a481a;
-  --backdrop: #12244070;
-  --toast-bg: #22344e;
+  --focus: #3b5b86;
+  --green: #2f6f4f;
+  --green-bg: #edf4ef;
+  --amber: #83601f;
+  --amber-bg: #f7f1e5;
+  --red: #a3423f;
+  --red-bg: #f8edec;
+  --st-doing: var(--accent); --st-doing-bg: var(--accent-soft);
+  --st-ready: var(--green); --st-ready-bg: var(--green-bg);
+  --st-waiting: var(--amber); --st-waiting-bg: var(--amber-bg);
+  --st-blocked: var(--red); --st-blocked-bg: var(--red-bg);
+  --st-done: var(--muted); --st-done-bg: var(--surface-muted);
+  --sidebar: #f1f1ee;
+  --sidebar-text: #2b3036;
+  --sidebar-muted: #5c636b;
+  --sidebar-active: #e5e5e0;
+  --sidebar-line: #e0e0db;
+  --sidebar-accent: #3b5b86;
+  --chart-input: #3b5b86;
+  --chart-cache: #5b86ad;
+  --chart-write: #7a6aa3;
+  --chart-output: #3f8a78;
+  --chart-reason: #9c7733;
+  --chart-cost: #3b5b86;
+  --chart-area: #3b5b8614;
+  --shadow-sm: 0 1px 2px #1b1f2314, 0 2px 6px #1b1f230d;
+  --shadow: 0 8px 28px #1b1f231f;
+  --backdrop: #1b1f2366;
+  --toast-bg: #2b3036;
   --toast-text: #ffffff;
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #0d1422;
-  --surface: #141e2e;
-  --surface-raised: #1a2639;
-  --surface-muted: #1d2b40;
-  --surface-hover: #22334d;
-  --text: #e5edf9;
-  --muted: #a8b8ce;
-  --line: #33445c;
-  --control-border: #697f9c;
-  --accent: #a3b5ff;
-  --accent-soft: #273653;
-  --text-on-accent: #111b32;
-  --focus: #b6c6ff;
-  --green: #8cdcb4;
-  --green-bg: #173a30;
-  --amber: #efc57c;
-  --amber-bg: #3a2c18;
-  --red: #ffa5ac;
-  --red-bg: #40232e;
-  --sidebar: #101929;
-  --sidebar-text: #d6e2f6;
-  --sidebar-muted: #9eafc9;
-  --sidebar-active: #283a5a;
-  --sidebar-line: #30425c;
-  --sidebar-accent: #b2c2ff;
-  --chart-input: #a3b5ff;
-  --chart-cache: #79c3f3;
-  --chart-write: #ce9fea;
-  --chart-output: #78d5bf;
-  --chart-reason: #efc57c;
-  --chart-cost: #a3b5ff;
-  --chart-area: #a3b5ff19;
-  --shadow: 0 16px 48px #00000047;
-  --backdrop: #020713b8;
-  --toast-bg: #e5edf9;
-  --toast-text: #19263b;
+  --bg: #16181b;
+  --surface: #1c1f23;
+  --surface-raised: #212429;
+  --surface-muted: #24282d;
+  --surface-hover: #2a2f35;
+  --text: #e4e6e8;
+  --text-strong: #f3f4f5;
+  --muted: #a3a9b0;
+  --faint: #80878f;
+  --line: #30353b;
+  --line-strong: #3b4148;
+  --control-border: #6b727a;
+  --accent: #93acd0;
+  --accent-soft: #253040;
+  --text-on-accent: #121417;
+  --focus: #a9bddb;
+  --green: #86c3a2;
+  --green-bg: #1e2c25;
+  --amber: #d6b273;
+  --amber-bg: #2f281b;
+  --red: #e3a09c;
+  --red-bg: #382423;
+  --sidebar: #191b1e;
+  --sidebar-text: #dcdfe2;
+  --sidebar-muted: #a3a9b0;
+  --sidebar-active: #262a2f;
+  --sidebar-line: #2c3136;
+  --sidebar-accent: #a9bddb;
+  --chart-input: #93acd0;
+  --chart-cache: #7fb0d6;
+  --chart-write: #b7a6dc;
+  --chart-output: #7fc4b0;
+  --chart-reason: #d6b273;
+  --chart-cost: #93acd0;
+  --chart-area: #93acd01a;
+  --shadow-sm: 0 1px 2px #00000040;
+  --shadow: 0 8px 28px #00000066;
+  --backdrop: #000000a6;
+  --toast-bg: #e4e6e8;
+  --toast-text: #16181b;
 }
 
 html { background: var(--bg); scrollbar-color: var(--control-border) var(--bg); }
@@ -96,48 +120,53 @@ option { background: var(--surface); color: var(--text); }
 .theme-switch { display: inline-flex; align-items: center; padding: 0; border-radius: 999px; line-height: 0; }
 .ts-track {
   position: relative; display: block; width: 58px; height: 30px; border-radius: 999px;
-  background: #dbe5fb; border: 1px solid var(--control-border);
+  background: var(--surface-muted); border: 1px solid var(--line-strong);
   transition: background-color .35s ease, border-color .35s ease;
 }
 .ts-thumb {
   position: absolute; top: 2px; left: 2px; width: 24px; height: 24px; border-radius: 50%;
-  background: #ffffff; box-shadow: 0 1px 4px #0f1f3a40;
+  background: var(--surface); box-shadow: var(--shadow-sm);
   transition: transform .45s cubic-bezier(.34, 1.45, .55, 1), background-color .35s ease;
 }
 .theme-switch svg { position: absolute; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .ts-thumb svg { top: 4px; left: 4px; transition: opacity .3s ease, transform .45s ease; }
-.ts-thumb .ts-sun { color: #c07a08; fill: #f3b33d; opacity: 1; transform: rotate(0deg) scale(1); }
-.ts-thumb .ts-moon { color: #dfe7ff; fill: #dfe7ff; opacity: 0; transform: rotate(-90deg) scale(.4); }
+.ts-thumb .ts-sun { color: var(--amber); fill: var(--amber); opacity: 1; transform: rotate(0deg) scale(1); }
+.ts-thumb .ts-moon { color: var(--accent); fill: var(--accent); opacity: 0; transform: rotate(-90deg) scale(.4); }
 .ts-hint { top: 6px; width: 14px !important; height: 14px !important; opacity: .55; color: var(--muted); }
 .ts-hint-sun { left: 7px; }
 .ts-hint-moon { right: 7px; }
 .theme-switch:hover .ts-track { border-color: var(--accent); }
-:root[data-theme="dark"] .ts-track { background: #22324f; }
-:root[data-theme="dark"] .ts-thumb { transform: translateX(28px); background: #3c4f78; }
+:root[data-theme="dark"] .ts-track { background: var(--surface-muted); }
+:root[data-theme="dark"] .ts-thumb { transform: translateX(28px); background: var(--surface-hover); }
 :root[data-theme="dark"] .ts-thumb .ts-sun { opacity: 0; transform: rotate(90deg) scale(.4); }
 :root[data-theme="dark"] .ts-thumb .ts-moon { opacity: 1; transform: rotate(0deg) scale(1); }
-/* Colors cross-fade only for the moment the switch is pressed. */
-.theme-fading, .theme-fading *, .theme-fading *::before, .theme-fading *::after {
-  transition: background-color .4s ease, color .4s ease, border-color .4s ease, fill .4s ease, stroke .4s ease !important;
-}
-.theme-fading .ts-thumb { transition: transform .45s cubic-bezier(.34, 1.45, .55, 1), background-color .35s ease !important; }
-.theme-fading .ts-thumb svg { transition: opacity .3s ease, transform .45s ease !important; }
 @media (prefers-reduced-motion: reduce) {
   .ts-track, .ts-thumb, .ts-thumb svg { transition: none !important; }
 }
+
+/* Page layout shared by every tab. */
+.version-label { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--faint); display: block; }
+.page-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
+/* Two equal cards side by side, the same height; one column on narrow screens. */
+.duo { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-6); align-items: stretch; margin-bottom: var(--sp-6); }
+.duo > * { min-width: 0; margin: 0; }
+.trio { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-6); align-items: stretch; margin-bottom: var(--sp-6); }
+.trio > * { min-width: 0; margin: 0; }
+@media (max-width: 1200px) { .trio { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 900px) { .duo, .trio { grid-template-columns: minmax(0, 1fr); } }
 
 /* Navigation and shared chrome. */
 .sidebar { background: var(--sidebar); color: var(--sidebar-muted); border-right: 1px solid var(--sidebar-line); }
 .brand { color: var(--sidebar-text); }
 .brand small, .nav-label, .sidebar-bottom > small { color: var(--sidebar-muted); }
-.brand-symbol { color: var(--sidebar-accent); background: var(--sidebar-active); border-color: var(--control-border); }
-.workspace { color: var(--sidebar-text); border-color: var(--sidebar-line); }
-.workspace-icon { color: var(--sidebar-accent); background: var(--sidebar-active); }
-.workspace-dot, .connection i { background: var(--green); }
+.brand-symbol { color: var(--sidebar-accent); background: transparent; border-color: var(--line-strong); }
+.connection i { background: var(--green); }
 .connection.error i { background: var(--amber); }
-.search-launch, .search-launch kbd, .nav-link, .legacy-link { color: var(--sidebar-muted); }
-.search-launch kbd { border-color: var(--control-border); }
-.search-launch:hover, .nav-link:hover { color: var(--sidebar-text); background: var(--sidebar-active); }
+.nav-link, .legacy-link { color: var(--sidebar-muted); }
+.nav-link:hover { color: var(--sidebar-text); background: var(--sidebar-active); }
+.search-launch { color: var(--muted); background: var(--surface-muted); border-color: var(--control-border); }
+.search-launch kbd { color: var(--muted); border-color: var(--control-border); }
+.search-launch:hover { color: var(--text); background: var(--surface-hover); }
 .nav-link.active { background: var(--sidebar-active); color: var(--sidebar-accent); }
 .nav-link.active::before { background: var(--sidebar-accent); }
 .nav-count { color: var(--sidebar-text); background: var(--sidebar-line); }
@@ -172,7 +201,6 @@ option { background: var(--surface); color: var(--text); }
 .data-table tbody tr:hover { background: var(--surface-hover); }
 .empty svg { color: var(--muted); }
 .empty h3 { color: var(--text); }
-.spinner { border-color: var(--line); border-top-color: var(--accent); }
 .notice { color: var(--amber); background: var(--amber-bg); border-color: var(--amber); }
 .notice > svg, .notice p, .notice .text-link { color: var(--amber); }
 .notice.info { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
@@ -197,7 +225,7 @@ dialog::backdrop { background: var(--backdrop); }
 .markdown pre, .markdown code, .markdown th { background: var(--surface-muted); color: var(--text); }
 .markdown pre code { background: transparent; }
 .markdown blockquote { border-color: var(--control-border); }
-.report-frame { color-scheme: light; background: #ffffff; }
+.report-frame { color-scheme: light; background: var(--surface); }
 .command-input input { color: var(--text); background: transparent; }
 #toast { color: var(--toast-text); background: var(--toast-bg); box-shadow: var(--shadow); }
 .capture-note { background: var(--surface-muted); }
@@ -230,7 +258,10 @@ dialog::backdrop { background: var(--backdrop); }
 
 @media (max-width: 700px) {
   .top-actions { gap: 7px; }
-  .top-actions #checked-at { display: none; }
+  /* Phone width keeps the time only; the date and the new-activity notice need the room.
+     While the notice waits, the time it hides on wider screens shows again. */
+  #checked-at .clock-date, #checked-at .clock-sep, #checked-at[data-notice] .clock-notice { display: none; }
+  #checked-at[data-notice] .clock-time { display: inline; }
 }
 
 @media (forced-colors: active) {

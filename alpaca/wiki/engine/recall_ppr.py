@@ -31,16 +31,17 @@ def compute_passage_scores(
     return scores
 
 
-# Alpaca M2.11 DEMAND GATE. The PPR graph arm is OFF by default (the NARROW profile
-# ships vector + graph disabled); even when a caller opts the graph in, a graph is NOT built below
-# the EVENT FLOOR. Too few anchored blocks make a personalized-PageRank walk pure noise, so the
-# gate refuses and retrieval stays on the lexical seed alone. The floor is a count of active,
-# graph-eligible blocks; below it, no graph. Deterministic and total (a hollowed gate that always
-# returns True would let a graph build on an empty store and flips the demand-gate test).
+# DEMAND GATE (architecture.md 8.2). The PPR arm needs a graph to walk: with no edge the walk is the
+# lexical seed with extra steps, so the arm is refused and retrieval stays lexical, with the trace
+# note `graph-empty`. The count is the as-of active edges the walk would read (store/read.py
+# `ppr_edge_count`: the four-axis clause, the compartment and the visible blocks of the question),
+# so a store whose edges were all retired, retracted or quarantined counts zero. Deterministic and
+# total (a hollowed gate that always returns True would let a walk run on an empty graph and flips
+# the demand-gate test).
 GRAPH_EVENT_FLOOR = 3
 
 
-def graph_demand_met(active_block_count: int, floor: int = GRAPH_EVENT_FLOOR) -> bool:
-    """True iff the store carries enough anchored blocks to make a graph walk meaningful. Below the
-    event floor the demand gate refuses to build a graph; retrieval falls back to the lexical seed."""
-    return int(active_block_count) >= int(floor)
+def graph_demand_met(active_edge_count: int, floor: int = GRAPH_EVENT_FLOOR) -> bool:
+    """True iff the as-of graph holds at least `floor` active edges, enough for a walk to mean
+    something. Below it the demand gate refuses the arm; retrieval keeps the lexical seed."""
+    return int(active_edge_count) >= int(floor)

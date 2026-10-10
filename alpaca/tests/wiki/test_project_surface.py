@@ -146,7 +146,42 @@ def test_context_surfaces_uncaptured_events(project):
     conn.close()
     text = service.context(project, 'SQLite offline')
     assert '1 event(s) not captured' in text
-    assert '--refresh' in text
+    # t-334: the line names who lands the event and the read-only check, never a replay
+    assert '--refresh' not in text and 'wiki recover' not in text
+    assert 'session hooks land them' in text and '`bin/alpaca wiki status`' in text
+
+
+def test_context_points_to_the_collector_when_observability_is_on(project):
+    """t-334: with the observability collector on, the lag is its next pass."""
+    from alpaca.wiki import service
+    conn = db.connect(project)
+    db.append_event(conn, session='s', actor='test', kind='result', data={'body': 'not captured'})
+    conn.close()
+    folder = Path(project, '.alpaca/observability')
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / 'enabled').touch()
+    text = service.context(project, 'SQLite offline')
+    assert '1 event(s) not captured yet; the collector lands them' in text
+    assert '`bin/alpaca collect status`' in text and '--refresh' not in text
+
+
+def test_context_after_a_refresh_does_not_count_the_refresh_report(project, capsys):
+    """t-334 (fix-b2-b4.md 5.5): the refresh's own `wiki-recovered` event cannot be landed by the
+    replay that it reports, so `context` does not count it and does not ask for another refresh.
+    `status` still counts it as missing."""
+    from alpaca.wiki import service
+    conn = db.connect(project)
+    db.append_event(conn, session='s', actor='test', kind='result', data={'body': 'lantern rota'})
+    conn.close()
+    assert cli.main(['wiki', 'context', 'lantern rota', '--refresh']) == 0
+    text = capsys.readouterr().out
+    assert 'not captured' not in text, text
+    capture = service.status(project)['capture']
+    assert capture['missing_events'] == 1 and capture['missing_recovery_events'] == 1
+    conn = db.connect(project)
+    db.append_event(conn, session='s', actor='test', kind='result', data={'body': 'a later event'})
+    conn.close()
+    assert '1 event(s) not captured yet' in service.context(project, 'lantern rota')
 
 
 def test_ingest_cannot_publish_an_existing_private_source(project):

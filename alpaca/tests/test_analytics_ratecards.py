@@ -1,7 +1,9 @@
 """Recorded rate cards: parse the official price page, record with provenance, reprice analytics.
 
 No test touches the network: the page comes from a trimmed copy of the official pricing page
-saved on 2026-09-25 (fixtures/anthropic_pricing_trimmed.md) and the fetcher is injected.
+saved on 2026-09-25 (fixtures/anthropic_pricing_trimmed.md) and the fetcher is injected. The two
+Claude Haiku 5.5 prompt-size rows come from the page copy saved on 2026-10-08 (sha256
+9c0140eac6b4e3f215cc4792c3fbede37ba9a476e7e4cea9939098f7402d5228).
 """
 import hashlib
 import json
@@ -772,3 +774,106 @@ def test_f10_read_gaps_rebuilds_the_fix_from_the_checked_model(project):
     assert rows["gpt-7-nova"]["provider"] is None
     assert "rm -rf" not in rows["gpt-7-nova"]["fix"] and "curl" not in rows["gpt-7-nova"]["fix"]
     assert "--provider <provider>" in rows["gpt-7-nova"]["fix"]
+
+
+# --- t-427: rows priced by prompt length ---
+
+HAIKU_UP_TO = ("0.1", "0.01", "0.125", "0.2", None, "0.5")
+HAIKU_OVER = ("0.5", "0.05", "0.625", "1", None, "2.5")
+
+
+def haiku_rows(page=PAGE):
+    return [line for line in page.splitlines() if line.startswith("| Claude Haiku 5.5 (for prompts")]
+
+
+def test_parse_reads_both_prompt_size_rows():
+    got = ratecards.parse_anthropic(PAGE, "claude-haiku-5-5")
+    assert got["rates"] == HAIKU_UP_TO and got["long_context_rates"] == HAIKU_OVER
+    assert got["context_threshold_tokens"] == 100000
+    assert got["row"].splitlines() == haiku_rows()
+
+
+def test_parse_reads_prompt_size_rows_in_either_order():
+    up_to, over = haiku_rows()
+    swapped = PAGE.replace(up_to + "\n" + over, over + "\n" + up_to)
+    assert swapped != PAGE
+    got = ratecards.parse_anthropic(swapped, "claude-haiku-5-5")
+    assert got["rates"] == HAIKU_UP_TO and got["long_context_rates"] == HAIKU_OVER
+
+
+@pytest.mark.parametrize("change", ["drop-up-to", "drop-over", "duplicate", "other-boundary", "plain-row-too"])
+def test_parse_refuses_an_incomplete_or_ambiguous_prompt_size_pair(change):
+    up_to, over = haiku_rows()
+    replacement = {"drop-up-to": over, "drop-over": up_to, "duplicate": up_to + "\n" + up_to + "\n" + over,
+                   "other-boundary": up_to + "\n" + over.replace("100,000", "200,000"),
+                   "plain-row-too": up_to + "\n" + over + "\n" + up_to.replace(" (for prompts up to 100,000 tokens)",
+                                                                              "")}[change]
+    page = PAGE.replace(up_to + "\n" + over, replacement)
+    assert page != PAGE
+    with pytest.raises(ValueError):
+        ratecards.parse_anthropic(page, "claude-haiku-5-5")
+
+
+def test_a_model_priced_by_prompt_length_is_never_recorded_as_one_row(project):
+    page = {"url": ratecards.ANTHROPIC_PRICING_MD, "text": PAGE, "sha256": PAGE_SHA, "copy": None}
+    with pytest.raises(ValueError, match="priced by prompt length"):
+        ratecards.fetch_anthropic(project, "claude-haiku-5-5", page=page)
+
+
+def test_load_skips_an_event_with_a_second_rate_row(project):
+    record_opus_4_7(project)
+    data = dict(cards(project)["claude-opus-4-7"], model="claude-opus-4-7", rates=["1", ".1", "1.25", "2", None, "5"],
+                context_threshold_tokens=1000, long_context_rates=["2", ".2", "2.5", "4", None, "10"])
+    conn = db.connect(project)
+    try:
+        with db.transaction(conn):
+            db.append_event(conn, session="synthetic", actor="analytics", kind=ratecards.EVENT,
+                            ref="claude-opus-4-7", data=data, conn_in_txn=True)
+    finally:
+        conn.close()
+    assert cards(project)["claude-opus-4-7"]["rates"] == ("5", "0.5", "6.25", "10", None, "25")
+
+
+# A row that names the model with a qualifier other than the prompt-size pair is refused, never
+# skipped: a skipped row could leave the other row of a pair to price every prompt.
+
+def _row(name, page=PAGE):
+    return next(line for line in page.splitlines() if line.startswith("| %s " % name))
+
+
+def test_parse_refuses_a_qualifier_other_than_the_prompt_size_pair():
+    up_to = haiku_rows()[0]
+    renamed = up_to.replace("(for prompts up to 100,000 tokens)", "(for prompts between 1 and 2 tokens)")
+    page = PAGE.replace(up_to, renamed)
+    assert page != PAGE
+    with pytest.raises(ValueError, match="qualifies Claude Haiku 5.5"):
+        ratecards.parse_anthropic(page, "claude-haiku-5-5")
+
+
+def test_parse_refuses_a_qualified_row_beside_a_plain_row():
+    plain = _row("Claude Haiku 4.5")
+    preview = plain.replace("Claude Haiku 4.5          ", "Claude Haiku 4.5 (preview)", 1)
+    assert preview != plain and len(preview) == len(plain)
+    page = PAGE.replace(plain, plain + "\n" + preview)
+    with pytest.raises(ValueError, match="qualifies Claude Haiku 4.5"):
+        ratecards.parse_anthropic(page, "claude-haiku-4-5")
+
+
+def test_the_unchanged_page_still_parses_every_built_in_claude_card():
+    # Every other parenthesised qualifier on the page is a trailing link that _clean_name strips.
+    models = [model for model, card in pricing._CARDS.items() if card["provider"] == "anthropic"]
+    assert "claude-haiku-5-5" in models and "claude-opus-4-1" not in models
+    for model in models + ["claude-opus-4-1", "claude-opus-4", "claude-sonnet-4", "claude-3-5-haiku", "claude-mythos-5"]:
+        assert ratecards.parse_anthropic(PAGE, model)["rates"], model
+
+
+def test_a_shorter_name_never_takes_a_qualified_row_of_a_longer_one():
+    # "Claude Opus 5" must not reach "Claude Opus 5.5 (preview)": no row, not a qualifier refusal.
+    opus_5, opus_5_5 = _row("Claude Opus 5"), _row("Claude Opus 5.5")
+    qualified = opus_5_5.replace("Claude Opus 5.5          ", "Claude Opus 5.5 (preview)", 1)
+    assert qualified != opus_5_5 and len(qualified) == len(opus_5_5)
+    page = PAGE.replace(opus_5 + "\n", "").replace(opus_5_5, qualified)
+    with pytest.raises(ValueError, match="no row for Claude Opus 5\\Z"):
+        ratecards.parse_anthropic(page, "claude-opus-5")
+    with pytest.raises(ValueError, match="qualifies Claude Opus 5.5"):
+        ratecards.parse_anthropic(page, "claude-opus-5-5")

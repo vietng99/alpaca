@@ -32,6 +32,7 @@ import sqlite3
 from pathlib import Path
 
 CHAR_LIMIT = 400  # a lesson is a terse prior, not an essay
+_LESSON_ID = re.compile(r"^L-[A-Za-z0-9_-]{1,80}$")
 
 
 class RejectedLesson(Exception):
@@ -204,8 +205,21 @@ class LessonsStore:
     # -- write path ------------------------------------------------------
 
     def propose(self, label, description, value, provenance, governs, prescribes,
-                run_id="", proposer="analyst"):
-        """lessons.propose(candidate). Admits only on entailment AND a discriminating probe."""
+                run_id="", proposer="analyst", lesson_id=""):
+        """lessons.propose(candidate). Admits only on entailment AND a discriminating probe.
+
+        `lesson_id` is optional. Without it the id is a slug of the label, so two lessons with one
+        label slug share an id. A caller that derives its own id (Rune2 derives it from the
+        candidate id, architecture.md 7.4, OB-06) passes it here, and an id that any `lesson-admit`
+        row has ever used is refused: an admission never overwrites another candidate's lesson."""
+        if lesson_id:
+            if not _LESSON_ID.match(lesson_id):
+                raise RejectedLesson(f"lesson id {lesson_id!r} must match L-[A-Za-z0-9_-]{{1,80}}",
+                                     control="NC-lesson-id")
+            if self.conn.execute("SELECT 1 FROM lessons_log WHERE event='lesson-admit' AND id=?",
+                                 (lesson_id,)).fetchone():
+                raise RejectedLesson(f"lesson id {lesson_id!r} was already admitted; an admission "
+                                     "never overwrites a retained lesson", control="NC-id-collision")
         if len(value) > CHAR_LIMIT:
             raise RejectedLesson(
                 f"value is {len(value)} chars, cap is {CHAR_LIMIT} - a lesson is a terse "
@@ -229,7 +243,7 @@ class LessonsStore:
             self._log("lesson-reject", label, control="NC-reward", reason=pdetail, run_id=run_id)
             raise RejectedLesson(pdetail, control="NC-reward")
 
-        lesson_id = self._mint_id(label)
+        lesson_id = lesson_id or self._mint_id(label)
         sig = self._signature(governs, prescribes)
         block = {
             "id": lesson_id,
@@ -283,19 +297,45 @@ class LessonsStore:
     # -- helpers ---------------------------------------------------------
 
     def _retained(self):
+        """The admitted lessons still in force, replaying the log in order: an admit adds the block,
+        a supersede and a `lesson-withdraw` (architecture.md 7.6, 10.2) remove the id they name."""
         out = {}
         for row in self.conn.execute(
-            "SELECT id, block_json FROM lessons_log WHERE event='lesson-admit' "
-            "AND block_json IS NOT NULL ORDER BY seq"
+            "SELECT event, id, block_json, supersedes FROM lessons_log "
+            "WHERE event IN ('lesson-admit','lesson-supersede','lesson-withdraw') ORDER BY seq"
         ).fetchall():
-            block = json.loads(row["block_json"] if isinstance(row, sqlite3.Row) else row[1])
-            out[block["id"]] = block
-        for row in self.conn.execute(
-            "SELECT supersedes FROM lessons_log WHERE event='lesson-supersede'"
-        ).fetchall():
-            sup = row["supersedes"] if isinstance(row, sqlite3.Row) else row[0]
-            out.pop(sup, None)
+            event, ident, block_json, sup = (row[0], row[1], row[2], row[3])
+            if event == "lesson-admit":
+                if block_json is not None:
+                    block = json.loads(block_json)
+                    out[block["id"]] = block
+            elif event == "lesson-supersede":
+                out.pop(sup, None)
+            else:
+                out.pop(ident, None)
         return list(out.values())
+
+    def withdraw(self, lesson_id, reason=""):
+        """Withdraw an admitted lesson: a `lesson-withdraw` row that `_retained` honors. Nothing is
+        deleted; an id that is not retained is left as it is."""
+        if not any(b["id"] == lesson_id for b in self._retained()):
+            return False
+        self._log("lesson-withdraw", lesson_id, reason=reason)
+        return True
+
+    def replay_admitted(self, block, run_id=""):
+        """Write the `lesson-admit` row of a lesson that an earlier admission recorded (a rebuild
+        from the record, architecture.md 10.2), without the probe or the entailment check that
+        admitted it: the gate ran once, live, and its verdict is the record. Idempotent: the same
+        block again writes nothing. Returns True iff a row was written."""
+        if not isinstance(block, dict) or not block.get("id"):
+            raise ValueError("a recorded lesson names its id")
+        text = json.dumps(block, sort_keys=True)
+        if self.conn.execute("SELECT 1 FROM lessons_log WHERE event='lesson-admit' AND id=? "
+                             "AND block_json=?", (block["id"], text)).fetchone():
+            return False
+        self._log("lesson-admit", block["id"], block=block, reward=1, run_id=run_id)
+        return True
 
     @staticmethod
     def _mint_id(label):
@@ -320,7 +360,8 @@ class LessonsStore:
 def write(conn: sqlite3.Connection, lesson: dict, probe) -> dict:
     """Interface (M2.12): admit a procedural lesson through the discriminating-probe write-gate.
 
-    `lesson` is a dict {label, description, value, provenance, governs, prescribes, [run_id]} and
+    `lesson` is a dict {label, description, value, provenance, governs, prescribes, [run_id],
+    [lesson_id]} and
     `probe` is the held-out corpus (a list of {id, tag, outcome, action}, or a jsonl path). Returns
     the admitted block; raises RejectedLesson when the probe does not discriminate (or any other
     control refuses). A lesson without a discriminating probe is refused, never silently admitted.

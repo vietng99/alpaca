@@ -29,6 +29,7 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 import math
+import sys
 from typing import Optional
 
 from ..determinism import normalize_text
@@ -77,31 +78,76 @@ def _slug(surface: str) -> str:
     return s
 
 
+def _token_tuple(normalized: str) -> tuple[str, ...]:
+    """The distinct tokens of a normalized text: the members of `set(normalized.split())`, held as a
+    tuple of interned strings. An index of every active block holds tens of millions of token entries
+    over a vocabulary of about two million (the live store, 2026-10-06): one shared string per token
+    and a tuple per block instead of a set take about 3 GB less, and `detect` reads only the members
+    and their count, so every verdict is the one the set gave."""
+    return tuple(dict.fromkeys(map(sys.intern, normalized.split())))
+
+
 class EchoIndex:
     """Incremental normalized/token index for deterministic echo detection."""
 
     def __init__(self):
         self._doc: dict[str, str | None] = {}
+        self._by_doc: dict[str | None, set[str]] = defaultdict(set)
+        self._by_size: dict[int, set[str]] = defaultdict(set)
         self._norm: dict[str, str] = {}
-        self._tokens: dict[str, set[str]] = {}
+        self._tokens: dict[str, tuple[str, ...]] = {}     # distinct tokens (`_token_tuple`)
         self._exact: dict[str, set[str]] = defaultdict(set)
         self._postings: dict[str, set[str]] = defaultdict(set)
 
     def add(self, block_id: str, text: str, doc_id: str | None = None) -> None:
         self.remove(block_id)
         normalized = normalize_text(text)
-        tokens = set(normalized.split())
+        tokens = _token_tuple(normalized)
         self._doc[block_id] = doc_id
+        self._by_doc[doc_id].add(block_id)
         self._norm[block_id] = normalized
         self._tokens[block_id] = tokens
+        self._by_size[len(tokens)].add(block_id)
         self._exact[normalized].add(block_id)
         for token in tokens:
             self._postings[token].add(block_id)
 
+    def load(self, rows) -> None:
+        """Bulk `add` of `(block_id, text, doc_id)` rows into an empty index: the same index `add`
+        builds, without the per-block remove and method calls (the load of a whole store). It fills
+        the by-document and by-size maps `add` fills (main a24aef856, b70a1022f), which `detect`
+        reads to exclude a document's own blocks and to bound large comparisons."""
+        docs, norms, tokens_of = self._doc, self._norm, self._tokens
+        by_doc, by_size = self._by_doc, self._by_size
+        exact, postings = self._exact, self._postings
+        for block_id, text, doc_id in rows:
+            normalized = normalize_text(text)
+            tokens = _token_tuple(normalized)
+            if doc_id is not None:
+                doc_id = sys.intern(doc_id)              # one string per document, not per block
+            docs[block_id] = doc_id
+            by_doc[doc_id].add(block_id)
+            norms[block_id] = normalized
+            tokens_of[block_id] = tokens
+            by_size[len(tokens)].add(block_id)
+            exact[normalized].add(block_id)
+            for token in tokens:
+                postings[token].add(block_id)
+
     def remove(self, block_id: str) -> None:
         normalized = self._norm.pop(block_id, None)
-        tokens = self._tokens.pop(block_id, set())
-        self._doc.pop(block_id, None)
+        tokens = self._tokens.pop(block_id, ())
+        sized = self._by_size.get(len(tokens))
+        if sized is not None:
+            sized.discard(block_id)
+            if not sized:
+                self._by_size.pop(len(tokens), None)
+        doc_id = self._doc.pop(block_id, None)
+        members = self._by_doc.get(doc_id)
+        if members is not None:
+            members.discard(block_id)
+            if not members:
+                self._by_doc.pop(doc_id, None)
         if normalized is not None:
             ids = self._exact.get(normalized)
             if ids is not None:
@@ -120,10 +166,9 @@ class EchoIndex:
         normalized = normalize_text(text)
         tokens = set(normalized.split())
 
-        def allowed(block_id: str) -> bool:
-            return exclude_doc_id is None or self._doc.get(block_id) != exclude_doc_id
-
-        exact = sorted(block_id for block_id in self._exact.get(normalized, ()) if allowed(block_id))
+        excluded = self._by_doc.get(exclude_doc_id, ()) if exclude_doc_id is not None else ()
+        exact_ids = self._exact.get(normalized, ())
+        exact = sorted(set(exact_ids).difference(excluded)) if excluded else sorted(exact_ids)
         if exact:
             return "quotes", exact[0], None
 
@@ -137,8 +182,10 @@ class EchoIndex:
         ]
         for token in probes:
             candidates.update(self._postings.get(token, ()))
-        candidates = {block_id for block_id in candidates if allowed(block_id)}
-        for block_id in sorted(candidates):
+        if excluded:
+            candidates.difference_update(excluded)
+        ordered = sorted(candidates)
+        for block_id in ordered:
             known = self._norm[block_id]
             if known and known in normalized:
                 return "quotes", block_id, None
@@ -148,10 +195,27 @@ class EchoIndex:
             return "attributes", None, _slug(match.group(1))
 
         best_id, best_score = None, 0.0
-        for block_id in sorted(candidates):
+        query_size = len(tokens)
+        if len(candidates) > 512:
+            eligible = set()
+            for known_size, members in self._by_size.items():
+                largest = max(query_size, known_size)
+                # Use the same ratio comparison as the per-block bound. Products
+                # and rounded integer bounds differ at floating-point thresholds.
+                if not largest or min(query_size, known_size) / largest >= restate_threshold:
+                    eligible.update(candidates.intersection(members))
+            ordered = sorted(eligible)
+        for block_id in ordered:
             known_tokens = self._tokens[block_id]
-            union = tokens | known_tokens
-            score = len(tokens & known_tokens) / len(union) if union else 0.0
+            known_size = len(known_tokens)
+            largest = max(query_size, known_size)
+            # Jaccard cannot exceed the smaller set's size divided by the larger.
+            # Quote and attribution precedence have already been evaluated.
+            if largest and min(query_size, known_size) / largest < restate_threshold:
+                continue
+            overlap = len(tokens.intersection(known_tokens))   # known_tokens holds no repeats
+            union_size = query_size + known_size - overlap
+            score = overlap / union_size if union_size else 0.0
             if score > best_score:
                 best_id, best_score = block_id, score
         if best_id is not None and best_score >= restate_threshold:

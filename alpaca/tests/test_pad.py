@@ -22,7 +22,7 @@ def test_pad_shows_current_op_and_first_task(project):
 
 def test_pad_counts_stay_consistent_when_a_lease_expires(project):
     cli.main(["init"]); cli.main(["onboard", "--name", "demo", "--who", "v:owner", "--what", "w"])
-    cli.main(["op", "new", "x"]); cli.main(["task", "add", "--title", "task", "op-001", "s"])
+    cli.main(["op", "new", "x"]); cli.main(["task", "add", "--title", "task", "op-001", "s", "--phase", "build"])
     cli.main(["task", "claim", "t-001", "--by", "w1", "--minutes", "-5"])
     text = pad.render(project)
     header_events = int(text.split("events: ")[1].split(" |")[0])
@@ -65,7 +65,7 @@ def test_active_now_names_the_live_session_its_tool_and_what_it_holds(project):
     util.set_clock(clock.FixedClock("2026-06-01T00:00:00+00:00", step=0))
     try:
         cli.main(["init"]); cli.main(["onboard", "--name", "demo", "--who", "v:owner", "--what", "w"])
-        cli.main(["op", "new", "x"]); cli.main(["task", "add", "--title", "task", "op-001", "a task to hold"])
+        cli.main(["op", "new", "x"]); cli.main(["task", "add", "--title", "task", "op-001", "a task to hold", "--phase", "build"])
         cli.main(["--session", "aaaaaaaa-1111", "task", "claim", "t-001", "--by", "w1",
                   "--minutes", "60"])
         conn = db.connect(project)
@@ -101,7 +101,7 @@ def test_progress_reports_each_open_op_and_the_op_closed_today(project):
     cli.main(["init"]); cli.main(["onboard", "--name", "demo", "--who", "v:owner", "--what", "w"])
     cli.main(["op", "new", "first"])
     for statement in ("one", "two"):
-        cli.main(["task", "add", "--title", "task", "op-001", statement])
+        cli.main(["task", "add", "--title", "task", "op-001", statement, "--phase", "build"])
     cli.main(["task", "move", "t-001", "done", "--proof", proofkit.seal_for(project, "t-001")])
     block = pad.render(project).split("## Progress")[1].split("## Current op")[0]
     assert "op-001" in block and "open" in block and "tasks 1/2" in block
@@ -116,7 +116,7 @@ def test_progress_reports_each_open_op_and_the_op_closed_today(project):
 
 def test_recent_events_counts_the_noise_instead_of_listing_it(project):
     cli.main(["init"]); cli.main(["onboard", "--name", "demo", "--who", "v:owner", "--what", "w"])
-    cli.main(["op", "new", "x"]); cli.main(["task", "add", "--title", "task", "op-001", "a real task"])
+    cli.main(["op", "new", "x"]); cli.main(["task", "add", "--title", "task", "op-001", "a real task", "--phase", "build"])
     conn = db.connect(project)
     _worker(conn, "aaaaaaaa-1111", beats=20)
     for n in range(5):
@@ -136,7 +136,7 @@ def test_the_pad_is_a_pure_function_of_the_record(project):
     the declared volatile lines."""
     from alpaca import freshness
     cli.main(["init"]); cli.main(["onboard", "--name", "demo", "--who", "v:owner", "--what", "w"])
-    cli.main(["op", "new", "x"]); cli.main(["task", "add", "--title", "task", "op-001", "a real task"])
+    cli.main(["op", "new", "x"]); cli.main(["task", "add", "--title", "task", "op-001", "a real task", "--phase", "build"])
     conn = db.connect(project)
     _worker(conn, "aaaaaaaa-1111")
     for n in range(4):
@@ -151,7 +151,7 @@ def test_next_action_can_be_read_without_the_lease_sweep(project):
     """A projection renders the record; it never writes to it. The read-only caller gets the same
     line without the sweep that a pad render performs."""
     cli.main(["init"]); cli.main(["onboard", "--name", "demo", "--who", "v:owner", "--what", "w"])
-    cli.main(["op", "new", "x"]); cli.main(["task", "add", "--title", "task", "op-001", "s"])
+    cli.main(["op", "new", "x"]); cli.main(["task", "add", "--title", "task", "op-001", "s", "--phase", "build"])
     cli.main(["task", "claim", "t-001", "--by", "w1", "--minutes", "-5"])
     conn = db.connect(project)
     before = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
@@ -166,7 +166,7 @@ def test_next_action_can_be_read_without_the_lease_sweep(project):
 def test_pad_onboarded_without_op_and_with_all_done(project):
     cli.main(["init"]); cli.main(["onboard", "--name", "demo", "--who", "v:owner", "--what", "w"])
     assert pad.next_action(project).startswith("no open op")
-    cli.main(["op", "new", "x"]); cli.main(["task", "add", "--title", "task", "op-001", "s"])
+    cli.main(["op", "new", "x"]); cli.main(["task", "add", "--title", "task", "op-001", "s", "--phase", "build"])
     cli.main(["task", "move", "t-001", "done", "--proof", proofkit.seal_for(project, "t-001")])
     assert "has no open tasks" in pad.next_action(project)
     assert "(none)" in pad.render(project)
@@ -202,9 +202,9 @@ def _park_two_ops():
     _onboarded()
     assert cli.main(["op", "new", "memory store"]) == 0                       # op-001
     assert cli.main(["op", "new", "research engine"]) == 0                   # op-002
-    cli.main(["task", "add", "--title", "memory scope", "op-001", "define the memory scope"])
-    cli.main(["task", "add", "--title", "engine design", "op-002", "design the engine"])
-    cli.main(["task", "add", "--title", "memory later", "op-001", "a later memory task"])
+    cli.main(["task", "add", "--title", "memory scope", "op-001", "define the memory scope", "--phase", "build"])
+    cli.main(["task", "add", "--title", "engine design", "op-002", "design the engine", "--phase", "build"])
+    cli.main(["task", "add", "--title", "memory later", "op-001", "a later memory task", "--phase", "build"])
     for sid, task, op, word in ((MEMORY, "t-001", "op-001", "memory"),
                                 (ENGINE, "t-002", "op-002", "engine")):
         _session(sid, "session", "start")
@@ -281,7 +281,7 @@ def test_resume_points_file_a_checkpoint_under_the_op_its_session_held_when_it_w
     an op it only claimed afterwards."""
     _park_two_ops()
     both = "both0003-cccc"
-    cli.main(["task", "add", "--title", "engine tests", "op-002", "test the engine"])      # t-004
+    cli.main(["task", "add", "--title", "engine tests", "op-002", "test the engine", "--phase", "build"])      # t-004
     _session(both, "session", "start")
     _session(both, "task", "claim", "t-004", "--by", "w-both", "--minutes", "600")
     _session(both, "session", "checkpoint", "--note", "both on the engine")
@@ -350,7 +350,7 @@ def test_resume_points_say_so_for_an_op_with_nothing_parked(project):
     entry = _entries(pad.render(project))["op-001"]
     assert entry == ["- op-001  quiet op", "  - next: (no open task)",
                      "  - handoff: (no handoff)", "  - checkpoint: (no checkpoint)"]
-    cli.main(["task", "add", "--title", "first step", "op-001", "take the first step"])
+    cli.main(["task", "add", "--title", "first step", "op-001", "take the first step", "--phase", "build"])
     entry = _entries(pad.render(project))["op-001"]
     assert _field(entry, "next") == "t-001 [open] first step (unclaimed)"
     assert _field(entry, "handoff") == "(no handoff)"
@@ -378,7 +378,7 @@ def test_resume_points_keep_each_field_on_one_line(project):
     either stays inside its one line, escaped, and a long one is cut."""
     _onboarded()
     assert cli.main(["op", "new", "one op"]) == 0
-    cli.main(["task", "add", "--title", "a task", "op-001", "a task"])
+    cli.main(["task", "add", "--title", "a task", "op-001", "a task", "--phase", "build"])
     _session(MEMORY, "session", "start")
     _session(MEMORY, "task", "claim", "t-001", "--by", "w", "--minutes", "600")
     _handoff(MEMORY, "L|R\nsecond line " + "x" * 400, ref="op-001")

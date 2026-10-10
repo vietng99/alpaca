@@ -8,6 +8,7 @@ Backup directories never contain executable tools, host credentials or worktrees
 """
 from __future__ import annotations
 
+import contextlib
 from contextlib import ExitStack
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 import hashlib
@@ -179,8 +180,30 @@ def create(root, *, destination=None, approved_sources=()):
         raise
 
 
+@contextlib.contextmanager
+def _held(root, parts):
+    """`<root>/.alpaca/<parts...>` opened component by component with no link followed (created when
+    absent), yielding a path through the held descriptor: every later use of it lands in that folder
+    even if a component above is replaced by a link meanwhile (t-424)."""
+    from alpaca import _nofollow
+    runtime_fd = _nofollow.open_runtime(str(root))
+    try:
+        fd = _nofollow.open_dir_below(runtime_fd, tuple(parts), create=True, chmod=False)
+    finally:
+        os.close(runtime_fd)
+    try:
+        yield Path('/proc/self/fd/%d' % fd)
+    finally:
+        os.close(fd)
+
+
 def _create(root, *, destination=None, approved_sources=()):
     root = Path(root).resolve()
+    with _held(root, ('backups',)) as held:
+        return _create_in(root, held, destination=destination, approved_sources=approved_sources)
+
+
+def _create_in(root, held, *, destination=None, approved_sources=()):
     home = root / '.alpaca/backups'
     destination = Path(destination).absolute() if destination else home / (time.strftime('%Y%m%dT%H%M%S') + '-' + uuid.uuid4().hex[:12])
     destination = artifacts.contained(root, destination)
@@ -188,8 +211,7 @@ def _create(root, *, destination=None, approved_sources=()):
         raise ValueError('backup destination must be under project .alpaca/backups')
     if destination.exists():
         raise ValueError('backup destination already exists')
-    home.mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(prefix='.pending-', dir=home))
+    staging = Path(tempfile.mkdtemp(prefix='.pending-', dir=held))
     data = staging / 'data'; data.mkdir()
     sources = set(); excluded_evidence = set(); issues = []
     main = root / '.alpaca/alpaca.db'
@@ -318,8 +340,8 @@ def _create(root, *, destination=None, approved_sources=()):
             if not result['ok']:
                 raise ValueError('backup verification failed: ' + '; '.join(result['issues']))
             artifacts._sync_dir(staging)
-            os.replace(staging, destination)
-            artifacts._sync_dir(home)
+            os.replace(staging, held / destination.name)
+            artifacts._sync_dir(held)
         _record_verification(root, destination, result)
         return manifest
     except BaseException:
@@ -464,10 +486,12 @@ def _record_verification(root, path, result):
     rel = '.alpaca/backups/verifications/' + ident + '.json'
     receipt = dict(result, latest=str(path) if path is not None else None, verified_at=time.time(),
                    status='ok' if result['ok'] else 'error', verification_receipt=rel)
-    artifacts.atomic_json(root / rel, receipt)
-    artifacts.atomic_json(root / '.alpaca/backups/latest-verification.json', receipt)
-    if result['ok']:
-        artifacts.atomic_json(root / '.alpaca/backups/last-successful-verification.json', receipt)
+    with _held(root, ('backups', 'verifications')) as folder:
+        artifacts.atomic_json(folder / (ident + '.json'), receipt)
+    with _held(root, ('backups',)) as folder:
+        artifacts.atomic_json(folder / 'latest-verification.json', receipt)
+        if result['ok']:
+            artifacts.atomic_json(folder / 'last-successful-verification.json', receipt)
     return receipt
 
 

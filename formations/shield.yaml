@@ -1,0 +1,105 @@
+# Shield: the delegation policy every formation runs under.
+#
+# One file, read by alpaca/formation/shield.py and by the /shield skill. It decides three things:
+# which model a spawned role runs on (tiers), what happens when a round of checks fails
+# (escalation), and how verifiers spend tokens (verifier). An archetype's default tier lives in
+# its brief (agents/<archetype>.md, `tier:`); a formation role may override it with its own
+# `tier:`. Raising a role's tier needs evidence (an investigator report); lowering is free.
+
+version: 1
+
+# Tiers, weakest first. `session` is the main chat itself: it keeps the model the operator chose
+# and is never spawned.
+tiers: [low, mid, high, top]
+
+# Tier to model, per runtime. Every spawn names its model explicitly; nothing inherits the
+# session model. A runtime without a complete table is refused.
+runtimes:
+  claude:
+    # Owner rule 2026-10-02: only Sonnet 5.5 and Opus 5.5; no Fable. The 2026-10-08 Haiku 5.5
+    # trial of the low tier (dec-ad4dd702ef73) ended with misses that a later Opus audit found
+    # (.alpaca/proofs/op-009/t-296.logs/haiku-trial.md), so per that decision's consequence low
+    # is Sonnet again (t-440). Research roles never resolve to low (their formations pin them to
+    # mid), and paired verifiers stay Sonnet plus Opus.
+    low: sonnet    # exact reads, census, quote copying, script runners that judge nothing
+    mid: sonnet    # building, fixing, judgment lenses that a later high check confirms
+    high: opus     # deciding what is true: investigators, adversarial lens, confirmers, judges
+    top: opus      # folds and verdict panels a skill doctrine assigns to its strongest model
+  codex:
+    # Owner request 2026-10-04: port Shield; Sonnet tiers use GPT-6.1 Sol.
+    low: gpt-6.1-sol
+    mid: gpt-6.1-sol
+    high: gpt-6-astra
+    top: gpt-6-astra
+
+# Design work (writing a design document, fixing it after a check round, and every design check
+# lens) runs on this tier. Owner rule 2026-10-03: every design is Opus 5.5, never Sonnet.
+design:
+  tier: high
+
+# Think first (t-221, owner decision dec-d84f544d3907): spend a fixed number of agents before
+# round 1 so the build starts from the bug class, its sibling cases, an attack set written before
+# the build, and a choice between patching in place and removing the class. Runs once per task,
+# before the design loop when there is one. Sizes: full runs every step; lite runs the `lite`
+# list; off is for a one-file change with no attack surface and is justified in the proof.
+think:
+  default_size: lite
+  full_when: [adversarial-lens, follow-up]   # a redesign always runs full
+  steps:
+    trace:      {archetype: scout, tier: low}                 # code paths and enforcement points
+    history:    {archetype: scout, tier: low}                 # earlier findings on the same code
+    probe:      {archetype: scout, tier: low, when: task-names-probe}   # a cheap real run, before
+    cause:      {archetype: judge, tier: high}                # the bug class and its siblings
+    premortem:  {archetype: red, tier: high}                  # the attack set, as runnable checks
+    approaches: {archetype: eng, tier: design, count: 2}      # patch in place / remove the class
+    pick:       {archetype: judge, tier: high}                # the brief the build starts from
+  lite: [trace, cause, pick]
+
+escalation:
+  round_cap: 5               # a formation may lower it, never raise it
+  investigator:
+    tier: high
+    when: every-failed-round
+    # t-221: the investigator finishes before the next fix starts, and its report goes into that
+    # fix's brief. Racing it against the fix let a fixer repeat a mistake the investigator had
+    # already named (op-009 t-198, investigate-s2.md D2 then fix round s2).
+    runs: before-next-fix
+    reports_to: orchestrator
+    report: [cause, how, direction, alternative, disputed, file]
+  # The orchestrator acts on the investigator's cause before the next fix starts.
+  causes:
+    builder-error: continue
+    checker-false-positive: judge-dispute
+    contract-unclear: cancel-and-ask-owner   # the contract is the owner's; only the owner fixes it
+    wrong-direction: redesign                # back through the think stage, no owner choice
+    capability: promote-fixer
+  # Every fix brief carries these rules (SKILL.md section 4 says what each means).
+  fix_rules: [fix-the-class, probe-impossibility-claims]
+  # Stop patching when the rounds do not converge: one Opus class reviewer reads every finding so
+  # far and names the bug class behind them, or says there is none. A named class sends the task
+  # back through the think stage once (redesign); the round count is kept, so the cap still holds.
+  class_check:
+    after_failed_rounds: 3     # at the latest
+    non_converging: true       # earlier: a failed round with as many blocking items as the one before
+    tier: high
+    max_redesigns: 1
+  promote:
+    steps: 1                 # one tier up per promotion
+    ceiling: high
+  at_cap: block-and-ask-owner
+  judge_tier: high           # the judge that rules on a disputed finding
+
+verifier:
+  mechanical: script         # suite runs, failure diffs, grep checks, citation resolution
+  regression_tier: low       # the agent that runs the regression script and judges nothing
+  judgment_lens_tier: mid
+  adversarial_lens_tier: high
+  recheck: failed-lenses-only
+  every_round: [regression-script]
+  confirmer:
+    tier: high
+    blind: true
+    when: all-lenses-pass
+  attack_freeze_round: 2     # the pre-mortem set is round 0; lenses add in rounds 1-2; later classes are follow-ups
+  minor_findings: ledger-once
+  paired_verifiers: [mid, high]

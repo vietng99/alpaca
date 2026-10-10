@@ -1,0 +1,21 @@
+Print newline, word, and byte counts for each FILE, and a total line if more than one FILE is
+specified.
+
+Usage: wc [OPTION]... [FILE]...
+
+Arguments:
+  [files]...  
+
+Options:
+  -c, --bytes            print the byte counts
+  -m, --chars            print the character counts
+      --files0-from <F>  read input from the files specified by
+                         NUL-terminated names in file F;
+                         If F is - then read names from standard input
+  -l, --lines            print the newline counts
+  -L, --max-line-length  print the length of the longest line
+      --total <WHEN>     when to print a line with total counts;
+                         WHEN can be: auto, always, only, never
+  -w, --words            print the word counts
+  -h, --help             Print help
+  -V, --version          Print version

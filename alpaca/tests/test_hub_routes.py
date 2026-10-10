@@ -117,8 +117,23 @@ def test_existing_entry_points_join_the_shared_hub(server):
     # The landing page is the workspace hub; its Alpaca tile links to the cockpit at /hub/.
     status, _, body = fetch(url, '/')
     assert status == 200 and b'data-page="hub"' in body and b'/hub/assets/hub.js' not in body
-    assert b'/hub/assets/hub.js' not in fetch(url, '/analytics/legacy/')[2]
-    assert b'/hub/assets/hub.js' not in fetch(url, '/cockpit/legacy/')[2]
+
+
+def test_the_retired_legacy_pages_redirect_to_their_replacements(server):
+    _, url = server
+    for route, target in (('/cockpit/legacy/', '/hub/'), ('/analytics/legacy/', '/analytics/')):
+        req = urllib.request.Request(url + route)
+        opener = urllib.request.build_opener(_NoRedirect)
+        try:
+            opener.open(req, timeout=5)
+            raise AssertionError('expected a redirect from ' + route)
+        except urllib.error.HTTPError as e:
+            assert e.code == 301 and e.headers['Location'] == target, (route, e.code)
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
 
 
 def test_analytics_routes_validate_session_and_keep_auth_gate(server):

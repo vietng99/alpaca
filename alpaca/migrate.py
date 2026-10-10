@@ -227,16 +227,32 @@ def execute_schema(conn, script):
 
 
 def apply(conn) -> int:
-    """Transactional additive migration. Current schemas cause no writes."""
+    """Transactional additive migration. Complete current schemas cause no writes."""
     from alpaca.db import transaction
     _verify_constraints(conn)
     from_version = current_version(conn)
     if from_version > CURRENT_SCHEMA_VERSION:
         raise UnsafeLegacySchema("record schema is newer than this operator; upgrade Alpaca")
     if from_version == CURRENT_SCHEMA_VERSION:
-        if _run_census_behind(conn):
+        # An index does not change the record shape/version or its events.
+        # Repair it for existing records as well as installing it in new ones.
+        indexes = {
+            'idx_events_ref_id': 'CREATE INDEX IF NOT EXISTS idx_events_ref_id ON events(ref, id)',
+            'idx_events_scope_id': "CREATE INDEX IF NOT EXISTS idx_events_scope_id ON events "
+                                   "(CASE WHEN json_valid(data) THEN json_extract(data, '$.scope') ELSE NULL END, id)",
+            'idx_events_invalid_json_id': 'CREATE INDEX IF NOT EXISTS idx_events_invalid_json_id '
+                                         'ON events(id) WHERE NOT json_valid(data)',
+        }
+        present = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='index' "
+                                                "AND name IN (?,?,?)", tuple(indexes))}
+        missing = [statement for name, statement in indexes.items() if name not in present]
+        census_behind = _run_census_behind(conn)
+        if missing or census_behind:
             with transaction(conn):
-                _backfill_run_census(conn)
+                for statement in missing:
+                    conn.execute(statement)
+                if census_behind:
+                    _backfill_run_census(conn)
         return from_version
     with transaction(conn):
         execute_schema(conn, schema_sql())

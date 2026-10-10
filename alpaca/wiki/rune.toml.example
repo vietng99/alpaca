@@ -18,4 +18,4 @@ ppr_alpha   = "0.15"
 ppr_iters   = "40"
 ppr_epsilon = "1e-6"
 rrf_k       = "60"
-retrieval_profile = "narrow"        # narrow | hybrid | full; Phase-0 selected narrow
+retrieval_profile = "narrow"        # narrow | graph | hybrid | full; graph = narrow + PPR arm (off by default: bar A3 does not hold at op-008 t-068, dec-7574faf2ea3b)

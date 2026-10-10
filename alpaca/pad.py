@@ -87,7 +87,9 @@ def _row_op(conn, ref, cache):
 
 def resume_points(conn, op_ids, view=None) -> list:
     """One resume point per op in `op_ids`, in that order:
-    {op, intent, next, handoff, checkpoint}.
+    {op, intent, next, handoff, checkpoint, orders}.
+
+    - `orders` is the op's open owner orders (alpaca/orders.py), so a resume entry carries them.
 
     - `next` is the op's first open or doing task by id (ops.first_open_task), or None.
     - `handoff` is the newest `msg` event of message kind `handoff` whose ref is the op (the event's
@@ -133,8 +135,21 @@ def resume_points(conn, op_ids, view=None) -> list:
                 handoff[op] = {"event": r["id"], "ts": r["ts"], "from": r["actor"],
                                "to": data.get("to"), "body": data.get("body") or ""}
     intents = {r[0]: r[1] for r in conn.execute("SELECT id, intent FROM ops")}
+    from alpaca import orders
     return [{"op": o, "intent": intents.get(o), "next": ops.first_open_task(conn, o),
-             "handoff": handoff.get(o), "checkpoint": checkpoint.get(o)} for o in op_ids]
+             "handoff": handoff.get(o), "checkpoint": checkpoint.get(o),
+             "orders": orders.open_orders(conn, o)} for o in op_ids]
+
+
+def _derived_count(conn, op) -> int:
+    """How many choices the door self-check recorded as derived for `op` (op-019 t-203): a choice the
+    signed brief did not make that the agent made itself, listed for the owner to read later. 0 when
+    the count cannot be read, so a failure here never turns a RESUME write into a failure."""
+    try:
+        from alpaca import selfcheck
+        return selfcheck.derived_count(conn, op)
+    except Exception:
+        return 0
 
 
 def resume_point_lines(conn, op_ids, view=None) -> list:
@@ -163,6 +178,13 @@ def resume_point_lines(conn, op_ids, view=None) -> list:
                 _one_line(h["body"], RESUME_TEXT_MAX)))
         else:
             lines.append("  - handoff: (no handoff)")
+        for o in p.get("orders") or []:
+            lines.append("  - open owner order %s (door %s): \"%s\"" % (
+                o["id"], o["door"], _one_line(o["quote"], RESUME_TEXT_MAX)))
+        derived = _derived_count(conn, p["op"])
+        if derived:
+            lines.append("  - derived choices: %d for the owner to read (bin/alpaca selfcheck derived "
+                         "--op %s)" % (derived, _render.cell(p["op"])))
         c = p["checkpoint"]
         if c:
             lines.append("  - checkpoint: event %d at %s session %s: %s" % (

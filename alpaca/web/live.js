@@ -3,6 +3,7 @@
 // This page is a profile page (alpaca/profile.py `web` pages "live"): the profile that turns it on
 // serves /live/log and /live/telemetry.json through its routes.
 import {icon} from './icons.js';
+import {orb} from './orb.js';
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const n=v=>Number(v||0).toLocaleString();
 const href=(route,params={})=>'#'+route+(Object.keys(params).length?'?'+new URLSearchParams(params):'');
@@ -19,7 +20,7 @@ export function createLive({api,stageName,route}){
  function page(pinned){
   board.pinned=pinned;
   return `<div class="page-heading lv-heading"><div><span class="eyebrow">WORKSPACE</span><h1>Live logs</h1><p>Every running job, side by side. Tiles follow each job across its stages.</p></div><div class="lv-actions"><a class="button" href="${esc(href('runs'))}">All runs ${icon('arrow')}</a></div></div>
-<div class="lv-toolbar"><span class="lv-count" id="lv-count"><i class="lv-pulse"></i>Looking for running jobs...</span>
+<div class="lv-toolbar"><span class="lv-count" id="lv-count">${orb('searching',20)}Looking for running jobs...</span>
 <label>Layout <select id="lv-mode" aria-label="Tile layout"><option value="auto">Auto</option><option value="columns">Side by side</option><option value="rows">Stacked</option><option value="grid2">Two columns</option></select></label>
 <button type="button" data-lv="pause-all" id="lv-pause-all">Pause all</button><button type="button" data-lv="clear">Clear finished</button><span class="lv-hint">Scan highlights point at lines; the recorded result stays on the receipt.</span></div>
 <div id="lv-strip" class="lv-strip" hidden></div>
@@ -28,7 +29,7 @@ export function createLive({api,stageName,route}){
  }
 
  function tileHtml(t){
-  return `<section class="lv-tile" id="lv-${t.job}" data-job="${t.job}"><header class="lv-head"><span class="lv-dot" aria-hidden="true"></span><div class="lv-title"><strong class="lv-name"></strong><small class="lv-sub"></small></div><div class="lv-chips"><span class="lv-chip sev-error" title="Error lines flagged by the scan"><b class="lv-err">0</b> err</span><span class="lv-chip sev-warning" title="Warning lines flagged by the scan"><b class="lv-warn">0</b> warn</span><span class="lv-chip lv-mem" title="Memory of the job's process tree"><svg class="lv-spark" viewBox="0 0 60 16" preserveAspectRatio="none" aria-hidden="true"><polyline points=""/></svg><b class="lv-rss">-</b></span></div><div class="lv-buttons"><button type="button" data-lv="pause" title="Pause following" aria-label="Pause following">${icon('pause')}</button><button type="button" data-lv="focus" title="Maximize" aria-label="Maximize tile">${icon('overview')}</button><a class="lv-open" title="Open the full run" aria-label="Open the full run" href="#">${icon('external')}</a><button type="button" data-lv="close" title="Close tile" aria-label="Close tile">${icon('close')}</button></div></header><div class="lv-bar" hidden></div><div class="lv-log" tabindex="0" role="log" aria-label="Live output"></div><footer class="lv-foot"><span class="lv-state">Connecting</span><span class="lv-bytes"></span></footer></section>`;
+  return `<section class="lv-tile" id="lv-${t.job}" data-job="${t.job}"><header class="lv-head"><span class="lv-dot" aria-hidden="true"></span>${orb('listening',20,'Streaming output')}<div class="lv-title"><strong class="lv-name"></strong><small class="lv-sub"></small></div><div class="lv-chips"><span class="lv-chip sev-error" title="Error lines flagged by the scan"><b class="lv-err">0</b> err</span><span class="lv-chip sev-warning" title="Warning lines flagged by the scan"><b class="lv-warn">0</b> warn</span><span class="lv-chip lv-mem" title="Memory of the job's process tree"><svg class="lv-spark" viewBox="0 0 60 16" preserveAspectRatio="none" aria-hidden="true"><polyline points=""/></svg><b class="lv-rss">-</b></span></div><div class="lv-buttons"><button type="button" data-lv="pause" title="Pause following" aria-label="Pause following">${icon('pause')}</button><button type="button" data-lv="focus" title="Maximize" aria-label="Maximize tile">${icon('overview')}</button><a class="lv-open" title="Open the full run" aria-label="Open the full run" href="#">${icon('external')}</a><button type="button" data-lv="close" title="Close tile" aria-label="Close tile">${icon('close')}</button></div></header><div class="lv-bar" hidden></div><div class="lv-log" tabindex="0" role="log" aria-label="Live output"></div><footer class="lv-foot"><span class="lv-state">Connecting</span><span class="lv-bytes"></span></footer></section>`;
  }
 
  function tile(job,{pinned=false}={}){
@@ -67,7 +68,7 @@ export function createLive({api,stageName,route}){
   const strip=$('#lv-strip');
   if(strip){strip.hidden=!board.focus;strip.innerHTML=board.focus?`<button type="button" data-lv="unfocus">${icon('overview')} Show all ${n(ids.length)} tiles</button>`+ids.filter(j=>j!==board.focus).map(j=>{const t=board.tiles.get(j);return `<button type="button" data-lv="focus-to" data-job="${j}" class="lv-mini ${t.done?'tone-'+tone(t.verdict):'tone-live'}"><i></i>${esc(label(t))}</button>`;}).join(''):'';}
   const c=$('#lv-count');
-  if(c){const live=ids.filter(j=>!board.tiles.get(j).done).length;c.innerHTML=`<i class="lv-pulse ${live?'':'off'}"></i>${live?`${n(live)} job${live===1?'':'s'} running`:'No job running'}${ids.length>live?` &middot; ${n(ids.length-live)} finished or pinned`:''}`;}
+  if(c){const live=ids.filter(j=>!board.tiles.get(j).done).length;c.innerHTML=`${live?orb('working',20):orb('breathing',20,'No job running')}${live?`${n(live)} job${live===1?'':'s'} running`:'No job running'}${ids.length>live?` &middot; ${n(ids.length-live)} finished or pinned`:''}`;}
   const empty=$('#lv-empty');if(empty)empty.innerHTML=ids.length?'':emptyHtml();
  }
 

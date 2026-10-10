@@ -1,0 +1,489 @@
+{
+ "files": [
+  {
+   "of": 85,
+   "path": "a05179e7708318396.jsonl.gz.b64",
+   "records": 29,
+   "source": "~/.claude/projects/-home-SEALEDTERM-Harness-Alpaca/5784d8c2-6fcb-439b-98f4-48d9539f2fac/subagents/agent-a05179e7708318396.jsonl",
+   "source_sha256": "94c81d829a4b512885895f85973bca96508dabfb1881e369ab06d9bb3e31d14e"
+  },
+  {
+   "of": 91,
+   "path": "a660f66772906b0c2.jsonl.gz.b64",
+   "records": 31,
+   "source": "~/.claude/projects/-home-SEALEDTERM-Harness-Alpaca/5784d8c2-6fcb-439b-98f4-48d9539f2fac/subagents/agent-a660f66772906b0c2.jsonl",
+   "source_sha256": "514ae97d10631ba903a6d9d24103a69544cb7592206191879b282eb43b1a0ca2"
+  },
+  {
+   "path": "a84427dcadd1ac87b.whole.jsonl.gz.b64",
+   "records": 139,
+   "source": "~/.claude/projects/-home-SEALEDTERM-Harness-Alpaca/5784d8c2-6fcb-439b-98f4-48d9539f2fac/subagents/agent-a84427dcadd1ac87b.jsonl",
+   "source_sha256": "6a0e6e5b1f01cfa23bc0391a504e4a882e0c56272f2f06cef99eb38c548519e8"
+  },
+  {
+   "of": 139,
+   "path": "a84427dcadd1ac87b.jsonl.gz.b64",
+   "records": 51,
+   "source": "~/.claude/projects/-home-SEALEDTERM-Harness-Alpaca/5784d8c2-6fcb-439b-98f4-48d9539f2fac/subagents/agent-a84427dcadd1ac87b.jsonl",
+   "source_sha256": "6a0e6e5b1f01cfa23bc0391a504e4a882e0c56272f2f06cef99eb38c548519e8"
+  },
+  {
+   "of": 71,
+   "path": "aa63cf2e2ead94ce0.jsonl.gz.b64",
+   "records": 25,
+   "source": "~/.claude/projects/-home-SEALEDTERM-Harness-Alpaca/5784d8c2-6fcb-439b-98f4-48d9539f2fac/subagents/agent-aa63cf2e2ead94ce0.jsonl",
+   "source_sha256": "c88ee715708e8770f4815a695f20feb13b6931ccb73dd64f128ac0939e57f1cc"
+  },
+  {
+   "of": 105,
+   "path": "ad36c863082a96f89.jsonl.gz.b64",
+   "records": 35,
+   "source": "~/.claude/projects/-home-SEALEDTERM-Harness-Alpaca/5784d8c2-6fcb-439b-98f4-48d9539f2fac/subagents/agent-ad36c863082a96f89.jsonl",
+   "source_sha256": "6bc52ca86753508a7db6b8939e25dd2c1118ec47a2aabd1ad138170b4beacbd1"
+  },
+  {
+   "path": "ad6eaccc971b5eec2.whole.jsonl.gz.b64",
+   "records": 76,
+   "source": "~/.claude/projects/-home-SEALEDTERM-Harness-Alpaca/5784d8c2-6fcb-439b-98f4-48d9539f2fac/subagents/agent-ad6eaccc971b5eec2.jsonl",
+   "source_sha256": "041bd7c6ca4fb859a2574dcfecf29e769402323dd546f826e05f572e656fd61e"
+  },
+  {
+   "of": 99,
+   "path": "af6aa4839592eef38.jsonl.gz.b64",
+   "records": 33,
+   "source": "~/.claude/projects/-home-SEALEDTERM-Harness-Alpaca/5784d8c2-6fcb-439b-98f4-48d9539f2fac/subagents/agent-af6aa4839592eef38.jsonl",
+   "source_sha256": "442359594ab9b4790e77ded3af456b72065fc12cd469ca11801641142bf91d7f"
+  },
+  {
+   "of": 100,
+   "path": "af8d86438e38dbbd8.jsonl.gz.b64",
+   "records": 37,
+   "source": "~/.claude/projects/-home-SEALEDTERM-Harness-Alpaca/5784d8c2-6fcb-439b-98f4-48d9539f2fac/subagents/agent-af8d86438e38dbbd8.jsonl",
+   "source_sha256": "ab3be227ab111e52da5acc5c909b71b41e35ad23f24a1af9b7fdc04e0d3a4ccf"
+  },
+  {
+   "path": "ad36c863082a96f89/receipts/apply.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t1/receipts/apply.json",
+   "source_sha256": "53e3eef30ab44c8e119f2f5fe0f4a669c41940d1faf5cb5e161814fda5fadcf8"
+  },
+  {
+   "path": "ad36c863082a96f89/receipts/ev-82935.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t1/receipts/ev-82935.json",
+   "source_sha256": "9d829079443dc22f88d5d8842878b8768d35ab057ddf29795b7e6a54583d1291"
+  },
+  {
+   "path": "ad36c863082a96f89/receipts/ev-82939.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t1/receipts/ev-82939.json",
+   "source_sha256": "aa29b45e4495cb23476f78be71f2ebb095d873bddfa7eae41c326104ac363b1d"
+  },
+  {
+   "path": "ad36c863082a96f89/receipts/g-build.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t1/receipts/g-build.json",
+   "source_sha256": "0f4a4568815b1be76c1846d9cae1d749efba06c263a904cc8b5604f60a19bfc0"
+  },
+  {
+   "path": "ad36c863082a96f89/receipts/g-metric.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t1/receipts/g-metric.json",
+   "source_sha256": "a679da51e643577a40acd99ef5487f4f5cc3d9e9fb6b5b45ce44a51cbf10741d"
+  },
+  {
+   "path": "ad36c863082a96f89/receipts/g-source.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t1/receipts/g-source.json",
+   "source_sha256": "ca69430e744b49e304da03bb3005a2e046a2779b7838db4f117b1e700c26719a"
+  },
+  {
+   "path": "ad36c863082a96f89/receipts/g-unit.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t1/receipts/g-unit.json",
+   "source_sha256": "098edcf2180192818489b69e53d92723ae63eaa962c06fe75438ad7b49d730e5"
+  },
+  {
+   "path": "ad36c863082a96f89/receipts/h-e1.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t1/receipts/h-e1.json",
+   "source_sha256": "ad15d2eaa50db4efa336bb1f0d7fa4e820076b51e4fe9a298e7d04bc34743bf0"
+  },
+  {
+   "path": "ad36c863082a96f89/receipts/h-e2.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t1/receipts/h-e2.json",
+   "source_sha256": "513654bd677ecfd732154ccccc685d68e08e4c26df8fbfd3a7413f7b5ab96e14"
+  },
+  {
+   "path": "ad36c863082a96f89/receipts/h-e3.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t1/receipts/h-e3.json",
+   "source_sha256": "ffa8c35219d9a355fa195aa8db93eb6e52747b42d08b2dbd393c7e83921eb513"
+  },
+  {
+   "path": "ad36c863082a96f89/receipts/h-e4.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t1/receipts/h-e4.json",
+   "source_sha256": "6ea2b12e28a84ff85c0d48c2119da19ce839d60efabae5d01010f7ee5aded3a3"
+  },
+  {
+   "path": "ad36c863082a96f89/receipts/h-e5.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t1/receipts/h-e5.json",
+   "source_sha256": "f0376754818344b204b6ca75cc104065d5c1745d014bede9a7fc5fecf48a3b8d"
+  },
+  {
+   "path": "ad36c863082a96f89/receipts/h-e6.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t1/receipts/h-e6.json",
+   "source_sha256": "0ee4c3836e036b882fde9af1ae72fe74e1f1da143336368542928fbe139211b2"
+  },
+  {
+   "path": "ad36c863082a96f89/receipts/h-e7.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t1/receipts/h-e7.json",
+   "source_sha256": "6c236b330baa59c3995e6cb07d04c8ea61bec97f018c4894dd6bb944d637aa99"
+  },
+  {
+   "path": "ad36c863082a96f89/receipts/h-e8.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t1/receipts/h-e8.json",
+   "source_sha256": "c78fa77d8218510ef2336d9c05237daac2279a81c61dd89f41eca6578fb84b37"
+  },
+  {
+   "path": "ad36c863082a96f89/receipts/h-e9.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t1/receipts/h-e9.json",
+   "source_sha256": "326aab9b45b78b1caaaa8cc9c85a4dd3fa5d102fb950e7106aef31a8c94a6c6e"
+  },
+  {
+   "path": "ad36c863082a96f89/packet/brief.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t1/packet/brief.json",
+   "source_sha256": "b672cc56b7facdf5c42727a23741fcbdba80868ffa716b522ec204e66ac498f9"
+  },
+  {
+   "gzip": true,
+   "path": "ad36c863082a96f89/packet/diff.patch.gz.b64",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t1/packet/diff.patch",
+   "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+   "gzip": true,
+   "path": "ad36c863082a96f89/packet/research-contract.json.gz.b64",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t1/packet/research-contract.json",
+   "source_sha256": "d0fea1b7b425a006309d2d557dd64ba952718224027009603415b16eac3134d2"
+  },
+  {
+   "path": "ad36c863082a96f89/tree/alpaca/research/state.py",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t1/tree/alpaca/research/state.py",
+   "source_sha256": "f52c49663bb0dde2319799aee8d031c9980fc0e99df98eadbbf6c29d503b2ec4"
+  },
+  {
+   "path": "ad36c863082a96f89/tree/alpaca/research/types.py",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t1/tree/alpaca/research/types.py",
+   "source_sha256": "302cf52ffcca2488d14737a5725f5ecdd96bf003c5dcd6963c31a7ca6fa5f8d6"
+  },
+  {
+   "derived": "requests/ and receipts/*.answer",
+   "path": "ad36c863082a96f89/ledger.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t1/requests",
+   "source_sha256": "309ed3e7d3364bc8d6d0faed4f7c1276a424432ac8f755896d5695e139fa5d62"
+  },
+  {
+   "path": "af6aa4839592eef38/receipts/apply.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t2/receipts/apply.json",
+   "source_sha256": "0cd57ee31af36926ee73b6c1f9430441c9b88384bb7f496766f552a9a638025a"
+  },
+  {
+   "path": "af6aa4839592eef38/receipts/ev-82935.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t2/receipts/ev-82935.json",
+   "source_sha256": "2072fe1b859e0dbb33a735aafa721a6d756e64c3796b69417592111c254ace7a"
+  },
+  {
+   "path": "af6aa4839592eef38/receipts/ev-82939.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t2/receipts/ev-82939.json",
+   "source_sha256": "7423cecbb7812467c7f4ad6b24c21eacfff82c4dbf4842c8c2f03031be6ab1b8"
+  },
+  {
+   "path": "af6aa4839592eef38/receipts/g-build.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t2/receipts/g-build.json",
+   "source_sha256": "e788036f354b52087f0c6d29d39a5af929c683e7d5211981d7ee74a76b9df569"
+  },
+  {
+   "path": "af6aa4839592eef38/receipts/g-metric.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t2/receipts/g-metric.json",
+   "source_sha256": "07ea7552630058dfdef89d42218522a113d910ec7418327825c4b938b5559bbd"
+  },
+  {
+   "path": "af6aa4839592eef38/receipts/g-source.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t2/receipts/g-source.json",
+   "source_sha256": "524e1a946d88b4ed8e367686fcd7a76cf796178f98614cdce30e0b929f62dad4"
+  },
+  {
+   "path": "af6aa4839592eef38/receipts/g-unit.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t2/receipts/g-unit.json",
+   "source_sha256": "a3d48b99a7f2ef090dfdf69c4cc9e2bd4427013b7cac0f786ce6bdf3b3f91194"
+  },
+  {
+   "path": "af6aa4839592eef38/receipts/h-e1.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t2/receipts/h-e1.json",
+   "source_sha256": "1b1c2e97626c28de084ad15ec612071d885b96b49c414a74d89d3e0473b36e7b"
+  },
+  {
+   "path": "af6aa4839592eef38/receipts/h-e2.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t2/receipts/h-e2.json",
+   "source_sha256": "28425e8c4c55d02b19b45201e297844446d7b0f75ebb0c5d4f1703ae1c9dfcc4"
+  },
+  {
+   "path": "af6aa4839592eef38/receipts/h-e3.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t2/receipts/h-e3.json",
+   "source_sha256": "68ae5ee93a56fdf1c66846d54f895bcb8649366ea248bf66752cb6e99b18fc21"
+  },
+  {
+   "path": "af6aa4839592eef38/receipts/h-e4.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t2/receipts/h-e4.json",
+   "source_sha256": "6feb23b43dde7c23c711a311849d3237361876d2b4b791754e54bc5c3a1b98c8"
+  },
+  {
+   "path": "af6aa4839592eef38/receipts/h-e5.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t2/receipts/h-e5.json",
+   "source_sha256": "d1d263e4ae9c7eb4ecd67466b178db823f2bd185bfea34777bb1a98047bc8fcb"
+  },
+  {
+   "path": "af6aa4839592eef38/receipts/h-e6.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t2/receipts/h-e6.json",
+   "source_sha256": "ffe912eff515464bb9fe8425eb28722d0d4702451f7afd82fec34a8c37db4a69"
+  },
+  {
+   "path": "af6aa4839592eef38/receipts/h-e7.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t2/receipts/h-e7.json",
+   "source_sha256": "26ddd5e4ba7261537ef61b70fc8150b3f96eddf7480121619ff04b33fd485ca8"
+  },
+  {
+   "path": "af6aa4839592eef38/receipts/h-e8.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t2/receipts/h-e8.json",
+   "source_sha256": "5008b73f1742ab2868f48c15c9652010a188eedfb8f8a5fde9d2fce73cae8375"
+  },
+  {
+   "path": "af6aa4839592eef38/receipts/h-e9.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t2/receipts/h-e9.json",
+   "source_sha256": "e67b63fedd4296dcce65f49045110d71da52d2bfa9964c2f551235aeb866a50a"
+  },
+  {
+   "path": "af6aa4839592eef38/packet/brief.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t2/packet/brief.json",
+   "source_sha256": "336ff44f28975c176c786d037d87f789320e27c748c4ff891bb7981a957f7875"
+  },
+  {
+   "gzip": true,
+   "path": "af6aa4839592eef38/packet/evidence/06-after-eval.json.gz.b64",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t2/packet/evidence/06-after-eval.json",
+   "source_sha256": "5cb987d77bc805911cc6cd4bf3bb3bfa2fdbacc68719cfe62dc6c58e1fe419a5"
+  },
+  {
+   "gzip": true,
+   "path": "af6aa4839592eef38/packet/evidence/07-close.json.gz.b64",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t2/packet/evidence/07-close.json",
+   "source_sha256": "451b41c2946cd27f281b1c1a1112d5f7ebf39a2533ca1df76c3e4e0830774e7b"
+  },
+  {
+   "gzip": true,
+   "path": "af6aa4839592eef38/packet/research-contract.json.gz.b64",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t2/packet/research-contract.json",
+   "source_sha256": "d0fea1b7b425a006309d2d557dd64ba952718224027009603415b16eac3134d2"
+  },
+  {
+   "absent": true,
+   "note": "cited by the verdict, not copied",
+   "path": "af6aa4839592eef38/tree.git-admin/HEAD"
+  },
+  {
+   "path": "af6aa4839592eef38/tree/alpaca/research/types.py",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t2/tree/alpaca/research/types.py",
+   "source_sha256": "302cf52ffcca2488d14737a5725f5ecdd96bf003c5dcd6963c31a7ca6fa5f8d6"
+  },
+  {
+   "derived": "requests/ and receipts/*.answer",
+   "path": "af6aa4839592eef38/ledger.json",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t2/requests",
+   "source_sha256": "e96b8c2b95e8d9ce162efcda48a5221c4304d9779c2c3284a1f5148a3e1939c0"
+  },
+  {
+   "path": "a660f66772906b0c2/receipts/apply.json",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/receipts/apply.json",
+   "source_sha256": "ed8210eecb8811fa8eebedfc930ab510a57debb238824f80c1cf864961aa822c"
+  },
+  {
+   "path": "a660f66772906b0c2/receipts/ev-82980.json",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/receipts/ev-82980.json",
+   "source_sha256": "23575df22697895ae0a42b109cd9dbbfb2d64f53810aa7ecfcb3968479d812a8"
+  },
+  {
+   "path": "a660f66772906b0c2/receipts/ev-83041.json",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/receipts/ev-83041.json",
+   "source_sha256": "0d56ca81e1950da4110887ee528cb8386503477ab8a1d215da3d93dda4de22d9"
+  },
+  {
+   "path": "a660f66772906b0c2/receipts/ev-83114.json",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/receipts/ev-83114.json",
+   "source_sha256": "a414fc52786f6e2253e1f702e68cd17c6b703936b6452f6ab1b8ef0b4ea206b2"
+  },
+  {
+   "path": "a660f66772906b0c2/receipts/ev-83131.json",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/receipts/ev-83131.json",
+   "source_sha256": "515ebefd4e092f1a27e9a1dcc7b320bbc7e36f036d1cd916bfe387f67d2bfaf0"
+  },
+  {
+   "path": "a660f66772906b0c2/receipts/g-build.json",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/receipts/g-build.json",
+   "source_sha256": "d4606ad1e9cdde918574c54646c34b1204c0fdc602e4b65218c20be1770259ad"
+  },
+  {
+   "path": "a660f66772906b0c2/receipts/g-metric.json",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/receipts/g-metric.json",
+   "source_sha256": "a1c793299f001f5d3f645c5702d35bc83b66cc1521ad6da69a70da9147346f35"
+  },
+  {
+   "path": "a660f66772906b0c2/receipts/g-metric2.json",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/receipts/g-metric2.json",
+   "source_sha256": "ac95c7d3b86827f8c38a9b376dde4cbcfaa9e98dee32573a2b83e7657c0b1d70"
+  },
+  {
+   "path": "a660f66772906b0c2/receipts/g-metric3.json",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/receipts/g-metric3.json",
+   "source_sha256": "739e303f14fec34005e9774ac6263f81c8cc6f59a5b12e55d07a678ec800c4e7"
+  },
+  {
+   "path": "a660f66772906b0c2/receipts/g-source.json",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/receipts/g-source.json",
+   "source_sha256": "5fcd0b10d18a9f4552cf6da8ab5d6b60ec75f32b6bacca28b618bec138142909"
+  },
+  {
+   "path": "a660f66772906b0c2/receipts/g-unit.json",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/receipts/g-unit.json",
+   "source_sha256": "d4a0df32d84aa5261ae975cb0a4d25d903e37d911d53410143db74e7a24eda2c"
+  },
+  {
+   "path": "a660f66772906b0c2/receipts/h-e1.json",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/receipts/h-e1.json",
+   "source_sha256": "621375306e6e16508a76da8d14095749ed8b4feda9d615efef86779c9ad40212"
+  },
+  {
+   "path": "a660f66772906b0c2/receipts/h-e10.json",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/receipts/h-e10.json",
+   "source_sha256": "3c220bca7a51129f9cc07163bb914dd376a788effa517ba86c9829190060b119"
+  },
+  {
+   "path": "a660f66772906b0c2/receipts/h-e11.json",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/receipts/h-e11.json",
+   "source_sha256": "4ecd40ceaf28b6518313075cb5a219286900a60ba96ce76756a3c643900f8a65"
+  },
+  {
+   "path": "a660f66772906b0c2/receipts/h-e12.json",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/receipts/h-e12.json",
+   "source_sha256": "b5bda886e12b58c6b1606e219b13bf8567e721af2881b8ea64ef93b081f8695e"
+  },
+  {
+   "path": "a660f66772906b0c2/receipts/h-e13.json",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/receipts/h-e13.json",
+   "source_sha256": "5ed124d8c8809d4b159097ae4537e2e8ee8838441e43209ab67116c36c6d61a8"
+  },
+  {
+   "path": "a660f66772906b0c2/receipts/h-e14.json",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/receipts/h-e14.json",
+   "source_sha256": "3912b3a0bd6e30004b5f2e977da434c9791dd45757c2f8a87644f779ef7a7b12"
+  },
+  {
+   "path": "a660f66772906b0c2/receipts/h-e15.json",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/receipts/h-e15.json",
+   "source_sha256": "e00017ee97564b84dc14ee4e78baaa2da24f21575faeb2c36168804069833927"
+  },
+  {
+   "path": "a660f66772906b0c2/receipts/h-e16.json",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/receipts/h-e16.json",
+   "source_sha256": "efd35ed7e1b0455aa105dbfefe6e94b986de13751ef2b3c67e2d043f2f4e7ca8"
+  },
+  {
+   "path": "a660f66772906b0c2/receipts/h-e17.json",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/receipts/h-e17.json",
+   "source_sha256": "e047b27e06ce8152494b738ebbbbd7beda36f4a19dc1c7ba77b6fe87f8cf44b2"
+  },
+  {
+   "path": "a660f66772906b0c2/receipts/h-e18.json",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/receipts/h-e18.json",
+   "source_sha256": "47f1927d06e8071ef635b2b85b1312ad3dc69a8ce66de3c9677eb175fb342c4d"
+  },
+  {
+   "path": "a660f66772906b0c2/receipts/h-e19.json",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/receipts/h-e19.json",
+   "source_sha256": "1551cba43aac7d6fb57596a99647aa50baa66a56571d64aecb7b5515a8451fd2"
+  },
+  {
+   "path": "a660f66772906b0c2/receipts/h-e2.json",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/receipts/h-e2.json",
+   "source_sha256": "e859125df2b62db16534cf77a7da5fa866b4df9f04b3162f040e8919a9b6dc7e"
+  },
+  {
+   "path": "a660f66772906b0c2/receipts/h-e3.json",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/receipts/h-e3.json",
+   "source_sha256": "4330596f109594663f1ccf1cc7bc39b8e8477f856a61b485fc271ed3a34590c6"
+  },
+  {
+   "path": "a660f66772906b0c2/receipts/h-e4.json",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/receipts/h-e4.json",
+   "source_sha256": "f9305033e6655aa9bd6d20d30a9f400f248be6ee66dbe713c32149ff500da885"
+  },
+  {
+   "path": "a660f66772906b0c2/receipts/h-e5.json",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/receipts/h-e5.json",
+   "source_sha256": "822b30a0046107d487c6385395a223ab2d189af9f1b58348ae532653ff0ffd5c"
+  },
+  {
+   "path": "a660f66772906b0c2/receipts/h-e6.json",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/receipts/h-e6.json",
+   "source_sha256": "566f54e08884c702409842c0e410a62af3ae4acf8dca36960ee947e2b2bcbc9a"
+  },
+  {
+   "path": "a660f66772906b0c2/receipts/h-e7.json",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/receipts/h-e7.json",
+   "source_sha256": "db5667f0a17d7cc48d7c99d3f8f6fa4b4ea38837ace6ecf4091bc38c03d96dcf"
+  },
+  {
+   "path": "a660f66772906b0c2/receipts/h-e8.json",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/receipts/h-e8.json",
+   "source_sha256": "78d8659a5075c20b1e86d3c93dd74f2732e07be607d441cf9de90429eabc5baa"
+  },
+  {
+   "path": "a660f66772906b0c2/receipts/h-e9.json",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/receipts/h-e9.json",
+   "source_sha256": "fc9692f798899bda83270af2a6745cb02bfc4f88fccaee5170040543ea808ec2"
+  },
+  {
+   "path": "a660f66772906b0c2/packet/brief.json",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/packet/brief.json",
+   "source_sha256": "d39ee3206cabee23deb55ab35895a510bbb06976c384bb9c166aae2a0ccb0633"
+  },
+  {
+   "gzip": true,
+   "path": "a660f66772906b0c2/packet/audit.json.gz.b64",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/packet/audit.json",
+   "source_sha256": "3ca777494e48b77849b4b024ab5c66a18d01a90abfd85a8315981b052fb1a728"
+  },
+  {
+   "gzip": true,
+   "path": "a660f66772906b0c2/packet/diff.patch.gz.b64",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/packet/diff.patch",
+   "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+   "derived": "requests/ and receipts/*.answer",
+   "path": "a660f66772906b0c2/ledger.json",
+   "source": "@ROOT@/.alpaca/verify/t-194/vf-t-194-83138/v1/r0/t1/requests",
+   "source_sha256": "319fac5e7db42d9c5d8503c37d64bd4a42aa325917c6ed16fa1af9a6c2baaa35"
+  },
+  {
+   "gzip": true,
+   "path": "a84427dcadd1ac87b/out/after.txt.gz.b64",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t0/out/after.txt",
+   "source_sha256": "389442fdc3e04de71f3f9126e8d8d45ca494ae20036528c0f902157173d2bd06"
+  },
+  {
+   "gzip": true,
+   "path": "a84427dcadd1ac87b/out/close.txt.gz.b64",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t0/out/close.txt",
+   "source_sha256": "178488497b139e934552b6896da3110b02039145aedd90c178b46a4cf1c1a73f"
+  },
+  {
+   "gzip": true,
+   "path": "a84427dcadd1ac87b/out/open.txt.gz.b64",
+   "source": "@ROOT@/.alpaca/verify/t-193/vf-t-193-82943/v2/r0/t0/out/open.txt",
+   "source_sha256": "d2b468322e4d4174d541d9bc53f462962d4174f2da3e76f791348d7903a5900e"
+  }
+ ],
+ "note": "see build_fixtures.py: the records are scrubbed of sealed terms, e-mail addresses and the runtime's static context; each source_sha256 is that of the raw source"
+}

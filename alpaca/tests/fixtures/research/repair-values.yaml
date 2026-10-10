@@ -1,0 +1,58 @@
+# Test fixture: every value the worked repair runbook (worked/repair.yaml) sets, keyed by its indexed field
+# path at the grain of templates/research/repair.yaml. test_research_template.py fills the template
+# with these values and compares the result with worked/repair.yaml.
+id: sortbench-repair
+title: Fix the reported sortlib bugs
+description: For each reported bug, a reproducing test must fail on the base tree; a fix counts only when
+  that test passes and every test that passed before still passes.
+spec: repair-spec.md
+owner: the sortlib maintainer
+stages[0].id: build
+stages[0].title: the package compiles
+stages[0].run: python3 -m compileall -q ${WORKTREE}/src/sortlib
+stages[0].timeout: 120
+stages[0].checks:
+- {id: build-exit, type: exit-code}
+stages[1].id: prepare
+stages[1].title: write the test helper data into the case's base tree
+stages[1].run: python3 bench/prepare.py --src ${WORKTREE}/src
+stages[1].timeout: 300
+stages[1].checks:
+- {id: prepare-exit, type: exit-code}
+research.defaults: pack.yaml
+research.paths.editable: [src/sortlib/]
+research.paths.covers: [EC-002]
+research.paths.source: spec:EC-002
+research.gates[0].stage: build
+research.stop.rounds: 3
+research.stop.slots: 2
+research.controls.noop_rounds: 2
+research.controls.random: false
+research.coupled[0].id: dispatch
+research.coupled[0].files: [src/sortlib/sort.py, src/sortlib/dispatch.py]
+research.coupled[0].note: dispatch.py lists every entry point of sort.py; a new or renamed entry point
+  changes both
+research.repair.prepare: prepare
+research.repair.pass_to_pass.command: python3 ${CONTRACT_DIR}/packs/sortbench/tests/run_tests.py --src
+  ${WORKTREE}/src --markers
+research.repair.pass_to_pass.min_tests: 12
+research.repair.pass_to_pass.timeout: 600
+research.repair.pass_to_pass.covers: [SC-003]
+research.repair.pass_to_pass.source: spec:SC-003
+research.repair.cases[0].id: stable-keys
+research.repair.cases[0].bug_report: bugs/stable-keys.md
+research.repair.cases[0].base: 0f4c2a9e1b7d3c5a8e6f0b2d4c6a8e0f1b3d5c7a
+research.repair.cases[0].fail_to_pass.origin: store
+research.repair.cases[0].fail_to_pass.tests: [stable_equal_keys, stable_all_same_key]
+research.repair.cases[0].fail_to_pass.timeout: 300
+research.repair.cases[0].suspect_files: [src/sortlib/merge.py]
+research.repair.cases[0].covers: [SC-001, EC-001]
+research.repair.cases[0].source: spec:SC-001
+research.repair.cases[1].id: none-key
+research.repair.cases[1].bug_report: bugs/none-key.md
+research.repair.cases[1].fail_to_pass.origin: generate
+research.repair.cases[1].fail_to_pass.timeout: 300
+research.repair.cases[1].fail_to_pass.repeats: 2
+research.repair.cases[1].suspect_files: [src/sortlib/sort.py, src/sortlib/keys.py]
+research.repair.cases[1].covers: [SC-002]
+research.repair.cases[1].source: spec:SC-002

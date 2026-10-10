@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -87,15 +88,22 @@ def selftest_instruments(root):
 def _run_instrument(abspath, root):
     """Run one instrument's `--selftest` by absolute path (PYTHONPATH pinned to root so the target
     tree's own `alpaca` resolves). Two-channel: exit 0 AND a `GATE <name>-selftest: PASS` line -> PASS;
-    exit 1 -> FAIL; anything else, or a green exit with no agreeing line -> BLOCKED."""
+    exit 1 -> FAIL; anything else, or a green exit with no agreeing line -> BLOCKED.
+
+    Each child gets its own TMPDIR, deleted afterwards. Selftests build throwaway stores with
+    tempfile.mkdtemp() and leave them behind; without this every preflight left one dir per
+    instrument in the RAM-backed /tmp, which filled zram swap on the development host (2026-10-02)."""
+    tmp = tempfile.mkdtemp(prefix="boot-check-selftest-")
     try:
         proc = subprocess.run(
             [sys.executable, abspath, "--selftest"], cwd=root,
-            env={**os.environ, "PYTHONPATH": root, "PYTHONDONTWRITEBYTECODE": "1"},
+            env={**os.environ, "PYTHONPATH": root, "PYTHONDONTWRITEBYTECODE": "1", "TMPDIR": tmp},
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8", errors="backslashreplace")
     except (OSError, ValueError):
         return vc.BLOCKED
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
     out = proc.stdout or ""
     rc = proc.returncode
     line_ok = _PASS_LINE.search(out) is not None

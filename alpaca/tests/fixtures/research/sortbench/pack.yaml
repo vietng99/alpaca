@@ -1,0 +1,17 @@
+# Settings every research runbook of the sortbench pack shares.
+pack: sortbench
+research:
+  paths:
+    protected: [packs/sortbench/, pyproject.toml]
+  fingerprint:
+    tools: [python3]
+  budget:
+    usd: 40
+    tokens: 3000000
+    wall: 14400
+  disk: 2
+  lessons:
+    file: lessons.md
+  runtime:
+    timeouts: {proposer: 900, implementer: 1800}
+    retries: 2

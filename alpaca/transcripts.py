@@ -489,6 +489,72 @@ def _subagent_pairs(src, root, sid):
     return out
 
 
+#: a workflow run record or a subagent's metadata is small JSON; a file past this is not copied.
+MAX_SIDECAR_BYTES = 8 * 1024 * 1024
+
+
+def workflows_dir(root, sid) -> str:
+    """Where this session's workflow run records (wf_*.json) are kept inside the project."""
+    return os.path.join(paths.transcript_dir(root), slug(sid), "workflows")
+
+
+def _sidecar_pairs(src, root, sid):
+    """(source, local) for the small JSON files beside a session transcript: each workflow run
+    record (<stem>/workflows/wf_*.json) and each subagent's metadata
+    (<stem>/subagents/**/agent-*.meta.json). Names that would leave the local tree are dropped."""
+    stem_dir = os.path.join(os.path.dirname(os.path.abspath(src)), Path(src).stem)
+    out = []
+    for base, pattern, local_base in (
+            (os.path.join(stem_dir, "workflows"), "wf_*.json", workflows_dir(root, sid)),
+            (os.path.join(stem_dir, "subagents"), os.path.join("**", "agent-*.meta.json"), subagents_dir(root, sid))):
+        if not os.path.isdir(base) or os.path.islink(base):
+            continue
+        local_base = os.path.abspath(local_base)
+        for p in sorted(glob.glob(os.path.join(base, pattern), recursive=True)):
+            if os.path.islink(p) or not os.path.realpath(p).startswith(os.path.realpath(base) + os.sep):
+                continue
+            d = os.path.abspath(os.path.join(local_base, os.path.relpath(p, base)))
+            if d.startswith(local_base + os.sep):
+                out.append((p, d))
+    return out
+
+
+def _copy_sidecar(src, dst) -> bool:
+    """Copy one small JSON file whole when its bytes differ; True when the local copy changed.
+
+    A run record is rewritten in place while its workflow runs, so it is replaced atomically, never
+    appended. A source that is not readable JSON, or is too large, leaves the local copy alone."""
+    try:
+        if os.path.getsize(src) > MAX_SIDECAR_BYTES:
+            return False
+        with open(src, "rb") as fh:
+            body = fh.read()
+        json.loads(body)
+        with open(dst, "rb") as fh:
+            if fh.read() == body:
+                return False
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError):
+        return False
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(dst), prefix=".tmp-")
+    try:
+        with os.fdopen(fd, "wb") as out:
+            out.write(body)
+            out.flush()
+            os.fsync(out.fileno())
+        os.replace(tmp, dst)
+    finally:
+        _unlink(tmp)
+    return True
+
+
+def local_workflows(root, sid):
+    """Every workflow run record already copied into the project, sorted."""
+    return sorted(glob.glob(os.path.join(workflows_dir(root, sid), "wf_*.json")))
+
+
 def local_subagents(root, sid):
     """Every subagent transcript already copied into the project, sorted."""
     pattern = os.path.join(subagents_dir(root, sid), "**", "agent-*.jsonl")
@@ -567,10 +633,16 @@ def snapshot(root, sid, conn=None, event=False) -> dict:
                 for s, d in _subagent_pairs(src, root, sid):
                     if os.path.abspath(s) != os.path.abspath(d):
                         _snapshot_file(s, d)
+                # t-143: workflow run records and subagent metadata, so the fan-out view outlives
+                # the operator's own storage (cleared after thirty days).
+                for s, d in _sidecar_pairs(src, root, sid):
+                    if os.path.abspath(s) != os.path.abspath(d):
+                        _copy_sidecar(s, d)
             registry_children = _snapshot_registry_children(root, sid, conn)
             size, sha = _digest(dst)
             data = {"path": rel, "bytes": size, "sha256": sha,
                     "subagents": len(local_subagents(root, sid)),
+                    "workflows": len(local_workflows(root, sid)),
                     "source_missing": source_missing, "registry_children": registry_children, **facts}
             if event:
                 db.append_event(conn, session=sid, actor="alpaca", kind="transcript-snapshot",

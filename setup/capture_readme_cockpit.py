@@ -15,6 +15,10 @@ from urllib.parse import urlparse
 from PIL import Image
 from playwright.sync_api import sync_playwright
 
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from alpaca.serve import hub_page   # hub.html with the page registry filled in, as /hub/ serves it
+
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / 'docs/assets'
 WEB = ROOT / 'alpaca/web'
@@ -56,7 +60,7 @@ def main():
             if path.startswith('/hub/assets/') or path=='/hub/':
                 if file.is_file() and file.resolve().is_relative_to(WEB.resolve()):
                     if path=='/hub/':
-                        route.fulfill(content_type='text/html',body=file.read_text().replace('</head>','<style>'+css+'</style></head>')); return
+                        route.fulfill(content_type='text/html',body=hub_page().replace('</head>','<style>'+css+'</style></head>')); return
                     route.fulfill(path=str(file),content_type=mimetypes.guess_type(file)[0] or 'application/octet-stream'); return
             unknown.append(path); route.fulfill(status=404,body='Not part of the demo')
 

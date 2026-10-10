@@ -32,6 +32,7 @@ requires the blind adversarial-read attestation.
 """
 from __future__ import annotations
 
+import bisect
 import hashlib
 import json
 import os
@@ -505,11 +506,106 @@ def decode_explicit(raw: bytes):
 
 
 # ------------------------------------------------------------------ matching
-def _allowed(tl: TermList, context: str):
+#: the text an allow rule is judged against for one match: `text[first:last]` is real text around
+#: the match, which sits at [start, end). A cut edge (the line goes on past it) carries one guard
+#: character outside [first, last), so `^` and `$` can match only at a real line start or end.
+Context = namedtuple("Context", "text start end first last")
+
+
+def _allowed_at(tl: TermList, ctx: Context):
+    """(reason, rule line) of the first allow rule with a match that COVERS the matched text, else
+    (None, None). The rule's match must start at or after `first`, at or before the match's start,
+    and end at or after the match's end without passing `last`: an allowed URL clears the term
+    inside it, never a second copy beside it on the same line or in the same stretch of a binary
+    that decodes as text, and never a match that runs on past its line (review B2). Searching from
+    a position after 0 means `^` (no MULTILINE) can match only at a real line start (review M1)."""
+    text, start, end, first, last = ctx
+    if not (first <= start <= end <= last):
+        return None, None               # the match leaves the context: nothing covers it
     for rx, reason, lineno in tl.allow:
-        if rx.search(context):
-            return reason, lineno
+        pos = first
+        while pos <= start:
+            m = rx.search(text, pos)
+            if m is None or m.start() > start:
+                break
+            if end <= m.end() <= last:
+                return reason, lineno
+            pos = m.start() + 1
     return None, None
+
+
+#: characters of a line an allow rule is judged against around a match deep in a long line, and
+#: the most a hit reports as its context.
+CONTEXT_CHARS = 200
+#: characters after a match an allow rule may read before the context is cut.
+RIGHT_CHARS = 1024
+
+
+def _guarded(text: str, lo: int, hi: int, start: int, end: int, cut_left=False, cut_right=False):
+    """Context for a match at [start, end) of `text`, cut to [lo, hi). An edge is cut when `text`
+    goes on past it (or the caller says `text` itself was cut there); a cut left edge keeps the
+    real character before it as a guard, a cut right edge gets a NUL guard, so neither looks like a
+    line boundary to `^` or `$`, and a rule that needs the guard covers nothing."""
+    lo, hi = max(0, lo), min(len(text), hi)
+    if cut_left and lo == 0:
+        lo = min(1, len(text))
+    left = lo > 0
+    right = cut_right or hi < len(text)
+    pre = text[lo - 1] if left else ""
+    post = "\x00" if right else ""
+    off = len(pre) - lo
+    return Context(pre + text[lo:hi] + post, start + off, end + off, len(pre), len(pre) + hi - lo)
+
+
+def _line_context(line: str, start: int, end: int, cut_left=False, cut_right=False):
+    """Context for a match at [start, end) of `line` (its line ending included): the stripped line
+    while the match ends within its first CONTEXT_CHARS characters, otherwise from CONTEXT_CHARS/2
+    characters before the match; on the right up to RIGHT_CHARS characters after the match. The
+    match end is never trimmed: a match that runs past the line is outside the context and so not
+    covered. `cut_left`/`cut_right` say `line` is itself a cut piece of a longer line (the byte
+    lane's read ended there), so that edge is not a line boundary. Both lanes share it."""
+    lead = 0 if cut_left else len(line) - len(line.lstrip())
+    body = line[lead:]
+    if not cut_right:
+        body = body.rstrip()
+    start, end = max(0, start - lead), max(0, end - lead)
+    if end <= CONTEXT_CHARS and not cut_left:
+        lo = 0
+    else:
+        lo = max(0, start - CONTEXT_CHARS // 2)
+    hi = max(lo + CONTEXT_CHARS, end + RIGHT_CHARS)
+    return _guarded(body, lo, hi, start, end, cut_left, cut_right)
+
+
+def _shown(ctx: Context) -> str:
+    """The context a record reports: real text only, at most CONTEXT_CHARS characters unless the
+    match itself runs further."""
+    return ctx.text[ctx.first:min(ctx.last, max(ctx.first + CONTEXT_CHARS, ctx.end))]
+
+
+def _fold_map(body: str, low: str):
+    """(start, end) mappers from an index in `low` (body.casefold()) to an index in `body`:
+    casefolding can lengthen text (a sharp s folds to two letters), and a context is cut from
+    `body`."""
+    if len(low) == len(body):
+        same = lambda i: i  # noqa: E731
+        return same, same
+    cum, pos = [], 0
+    for ch in body:
+        cum.append(pos)
+        pos += len(ch.casefold())
+    return ((lambda i: bisect.bisect_right(cum, i) - 1 if i < pos else len(body)),
+            (lambda i: bisect.bisect_left(cum, i) if i < pos else len(body)))
+
+
+def _locate(lane, body, offsets, start, end, near=60):
+    """(line number, Context) of a match at [start, end) of `body`."""
+    if lane == "line":
+        for off, i, ln in offsets:
+            if off <= start < off + len(ln):
+                return i, _line_context(ln, start - off, end - off)
+        return 0, Context("", 0, 1, 0, 0)
+    return 0, _guarded(body, start - near, end + near, start, end)
 
 
 def scan_text(tl: TermList, text: str, relpath: str, shape_on: bool):
@@ -517,7 +613,8 @@ def scan_text(tl: TermList, text: str, relpath: str, shape_on: bool):
 
     Three projections, each a demonstrated evasion: line (ordinary, carries a line number),
     joined (separator runs collapsed: a term split across a break or tab), nulstrip (NUL bytes
-    removed: UTF-16-shaped text that decoded as something else)."""
+    removed: UTF-16-shaped text that decoded as something else). A match is suppressed only when
+    an allow rule covers it in its own context (`_allowed_at`)."""
     hits, suppressed = [], []
     d = defang(text)
     lanes = [("line", d)]
@@ -527,8 +624,19 @@ def scan_text(tl: TermList, text: str, relpath: str, shape_on: bool):
     if "\x00" in d:
         lanes.append(("nulstrip", d.replace("\x00", "")))
 
+    def record(lane, lineno, rule, kind, ctx, why, at, **extra):
+        rec = dict({"file": relpath, "line": lineno, "kind": kind, "rule": rule, "lane": lane,
+                    "context": ctx}, **extra)
+        if why:
+            rec["suppressed_by"] = why
+            rec["allow_rule_line"] = at
+            suppressed.append(rec)
+        else:
+            hits.append(rec)
+
     for lane, body in lanes:
         low = body.casefold()
+        head, tail = _fold_map(body, low)
         offsets = []
         if lane == "line":
             pos = 0
@@ -542,70 +650,32 @@ def scan_text(tl: TermList, text: str, relpath: str, shape_on: bool):
                 if idx < 0:
                     break
                 start = idx + 1
-                if lane == "line":
-                    lineno, ctx = 0, ""
-                    for off, i, ln in offsets:
-                        if off <= idx < off + len(ln):
-                            lineno, ctx = i, ln.strip()[:200]
-                            break
-                else:
-                    lineno, ctx = 0, body[max(0, idx - 60):idx + len(key) + 60]
-                why, at = _allowed(tl, ctx)
-                rec = {"file": relpath, "line": lineno, "kind": "term", "rule": term,
-                       "lane": lane, "context": ctx}
-                if why:
-                    rec["suppressed_by"] = why
-                    rec["allow_rule_line"] = at
-                    suppressed.append(rec)
-                else:
-                    hits.append(rec)
-                if lane != "line":
-                    break
+                lineno, ctx = _locate(lane, body, offsets, head(idx), tail(idx + len(key)))
+                why, at = _allowed_at(tl, ctx)
+                record(lane, lineno, term, "term", _shown(ctx), why, at)
+                if lane != "line" and not why:
+                    break           # one hit per term in a projection; an allowed match is not one
         for label, rx, _brx in getattr(tl, "regexes", ()):
             for m in rx.finditer(body):
-                if lane == "line":
-                    lineno, ctx = 0, ""
-                    for off, i, ln in offsets:
-                        if off <= m.start() < off + len(ln):
-                            lineno, ctx = i, ln.strip()[:200]
-                            break
-                else:
-                    lineno, ctx = 0, body[max(0, m.start() - 60):m.end() + 60]
-                why, at = _allowed(tl, ctx)
-                rec = {"file": relpath, "line": lineno, "kind": "term", "rule": label,
-                       "lane": lane, "context": ctx}
-                if why:
-                    rec["suppressed_by"] = why
-                    rec["allow_rule_line"] = at
-                    suppressed.append(rec)
-                else:
-                    hits.append(rec)
-                if lane != "line":
+                lineno, ctx = _locate(lane, body, offsets, m.start(), m.end())
+                why, at = _allowed_at(tl, ctx)
+                record(lane, lineno, label, "term", _shown(ctx), why, at)
+                if lane != "line" and not why:
                     break
         if not shape_on:
             continue
         for name, rx in SHAPE_RULES:
             for m in rx.finditer(body):
+                value = m.group(0)
                 if lane == "line":
-                    lineno, ctx = 0, ""
-                    for off, i, ln in offsets:
-                        if off <= m.start() < off + len(ln):
-                            lineno, ctx = i, ln.strip()[:200]
-                            break
+                    lineno, ctx = _locate(lane, body, offsets, m.start(), m.end())
                 else:
-                    lineno, ctx = 0, m.group(0)
-                why, at = _shape_allowed(tl, m.group(0))
+                    lineno, ctx = 0, Context(value, 0, len(value), 0, len(value))
+                why, at = _shape_allowed(tl, value)
                 if not why:
-                    why, at = _allowed(tl, ctx or m.group(0))
-                rec = {"file": relpath, "line": lineno, "kind": "shape", "rule": name,
-                       "lane": lane, "context": (ctx or m.group(0))[:200],
-                       "matched": m.group(0)[:120]}
-                if why:
-                    rec["suppressed_by"] = why
-                    rec["allow_rule_line"] = at
-                    suppressed.append(rec)
-                else:
-                    hits.append(rec)
+                    why, at = _allowed_at(tl, ctx)
+                record(lane, lineno, name, "shape", (_shown(ctx) or value)[:200], why, at,
+                       matched=value[:120])
     return hits, suppressed
 
 
@@ -615,56 +685,186 @@ def scan_text(tl: TermList, text: str, relpath: str, shape_on: bool):
 REGEX_OVERLAP = 512
 
 
+#: bytes the byte lane decodes on each side of a match to rebuild the line around it for the allow
+#: rules: CONTEXT_CHARS characters at up to four bytes each, with room to find the line start.
+BYTE_CONTEXT = 1024
+#: raw bytes a streamed match waits for on its right, and keeps on its left, before it is judged:
+#: four times BYTE_CONTEXT, so the NUL-stripped projection of UTF-16 or UTF-32 text still holds
+#: the context. Only a scan with allow rules keeps them.
+_RAW_SPAN = 4 * BYTE_CONTEXT
+
+
 def byte_hits(tl: TermList, chunks, exclude=frozenset()):
     """The terms and regex lines found in a stream of byte chunks, raw and NUL-stripped (UTF-16
     text without decoding it), case-insensitive. Memory is one chunk plus a small overlap, so a
-    blob of any size is scanned without being held whole. Returns the set of rules found."""
+    blob of any size is scanned without being held whole. Returns the set of rules found.
+
+    A match one of the list's `!allow:` rules covers in its own context (the line around it,
+    rebuilt from the bytes the way the text lane reads lines) is cleared; every other match of the
+    rule, anywhere in the stream and in either projection, still counts. So an allowed URL in a
+    text file is not a byte hit, and it hides nothing elsewhere in the file or in a binary
+    (`_allowed_at`: the rule must cover the match)."""
+    return _byte_scan(tl, chunks, exclude)[0]
+
+
+def _byte_scan(tl: TermList, chunks, exclude=frozenset()):
+    """(found, cleared): the rules with a match no allow rule covers, and {rule: [reason, allow
+    rule line, matches cleared]} for the matches an allow rule cleared in their own context."""
     keys = [(term, key.encode("utf-8")) for term, key in tl.terms if term not in exclude]
     rxs = [(label, brx) for label, _rx, brx in getattr(tl, "regexes", ()) if label not in exclude]
     if not keys and not rxs:
         for _chunk in chunks:           # a stream is always read to its end
             pass
-        return set()
+        return set(), {}
+    allow = bool(getattr(tl, "allow", ()))
     maxlen = max((len(k) for _, k in keys), default=1)
     overlap = max(maxlen * 2 + 8, REGEX_OVERLAP if rxs else 0)
-    found = set()
-    tail = b""
-    for chunk in chunks:
+    if allow:
+        overlap += 2 * _RAW_SPAN
+    found, cleared, judged = set(), {}, set()
+    tail, base = b"", 0                 # base: the stream offset of the window's first byte
+    it = iter(chunks)
+    chunk = next(it, None)
+    while chunk is not None:
+        nxt = next(it, None)
         window = tail + chunk
-        for proj in (window.lower(), window.replace(b"\x00", b"").lower()):
-            for term, kb in keys:
-                if term not in found and kb in proj:
+        if allow:
+            _judge_window(tl, window, base, nxt is None, keys, rxs, found, cleared, judged,
+                          overlap)
+        else:
+            for proj in (window.lower(), window.replace(b"\x00", b"").lower()):
+                for term, kb in keys:
+                    if term not in found and kb in proj:
+                        found.add(term)
+                for label, brx in rxs:
+                    if label not in found and brx.search(proj):
+                        found.add(label)
+        cut = len(window) - overlap if len(window) > overlap else 0
+        tail = window[cut:]
+        base += cut
+        if allow and cut:
+            judged = {j for j in judged if j[2] >= base}
+        chunk = nxt
+    return found, cleared
+
+
+def _nul_map(window):
+    """index in window-with-NULs-removed -> index in window."""
+    starts, raws, pos = [], [], 0
+    for m in re.finditer(rb"[^\x00]+", window):
+        starts.append(pos)
+        raws.append(m.start())
+        pos += m.end() - m.start()
+
+    def to_raw(i):
+        k = bisect.bisect_right(starts, i) - 1
+        return raws[k] + (i - starts[k])
+    return to_raw
+
+
+def _byte_context(proj: bytes, start: int, end: int, at_start=True, at_end=True):
+    """Context for a byte match at [start, end) of a projection: up to BYTE_CONTEXT bytes on each
+    side decoded (undecodable bytes kept as escapes, never replaced) and defanged, cut to the line
+    that holds the match as the text lane splits lines, then `_line_context`. The match end is not
+    trimmed to the line (review B2). Where the read stopped short of a line break (BYTE_CONTEXT
+    reached, or the edge of a streamed window that is not the stream's own start or end) the line
+    is marked cut, so `^` and `$` do not match there (review M1)."""
+    lo, hi = max(0, start - BYTE_CONTEXT), min(len(proj), end + BYTE_CONTEXT)
+    pre, mid, post = (defang(proj[a:b].decode("utf-8", "surrogateescape"))
+                      for a, b in ((lo, start), (start, end), (end, hi)))
+    text = pre + mid + post
+    s, e = len(pre), len(pre) + len(mid)
+    cut_l = lo > 0 or not at_start
+    cut_r = hi < len(proj) or not at_end
+    pieces = text.splitlines(True)
+    off = 0
+    for k, ln in enumerate(pieces):
+        if off <= s < off + len(ln):
+            open_end = ln.splitlines()[0] == ln          # no line break closes this piece
+            return _line_context(ln, s - off, e - off, cut_l and k == 0,
+                                 cut_r and k == len(pieces) - 1 and open_end)
+        off += len(ln)
+    return _line_context(text, s, e, cut_l, cut_r)
+
+
+def _judge_window(tl, window, base, last, keys, rxs, found, cleared, judged, overlap):
+    """Judge every match in one window against the allow rules, in its own context. A match whose
+    right-hand context is not in the window yet waits for the next window, but only while its
+    start stays inside the tail the next window keeps (`overlap` bytes); a match too long for that
+    is judged now, on the context this window holds (review B1). `judged` holds the cleared
+    matches already seen, by stream offset."""
+    keep_from = len(window) - overlap
+    projs = [("raw", window, None)]
+    if b"\x00" in window:
+        projs.append(("nul", window.replace(b"\x00", b""), _nul_map))
+    for pname, proj, mapper in projs:
+        low = proj.lower()
+        to_raw = []
+
+        def judge(rule, s, e):
+            """True when the match counts (no allow rule covers it)."""
+            if mapper is None:
+                rs, re_ = s, e
+            else:
+                if not to_raw:
+                    to_raw.append(mapper(window))
+                rs, re_ = to_raw[0](s), to_raw[0](e - 1) + 1
+            key = (rule, pname, base + rs)
+            if key in judged:
+                return False
+            if not last and re_ + _RAW_SPAN > len(window) and rs >= keep_from:
+                return False            # the next window keeps it and adds its right-hand context
+            why, at = _allowed_at(tl, _byte_context(proj, s, e, base == 0, last))
+            if not why:
+                return True
+            judged.add(key)
+            entry = cleared.setdefault(rule, [why, at, 0])
+            entry[2] += 1
+            return False
+
+        for term, kb in keys:
+            if term in found:
+                continue
+            i = low.find(kb)
+            while i >= 0:
+                if judge(term, i, i + len(kb)):
                     found.add(term)
-            for label, brx in rxs:
-                if label not in found and brx.search(proj):
+                    break
+                i = low.find(kb, i + 1)
+        for label, brx in rxs:
+            if label in found:
+                continue
+            for m in brx.finditer(low):
+                if judge(label, m.start(), max(m.end(), m.start() + 1)):
                     found.add(label)
-        tail = window[-overlap:] if len(window) > overlap else window
-    return found
+                    break
 
 
-def scan_bytes_stream(tl: TermList, path: str, relpath: str, exclude=frozenset()):
+def scan_bytes_stream(tl: TermList, path: str, relpath: str, exclude=frozenset(),
+                      quiet=frozenset()):
     """Byte lane: every regular file, whatever its suffix, streamed. Two projections per chunk:
     the raw bytes (a term inside a compiled artefact or binary container) and the NUL-stripped
     bytes (UTF-16-encoded text without needing it to decode). It is the BACKSTOP: `exclude`
-    carries the terms the text lane already accounted for, so it reports only what the text lane
-    could not."""
+    carries the terms the text lane already reported as hits. A term the text lane only
+    suppressed is scanned again: each of its byte matches is judged by the allow rules in its own
+    context, so an allowed line clears its own matches and nothing else in the file. `quiet`
+    names the rules whose cleared matches the text lane already reported as suppressed."""
     hits, suppressed = [], []
     try:
         with open(path, "rb") as f:
-            found = byte_hits(tl, iter(lambda: f.read(BYTE_CHUNK), b""), exclude)
+            found, cleared = _byte_scan(tl, iter(lambda: f.read(BYTE_CHUNK), b""), exclude)
     except OSError as e:
         return None, None, str(e)
+    ctx = "(byte lane: term present in the raw bytes of this file)"
     for term in sorted(found):
-        ctx = "(byte lane: term present in the raw bytes of this file)"
-        why, at = _allowed(tl, relpath + " " + ctx)
-        rec = {"file": relpath, "line": 0, "kind": "term", "rule": term,
-               "lane": "bytes", "context": ctx}
-        if why:
-            rec["suppressed_by"] = why
-            rec["allow_rule_line"] = at
-            suppressed.append(rec)
-        else:
-            hits.append(rec)
+        hits.append({"file": relpath, "line": 0, "kind": "term", "rule": term,
+                     "lane": "bytes", "context": ctx})
+    for term in sorted(set(cleared) - found - set(quiet)):
+        why, at, n = cleared[term]
+        suppressed.append({"file": relpath, "line": 0, "kind": "term", "rule": term,
+                           "lane": "bytes", "context": "(byte lane: %d match(es) an allow rule "
+                           "covers in their own line)" % n,
+                           "suppressed_by": why, "allow_rule_line": at})
     return hits, suppressed, ""
 
 
@@ -840,7 +1040,7 @@ def audit(target, terms_path=None, term_list=None, control=None, attestation=Non
         nh, ns = scan_name(tl, rel, shape_on)
         hits.extend(nh)
         suppressed.extend(ns)
-        text, accounted = None, set()
+        text, accounted, quiet = None, set(), set()
         try:
             size = os.path.getsize(full)
         except OSError as e:
@@ -863,8 +1063,9 @@ def audit(target, terms_path=None, term_list=None, control=None, attestation=Non
                         th, ts = scan_text(tl, text, rel, shape_on)
                         hits.extend(th)
                         suppressed.extend(ts)
-                        accounted = {r["rule"] for r in th + ts if r["kind"] == "term"}
-        bh, bs, err = scan_bytes_stream(tl, full, rel, exclude=accounted)
+                        accounted = {r["rule"] for r in th if r["kind"] == "term"}
+                        quiet = {r["rule"] for r in ts if r["kind"] == "term"}
+        bh, bs, err = scan_bytes_stream(tl, full, rel, exclude=accounted, quiet=quiet)
         if bh is None:
             unreadable.append((rel, err))
             continue
@@ -915,9 +1116,9 @@ def audit(target, terms_path=None, term_list=None, control=None, attestation=Non
                 if raw is not None:
                     text, _codec = decode_explicit(raw)
                     if text is not None:
-                        th, ts = scan_text(tl, text, rel, shape_on)
+                        th, _ts = scan_text(tl, text, rel, shape_on)
                         chits.extend(th)
-                        accounted = {r["rule"] for r in th + ts if r["kind"] == "term"}
+                        accounted = {r["rule"] for r in th if r["kind"] == "term"}
                 bh, _bs, _err = scan_bytes_stream(tl, full, rel, exclude=accounted)
                 if bh:
                     chits.extend(bh)

@@ -19,6 +19,12 @@ This skill drives an op through the board and keeps every claim tied to a proof.
   op's done-bar authority.
 - `alpaca op new` opens it. The level in force and the standing authority id are read from
   the record, never from the environment.
+- Always pass `--title`: a short name of at most 60 characters, e.g. `--title "Watchdog"`. The
+  Roadmap labels the op's map "Operation map Op21 - Watchdog"; the intent stays the full
+  description. Without `--title` the name is derived from the intent (the part before the first
+  colon) and `op new` says so. Rename with `alpaca op title <op> "<name>"`.
+- `op new` pins the new op, so its operation map shows on the Roadmap. Pass `--no-pin` for an op
+  that should not get a map; `alpaca op unpin <op>` removes one later.
 
 ## Working the board
 

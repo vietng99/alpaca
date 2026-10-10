@@ -69,6 +69,39 @@ def _move_checklist_row(conn, sid, crow, args):
     return cli.PASS
 
 # ---- op
+def short_title(intent, limit=48):
+    """A short display name derived from an op intent: the lead-in before the first colon, else the
+    intent cut at a word near `limit` characters. `op new` records it when no --title is given."""
+    head = str(intent or "").strip().split(":")[0].strip()
+    if len(head) <= limit:
+        return head
+    cut = head[:limit]
+    space = cut.rfind(" ")
+    return (cut[:space] if space > limit // 2 else cut) + "..."
+
+
+def open_op(conn, intent, done_when, *, phases=None, session, actor, from_intent=None, title=None) -> str:
+    """Open one op: the `op-open` event and the ops row in one transaction, then bind the standing
+    authority it opened under (authority.bind_op), so a closed op always says what authorized it.
+    Binds no intent: `op new --from-intent` binds its own afterwards, and a research run's op
+    opens from none (design/research-engine/architecture.md section 2.3). Returns the op id."""
+    now = util.now_iso()
+    with db.transaction(conn):
+        oid = "op-%03d" % (conn.execute("SELECT COUNT(*) FROM ops WHERE id != 'op-0'").fetchone()[0] + 1)
+        db.append_event(conn, session=session, actor=actor, kind="op-open", op=oid,
+                        data={"intent": intent, "done_when": done_when, "phases": phases,
+                              "from_intent": from_intent, **({"title": title} if title else {})},
+                        conn_in_txn=True)
+        db.upsert(conn, "ops", "id", {"id": oid, "intent": intent, "done_when": done_when,
+                                       "status": "open", "opened": now, "closed": None,
+                                       "phases": json.dumps(phases)})
+    # M3.2: stamp the standing authority (id + level + scope) this op ran under onto the op
+    # forever, so a closed op always says what authorized it. Additive; opens no new op.
+    from alpaca.posture import authority
+    authority.bind_op(conn, oid, session=session)
+    return oid
+
+
 @cli.command("op")
 def cmd_op(args):
     conn = db.connect(cli._root()); sid = args.session or "cli"; now = util.now_iso()
@@ -93,22 +126,37 @@ def cmd_op(args):
                       "the queue)")
                 return cli.FAIL
             op_intent, op_done_when = args.intent, args.done_when
-        with db.transaction(conn):
-            oid = "op-%03d" % (conn.execute("SELECT COUNT(*) FROM ops WHERE id != 'op-0'").fetchone()[0] + 1)
-            db.append_event(conn, session=sid, actor="human", kind="op-open", op=oid,
-                            data={"intent": op_intent, "done_when": op_done_when, "phases": phases,
-                                  "from_intent": intent_rec["id"] if intent_rec else None},
-                            conn_in_txn=True)
-            db.upsert(conn, "ops", "id", {"id": oid, "intent": op_intent, "done_when": op_done_when,
-                                           "status": "open", "opened": now, "closed": None, "phases": json.dumps(phases)})
-        # M3.2: stamp the standing authority (id + level + scope) this op ran under onto the op
-        # forever, so a closed op always says what authorized it. Additive; opens no new op.
-        from alpaca.posture import authority
-        authority.bind_op(conn, oid, session=sid)
+        # Every new op carries a short display name (the roadmap's map label) and is pinned so its
+        # operation map shows on the roadmap. --title names it; without one the name is derived
+        # from the intent and recorded, so the label never falls back to the full intent text.
+        title = (args.title or "").strip() or short_title(op_intent)
+        if len(title) > TITLE_MAX or any(ord(c) < 32 for c in title):
+            print("GATE alpaca-op-new: FAIL (--title must be one line of at most %d chars, e.g. "
+                  "--title \"Watchdog\")" % TITLE_MAX); return cli.FAIL
+        oid = open_op(conn, op_intent, op_done_when, phases=phases, session=sid, actor="human",
+                      from_intent=intent_rec["id"] if intent_rec else None, title=title)
         # M3.6: bind the intent the op opened from onto the op, so op close can judge its bar.
         if intent_rec is not None:
             _intent.bind_op(conn, oid, intent_rec["id"], session=sid)
-        print("%s opened: %s" % (oid, op_intent)); return cli.PASS
+        # op-019 t-200: every new op opens its question batch (the six big-choice classes)
+        from alpaca import batch as _batch
+        _batch.open_batch(conn, oid, session=sid)
+        if not args.no_pin:
+            db.append_event(conn, session=sid, actor="alpaca", kind="op-pin", op=oid, ref=oid,
+                            data={"pinned": True, "on_open": True})
+        print("%s opened: %s" % (oid, op_intent))
+        print("%s title: %s%s%s" % (oid, title, "" if args.title else " (derived; rename with: alpaca op title %s \"<name>\")" % oid,
+                                   "" if args.no_pin else "; pinned on the roadmap"))
+        return cli.PASS
+    if args.op_verb == "title":
+        title = (args.title or "").strip()
+        if not db.rows(conn, "ops", "id=?", (args.id,)):
+            print("GATE alpaca-op-title: FAIL (no op %s)" % args.id); return cli.FAIL
+        if not title or len(title) > TITLE_MAX or any(ord(c) < 32 for c in title):
+            print("GATE alpaca-op-title: FAIL (a title is one line of at most %d chars)" % TITLE_MAX); return cli.FAIL
+        db.append_event(conn, session=sid, actor=sid, kind="op-title", op=args.id, ref=args.id,
+                        data={"title": title})
+        print("%s title: %s" % (args.id, title)); return cli.PASS
     if args.op_verb == "close":
         ops_rows = db.rows(conn, "ops", "id=?", (args.id,))
         if not ops_rows: print("GATE alpaca-op-close: FAIL (no op %s)" % args.id); return cli.FAIL
@@ -196,7 +244,8 @@ def _contract_args(args):
     """The four contract parts and stage from repeatable CLI flags."""
     return {"input": getattr(args, "input", None) or [], "expected": getattr(args, "expected", None) or [],
             "done_bar": getattr(args, "done_bar", None) or [], "fail_cases": getattr(args, "fail_case", None) or [],
-            "stage": getattr(args, "stage", None), "source": getattr(args, "source", None)}
+            "stage": getattr(args, "stage", None), "source": getattr(args, "source", None),
+            "origin": getattr(args, "origin", None)}
 
 
 def _contract_flags(parser):
@@ -206,6 +255,9 @@ def _contract_flags(parser):
     parser.add_argument("--fail-case", dest="fail_case", action="append", help="a fail case; repeatable")
     parser.add_argument("--stage", help="the profile stage this task runs, if any (alpaca/profile.py stages)")
     parser.add_argument("--source", help="where the contract is restated from")
+    parser.add_argument("--origin", help="the origin of every line given by flag: owner-quote=<source> "
+                        "(a signed brief file, session:<sid> or dec:<id>), decision=<dec-id>, "
+                        "derived=<reason>, agent-proposed (the default)")
 
 def _mapping_flags(parser):
     membership = parser.add_mutually_exclusive_group()
@@ -220,6 +272,18 @@ def _mapping_flags(parser):
     parser.add_argument('--requires-stage', action='append', help='required profile stage; repeatable')
 
 
+def _intent_refused(conn, task, action, sid, gate):
+    """op-019: ask the intent gates (alpaca/intentgate.py) about a claim or a move; print the
+    refusal and return True when one refuses."""
+    from alpaca import intentgate
+    try:
+        intentgate.task_gate(conn, task, action, session=sid, root=cli._root())
+    except intentgate.IntentGateRefusal as exc:
+        print("GATE %s: FAIL (%s)" % (gate, exc))
+        return True
+    return False
+
+
 def _mapping_args(args):
     result = {key: getattr(args, key) for key in ('group', 'inherit') if getattr(args, key, None)}
     if args.after is not None or args.independent: result['after'] = args.after or []
@@ -232,7 +296,10 @@ def add_task(conn, op, statement, title, *, phase=None, why=None, session="cli",
              extra=None, mapping=None):
     """Add one open task to `op`: the task-add event and the tasks row in one transaction. Returns
     the new task id. `extra` adds keys to the event data (intake names the runbook stage a task came
-    from there, so a later intake finds the task again). The caller has checked the op and title."""
+    from there, so a later intake finds the task again). The caller has checked the op and title.
+    On an op with a batch (op-019) a phase of the ladder is required: ValueError TASK-PHASE-*."""
+    from alpaca import batch as _batch
+    _batch.require_phase(conn, op, phase)
     now = util.now_iso()
     data = {"statement": statement, "title": title, "phase": phase, "why": why}
     if extra:
@@ -309,15 +376,26 @@ def cmd_task(args):
         if mapping is None and db.meta_get(conn, 'task-planning') == 'required':
             print('GATE alpaca-task-add: FAIL (organization required: use --group or --inherit, '
                   '--after or --independent, and --resource or --no-resources)'); return cli.FAIL
+        # op-019 t-201: the actor is the session inside an agent session, never a fixed `human`;
+        # `--by owner` needs owner words (alpaca/ownerword.py) and the next id is its subject
+        from alpaca import ownerword
+        has_contract = any(getattr(args, part, None) for part in ("input", "expected", "done_bar", "fail_case"))
         try:
+            if has_contract:
+                from alpaca import taskcontract
+                taskcontract.prepare(conn, _contract_args(args), cli._root())   # a bad origin refuses before the task exists
+            actor, word = ownerword.writer(
+                conn, sid, getattr(args, "by", None), getattr(args, "quote", None), root=cli._root(),
+                subject="t-%03d" % (conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] + 1))
             tid = add_task(conn, args.op, args.statement, title, phase=args.phase, why=args.why,
-                           session=sid, actor="human", mapping=mapping)
+                           session=sid, actor=actor, mapping=mapping,
+                           extra={"owner_word": word} if word else None)
         except ValueError as exc:
             print('GATE alpaca-task-add: FAIL (%s)' % exc); return cli.FAIL
-        if any(getattr(args, part, None) for part in ("input", "expected", "done_bar", "fail_case")):
-            from alpaca import taskcontract
+        if has_contract:
             try:
-                taskcontract.record(conn, tid, _contract_args(args), session=sid, actor=args.by if getattr(args, "by", None) else "human")
+                taskcontract.record(conn, tid, _contract_args(args), session=sid, actor=actor,
+                                    root=cli._root(), owner_word=word)
             except ValueError as exc:
                 print("%s added; GATE alpaca-task-contract: FAIL (%s)" % (tid, exc)); return cli.FAIL
         print("%s added" % tid); return cli.PASS
@@ -325,14 +403,24 @@ def cmd_task(args):
         from alpaca import taskcontract
         import json as _json
         if args.show:
-            print(_json.dumps(taskcontract.latest(conn).get(args.id), indent=1, ensure_ascii=True)); return cli.PASS
+            current = taskcontract.latest(conn).get(args.id)
+            if getattr(args, "json", False):
+                print(_json.dumps(current, indent=1, ensure_ascii=True))
+            else:
+                print(taskcontract.show_text(current))
+            return cli.PASS
         try:
+            from alpaca import ownerword
             data = _contract_args(args)
             if args.file:
                 with open(args.file) as stream:
                     loaded = _json.load(stream)
                 data = dict(loaded, **{k: v for k, v in data.items() if v})
-            event = taskcontract.record(conn, args.id, data, session=sid, actor=args.by or "human")
+            trow = db.rows(conn, "tasks", "id=?", (args.id,))
+            actor, word = ownerword.writer(
+                conn, sid, args.by, getattr(args, "quote", None), subject=args.id, root=cli._root(),
+                since=ownerword.ask_ts(conn, args.id) or (trow[0]["created"] if trow else None))
+            event = taskcontract.record(conn, args.id, data, session=sid, actor=actor, root=cli._root(), owner_word=word)
         except (ValueError, OSError) as exc:
             print("GATE alpaca-task-contract: FAIL (%s)" % exc); return cli.FAIL
         print("%s contract recorded (event %s)" % (args.id, event["id"])); return cli.PASS
@@ -343,9 +431,16 @@ def cmd_task(args):
         title = args.title.strip()
         if not title or len(title) > TITLE_MAX:
             print("GATE alpaca-task-title: FAIL (title must be 1 to %d chars, got %d)" % (TITLE_MAX, len(title))); return cli.FAIL
+        from alpaca import ownerword
+        try:
+            actor, word = ownerword.writer(conn, sid, args.by, getattr(args, "quote", None), subject=args.id,
+                                           root=cli._root(), since=ownerword.ask_ts(conn, args.id) or t[0]["created"])
+        except ValueError as exc:
+            print("GATE alpaca-task-title: FAIL (%s)" % exc); return cli.FAIL
         with db.transaction(conn):
-            db.append_event(conn, session=sid, actor=args.by or "human", kind="task-title", op=t[0]["op"], ref=args.id,
-                            data={"from": t[0]["title"], "to": title}, conn_in_txn=True)
+            db.append_event(conn, session=sid, actor=actor, kind="task-title", op=t[0]["op"], ref=args.id,
+                            data=dict({"from": t[0]["title"], "to": title}, **({"owner_word": word} if word else {})),
+                            conn_in_txn=True)
             db.patch(conn, "tasks", "id", args.id, {"title": title, "updated": now})
         print("%s titled: %s" % (args.id, title)); return cli.PASS
     if args.task_verb == "claim":
@@ -356,6 +451,7 @@ def cmd_task(args):
         t = db.rows(conn, "tasks", "id=?", (args.id,))
         if not t: print("GATE alpaca-task: FAIL (no task %s)" % args.id); return cli.FAIL
         if t[0]["status"] != "open": print("GATE alpaca-task-claim: FAIL (%s is %s; move it to open first)" % (args.id, t[0]["status"])); return cli.FAIL
+        if _intent_refused(conn, t[0], "claim", sid, "alpaca-task-claim"): return cli.FAIL
         res = claims.take(conn, args.id, args.by, minutes=args.minutes, session=sid)
         print("%s claimed by %s until %s" % (args.id, args.by, res["lease_until"])); return cli.PASS
     if args.task_verb == "move":
@@ -367,6 +463,7 @@ def cmd_task(args):
             return _move_checklist_row(conn, sid, crow[0], args)
         t = db.rows(conn, "tasks", "id=?", (args.id,))
         if not t: print("GATE alpaca-task: FAIL (no task %s)" % args.id); return cli.FAIL
+        if _intent_refused(conn, t[0], args.status, sid, "alpaca-task-move"): return cli.FAIL
         # E4: done is closed by a SEALED PROOF REPORT, never by a bare string. `--proof` must be
         # local:<report>, the pointer must resolve, and the latest proof-report event for this
         # task must name that path with the sha256 the file carries right now.
@@ -475,7 +572,53 @@ def cmd_retention(args):
               % (len(r["removed"]), len(r["kept"]), r["store_bytes"])); return cli.PASS
     if args.retention_verb == "size":
         print("store: %d bytes" % retention.store_size(root)); return cli.PASS
+    if args.retention_verb == "gc":
+        return _retention_gc(root, args)
     return cli.USAGE
+
+
+def _retention_gc(root, args):
+    """Plan, and with --apply run, the project.yaml `disk:` cleanup (alpaca/disk.py): dead
+    sessions' scratch, stale declared /tmp leftovers and the declared run-tree prune rules. A dry
+    run is the default; it removes nothing."""
+    import json as _json
+    import os as _os
+    from alpaca import disk
+    errs = disk.policy_errors(root)
+    if errs:
+        print("GATE alpaca-retention-gc: FAIL (%s)" % "; ".join(errs)); return cli.FAIL
+    sid = _os.environ.get("ALPACA_SESSION_ID") or _os.environ.get("CLAUDE_CODE_SESSION_ID")
+    planned = disk.plan(root, current_sid=sid)
+    if not planned["policy"]:
+        print("no disk: block in project.yaml; nothing is swept"); return cli.PASS
+    for c in planned["remove"]:
+        c["bytes"] = disk.tree_bytes(c["path"])
+    total = sum(c["bytes"] for c in planned["remove"])
+    result = None
+    if args.apply:
+        result = disk.apply(root, planned, session=sid or "cli", measure=False)
+        shown, total = result["removed"], result["bytes"]
+    else:
+        shown = planned["remove"]
+    failed = (result or {}).get("failed", [])
+    if args.json:
+        print(_json.dumps({"verdict": "applied" if args.apply else "dry-run",
+                           "kept": planned["keep"], "dropped": shown, "bytes": total,
+                           "failed": failed}, indent=2))
+        return cli.FAIL if failed else cli.PASS
+    for c in shown:
+        print("%s %-7s %8.2fG  %s  (%s)" % ("removed" if args.apply else "would remove", c["kind"],
+                                          c["bytes"] / disk.GIB, c["path"], c["reason"]))
+    if args.verbose:
+        for c in planned["keep"]:
+            print("keep    %-7s  %s  (%s)" % (c["kind"], c["path"], c["reason"]))
+    print("%s %d path(s), %.2fG; kept %d" % ("removed" if args.apply else "dry run: would remove",
+                                            len(shown), total / disk.GIB, len(planned["keep"])))
+    for f in failed:
+        print("failed  %s: %s" % (f["path"], f["error"]))
+    if failed:
+        return cli.FAIL
+    return cli.PASS
 
 # ---- token: inspect and resolve the write-ahead pair
 @cli.command("token")
@@ -497,6 +640,12 @@ def cmd_token(args):
 def _parser(sub):
     op = sub.add_parser("op"); ov = op.add_subparsers(dest="op_verb")
     n = ov.add_parser("new"); n.add_argument("intent", nargs="?"); n.add_argument("--done-when", dest="done_when"); n.add_argument("--phases")
+    n.add_argument("--title", help="short display name for the roadmap label, at most %d chars "
+                   "(derived from the intent when omitted)" % TITLE_MAX)
+    n.add_argument("--no-pin", dest="no_pin", action="store_true",
+                   help="do not pin the new op's operation map on the roadmap")
+    t = ov.add_parser("title", help="rename an op's short display name; the newest title wins")
+    t.add_argument("id"); t.add_argument("title")
     n.add_argument("--from-intent", dest="from_intent", action="store_true",
                    help="open the op from the next open line in intents/queue.md (M3.6)")
     c = ov.add_parser("close"); c.add_argument("id"); c.add_argument("--basis", required=True)
@@ -519,6 +668,8 @@ def _parser(sub):
     a = tv.add_parser("add"); a.add_argument("op"); a.add_argument("statement"); a.add_argument("--phase"); a.add_argument("--why")
     a.add_argument("--title", help="required: short display name, at most %d chars" % TITLE_MAX)
     _contract_flags(a); _mapping_flags(a)
+    a.add_argument("--by", help="a human identity (owner, human) needs --quote: the owner's words; any other value is recorded as the actor")
+    a.add_argument("--quote", help="the owner's whole message answering the id (`<id> yes`)")
     gr = tv.add_parser('group', help='create or rename a workstream within a work area')
     gr.add_argument('op'); gr.add_argument('group')
     gr.add_argument('--title', required=True); gr.add_argument('--category', required=True)
@@ -531,7 +682,10 @@ def _parser(sub):
     ct = tv.add_parser("contract", help="record a task's input, expected output, done bar and fail cases; the newest is current")
     ct.add_argument("id"); _contract_flags(ct); ct.add_argument("--file", help="a JSON object with the same keys")
     ct.add_argument("--by"); ct.add_argument("--show", action="store_true")
+    ct.add_argument("--quote", help="with --by owner|human: the owner's whole message answering the task id")
+    ct.add_argument("--json", action="store_true", help="with --show: the stored contract as JSON")
     ti = tv.add_parser("title"); ti.add_argument("id"); ti.add_argument("title"); ti.add_argument("--by")
+    ti.add_argument("--quote", help="with --by owner|human: the owner's whole message answering the task id")
     cl = tv.add_parser("claim"); cl.add_argument("id"); cl.add_argument("--by", required=True); cl.add_argument("--minutes", type=int, default=60)
     mv = tv.add_parser("move"); mv.add_argument("id"); mv.add_argument("status", choices=STATUSES)
     mv.add_argument("--proof"); mv.add_argument("--reason"); mv.add_argument("--by")
@@ -546,6 +700,9 @@ def _parser(sub):
     rsn = rtv.add_parser("snapshot"); rsn.add_argument("path")
     rsn.add_argument("--tag", required=True); rsn.add_argument("--note", required=True)
     rtv.add_parser("compact"); rtv.add_parser("size")
+    rgc = rtv.add_parser("gc", help="plan (default) or --apply the project.yaml disk: cleanup")
+    rgc.add_argument("--apply", action="store_true"); rgc.add_argument("--json", action="store_true")
+    rgc.add_argument("--verbose", "-v", action="store_true")
     tk2 = sub.add_parser("token"); tnv = tk2.add_subparsers(dest="token_verb")
     tnv.add_parser("list")
     ts = tnv.add_parser("settle"); ts.add_argument("id"); ts.add_argument("--result")

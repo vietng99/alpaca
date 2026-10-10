@@ -1,13 +1,14 @@
 """alpaca serve: read-only localhost live dashboard.
 
 Two pages, one server, behind the web sign-in (`alpaca/weblogin.py`, page `/login`) when a login is
-configured. `/` is the workspace hub (`alpaca/web/workspaces.html`), whose Alpaca tile opens the
-cockpit at `/hub/` (the operations hub, `alpaca/web/hub.html`; the older
-single-file cockpit stays at `/cockpit/legacy/`): the live mission-control landing page, which
+configured. `/` is the workspace hub (`alpaca/web/workspaces.html`), whose own-project tile opens the
+cockpit at `/hub/` (the operations hub, `alpaca/web/hub.html`): the live mission-control
+landing page, which
 reads the seven-key `/board/data.json` payload (`alpaca.export.payload`), so every obligation row,
-gate run, pulse figure and chip number is read from the record. `/analytics/` is the session
+gate run, pulse figure and badge count is read from the record. `/analytics/` is the session
 analytics app. The retired classic board addresses (`/board/`, `/board.html`) answer a 301 to
-`/hub/`. A domain profile (alpaca/profile.py) may add read-only routes of its own, for example the
+`/hub/`, and the retired single-file pages `/cockpit/legacy/` and `/analytics/legacy/` answer a 301
+to `/hub/` and `/analytics/`. A domain profile (alpaca/profile.py) may add read-only routes of its own, for example the
 live state of a running job, which is runtime state rather than a fold of the record and so is
 served here and never written into `data.json`.
 
@@ -25,10 +26,12 @@ Verbs:
     alpaca serve --stop       stop the running server for this project
 """
 import datetime
+from contextlib import contextmanager
 import getpass
 import glob
 import hashlib
 import http.server
+import io
 import json
 import os
 import re
@@ -52,6 +55,10 @@ BOARD_MIN_S = 15             # the watcher rebuilds the status board at most thi
 GAPS_MIN_S = 900             # without a viewer, recompute the index for the pricing gap notice this often
 INDEX_VIEW_S = 600           # a viewer's index request keeps the watcher warming the index this long
 DATA_WAIT_S = 60             # an analytics request waits this long for the first fold
+INFLIGHT_S = 5                # an In-flight snapshot is reused this long (seconds)
+OVERVIEW_S = 15               # an overview is reused this long while the record head stays put (seconds)
+VCS_S = 10                    # a Version control snapshot is reused this long (seconds)
+BURN_KEEP = 12                # token boards kept: the three windows plus recent custom ranges
 RETRY_FOLD_S = 10            # Retry-After for an index request that arrives before the first fold
 HEARTBEAT_S = 15             # SSE keep-alive comment interval
 IDLE_SHUTDOWN_S = 1800       # exit when no viewer (SSE client) for this long, so servers never orphan
@@ -65,6 +72,91 @@ READABLE = {".html", ".htm", ".md", ".markdown", ".txt", ".json", ".csv", ".log"
 #: are the repository and the interpreter. The refusal compares REAL paths, so a symlink from a
 #: served directory cannot reach in.
 PRIVATE_DIRS = (".alpaca", ".git", ".venv")
+#: The Studio page registry (alpaca/web/pages.json): every hub page and the shell's own files. The
+#: asset allowlist, the hub page's stylesheet links and its inline copy of the registry, and the
+#: reserved server paths below all come from it, so a new page is one registry entry and its files.
+WEB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+_REGISTRY = [None]
+_ASSET_TYPES = {".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".png": "image/png",
+                ".woff2": "font/woff2", ".json": "application/json"}
+
+
+def registry():
+    """alpaca/web/pages.json as a dict, read again when the file changes (as hub.html is)."""
+    path = os.path.join(WEB, "pages.json")
+    st = os.stat(path)
+    key, cached = (st.st_size, st.st_mtime_ns), _REGISTRY[0]
+    if cached is None or cached[0] != key:
+        with open(path, encoding="utf-8") as fh:
+            cached = _REGISTRY[0] = (key, json.loads(fh.read()))
+    return cached[1]
+
+
+def hub_styles(reg=None):
+    """The hub page's stylesheets in cascade order: the shell's first ones, each page's in registry
+    order, then the shell's last ones (theme.css last of all)."""
+    reg = reg or registry()
+    return (list(reg["shell"]["css_before"]) + [name for page in reg["pages"] for name in page.get("css", [])]
+            + list(reg["shell"]["css_after"]))
+
+
+def hub_assets(reg=None):
+    """{name: content type} of every file /hub/assets/<name> serves: the shell's modules, files and
+    Arthur's strips, and every page's modules and stylesheets."""
+    reg = reg or registry()
+    shell = reg["shell"]
+    names = (hub_styles(reg) + list(shell["js"]) + list(shell["files"])
+             + ["vendor/arthur/assets/strips/%s.png" % name for name in shell["arthur_actions"]]
+             + [name for page in reg["pages"] for name in page.get("js", [])])
+    return {name: _ASSET_TYPES[os.path.splitext(name)[1]] for name in names}
+
+
+def hub_page(root=None):
+    """hub.html with the registry filled in at its marker: the stylesheet links in cascade order and an
+    inline copy of the registry (pages.js reads it), so the first paint needs no extra request. The
+    profile's own stylesheets of the project at `root` (alpaca/profile.py web_meta "styles") link
+    last, after theme.css, so a project restyles the Studio without editing alpaca/web. Every
+    served page crosses the whole-page ASCII boundary (render.SURFACE_WRITERS)."""
+    import html
+    reg = registry()
+    links = "\n".join(['<link rel="stylesheet" href="/hub/assets/%s">' % name for name in hub_styles(reg)]
+                      + ['<link rel="stylesheet" href="%s">' % html.escape(url) for url in _profile_styles(root)])
+    copy = json.dumps(reg, ensure_ascii=True, separators=(",", ":")).replace("</", "<\\/")
+    with open(os.path.join(WEB, "hub.html"), encoding="utf-8") as fh:
+        page = fh.read()
+    page = page.replace("<!-- studio:pages -->",
+                        links + '\n<script type="application/json" id="studio-pages">' + copy + "</script>", 1)
+    return render.ascii_entities(page)
+
+
+def _profile_styles(root):
+    """The served URLs of the project's own stylesheets, or [] (no root, no profile, a failed read)."""
+    if not root:
+        return []
+    from alpaca import profile
+    try:
+        return profile.web_meta(root)["styles"]
+    except Exception:
+        return []
+
+
+#: Arthur's actions (alpaca/web/vendor/arthur): package 1's 11, then package 2's
+#: 21, as the registry names them. Each has one strip, assets/strips/<action>.png.
+ARTHUR_ACTIONS = tuple(registry()["shell"]["arthur_actions"])
+_TAGS = {}
+
+
+def _content_tag(path, body):
+    """The sha256 of a static asset's bytes, its ETag. It is kept per file, size and modification
+    time, so a reload of unchanged artwork costs no rehash."""
+    st = os.stat(path)
+    key = (str(path), st.st_size, st.st_mtime_ns)
+    tag = _TAGS.get(key)
+    if tag is None:
+        if len(_TAGS) > 256:
+            _TAGS.clear()
+        tag = _TAGS[key] = hashlib.sha256(body).hexdigest()
+    return tag
 
 
 def _state_path(root):
@@ -295,6 +387,25 @@ def _transcript_inputs(transcripts):
             yield sid, "subagent", subagent
 
 
+def _overview_head(root):
+    """The record head an overview depends on: the event chain, tasks, ops, messages and decisions.
+    The record is append-only and every write lands in one of these, so an unchanged head means an
+    unchanged record. None when the record cannot be read (the overview is then never reused)."""
+    try:
+        conn = db.connect_readonly(root)
+    except Exception:
+        return None
+    try:
+        return tuple(conn.execute(
+            "SELECT (SELECT COALESCE(MAX(id), 0) FROM events), (SELECT COUNT(*) FROM tasks),"
+            " (SELECT COALESCE(MAX(updated), '') FROM tasks), (SELECT COUNT(*) FROM ops),"
+            " (SELECT COALESCE(MAX(id), 0) FROM messages), (SELECT COALESCE(MAX(id), 0) FROM decisions)").fetchone())
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
+
 def _data_sig(root):
     """Revision of exactly the inputs consumed by the analytics fold.
 
@@ -355,19 +466,21 @@ def _data_sig(root):
 
 # ---- profile live state (never a projection) ------------------------------
 
-#: every path the server itself answers. A profile route may never take one of these (nor any
-#: path under a reserved prefix): generic routes, and the rules they carry such as the file
-#: browser's 403 without a login, always win. A colliding profile route is ignored and reported.
-GENERIC_PATHS = frozenset((
-    "/", "/index.html", "/login", "/logout", "/workspaces.json", "/hub", "/hub/", "/hub/index.html",
-    "/hub/overview.json", "/hub/history.json", "/hub/system.json", "/hub/runs.json",
-    "/hub/mission.json", "/hub/mission-evidence.json",
-    "/hub/documents.json", "/hub/document.json", "/hub/session.json", "/hub/analytics.json",
-    "/hub/analytics-index.json", "/hub/analytics-children.json",
+#: The server's own route table: every GET path `_get` answers before the hub's data endpoints. The
+#: data endpoints the Studio pages read are named in the registry (pages.json `endpoints`).
+SERVER_PATHS = (
+    "/", "/index.html", "/login", "/logout", "/workspaces.json", "/workspaces/summary.json",
+    "/hub", "/hub/", "/hub/index.html",
     "/analytics", "/analytics.html", "/analytics/", "/analytics/index.html", "/analytics/legacy/",
     "/board", "/board/", "/board.html", "/board/index.html", "/board/data.json",
     "/cockpit", "/cockpit/", "/cockpit/index.html", "/cockpit/legacy/",
-    "/files/list", "/files/read", "/data.json", "/health.json", "/library.json", "/events", "/file"))
+    "/files/list", "/files/read", "/data.json", "/health.json", "/library.json", "/events", "/file")
+#: every path the server itself answers: the route table plus every registry endpoint. A profile route
+#: may never take one of these (nor any path under a reserved prefix): generic routes, and the rules
+#: they carry such as the file browser's 403 without a login, always win. A colliding profile route is
+#: ignored and reported.
+GENERIC_PATHS = frozenset(SERVER_PATHS) | frozenset(
+    path for part in [registry()["shell"]] + registry()["pages"] for path in part.get("endpoints", []))
 GENERIC_PREFIXES = ("/login/", "/hub/assets/")
 
 
@@ -417,6 +530,7 @@ class Live:
         self.root = root
         self.lock = threading.Lock()
         self.cond = threading.Condition(self.lock)
+        self._foreground_reads = 0
         self.gen = 0
         self.data_json = "{}"
         self.data_rev = ""
@@ -429,7 +543,17 @@ class Live:
         self._pricing_sig = None
         self._index = None                     # ((data_rev, pricing_rev), json body, etag) of the index
         self._gaps_at = 0.0                    # when the index (and the pricing gap notice) was last computed
+        self._index_ready = threading.Event()
         self._index_lock = threading.Lock()    # one index computation at a time; waiters reuse it
+        self._burn = {}                        # (window, start, end) -> ((data_rev, pricing_rev, window, start, end, minute), body, etag)
+        self._burn_lock = threading.Lock()
+        self._inflight = None                  # (computed at, value) of the In-flight snapshot
+        self._inflight_lock = threading.Lock()
+        self._overview = None                  # (computed at, record head, body, etag) of /hub/overview.json
+        self._overview_lock = threading.Lock()
+        self._overview_warm = None             # the background thread computing the next overview
+        self._vcs = {}                         # days -> (computed at, value) of the Version control snapshot
+        self._vcs_lock = threading.Lock()     # one board computation at a time (alpaca.analytics.burn)
         self._warm_thread = None
         self._index_requested_at = 0.0         # last /hub/analytics-index.json request (HTTP handler only)
         self._warm_pending = False             # a warm was due but skipped; the watcher re-checks it
@@ -448,6 +572,27 @@ class Live:
         self.failures = {}
         self.clients = 0
         self.idle_since = time.time()
+
+    @contextmanager
+    def foreground_read(self, path):
+        """Give current-work data reads priority over the usage index rebuild."""
+        priority = path in ('/hub/overview.json', '/hub/research.json')
+        if priority:
+            with self.cond:
+                self._foreground_reads += 1
+        try:
+            yield
+        finally:
+            if priority:
+                with self.cond:
+                    self._foreground_reads -= 1
+                    self.cond.notify_all()
+
+    def yield_analytics(self):
+        # Pause between conversations, with a bound so a slow/disconnected
+        # page client cannot stop analytics indefinitely.
+        with self.cond:
+            self.cond.wait_for(lambda: not self._foreground_reads, timeout=2.0)
 
     def touch(self):
         """Count one viewer request as viewer activity.
@@ -524,7 +669,7 @@ class Live:
         """Recompute what changed. The watcher passes throttle=True so the analytics fold runs at
         most every FOLD_MIN_S and the board at most every BOARD_MIN_S; a direct call recomputes
         at once. fold=False skips the analytics fold (the server's fast first refresh)."""
-        changed = False
+        changed = board_moved = False
         with self.lock:
             self.checked_at = time.time()
         try:
@@ -571,7 +716,7 @@ class Live:
                 with self.lock:
                     if brev != self.board_rev:
                         self.board_json, self.board_rev = bj, brev
-                        changed = True
+                        changed = board_moved = True
                 self._board_sig = dsig
                 self._board_at = now
             except Exception as e:
@@ -640,12 +785,56 @@ class Live:
                 self.cond.notify_all()
         if index_moved or self._warm_pending:
             self._warm_index()
+        if board_moved and self.clients:
+            self._warm_overview()
+
+    def _warm_overview(self):
+        """Compute the next overview on a background thread when the board moves and a viewer is
+        connected, so the page's own read after the push finds it ready. One at a time."""
+        if self._overview_warm is not None and self._overview_warm.is_alive():
+            return
+
+        def run():
+            try:
+                self.overview()
+            except Exception as error:
+                self.failure("overview", error)
+        self._overview_warm = threading.Thread(target=run, name="alpaca-overview-warm", daemon=True)
+        self._overview_warm.start()
 
     def note_index_request(self):
         """The HTTP handler records that a viewer asked for the index; only such a request makes
         the watcher warm it for viewers (a cockpit-only viewer never pays for it)."""
         with self.lock:
             self._index_requested_at = time.time()
+
+    def analytics_snapshot(self):
+        """Serve completed measurements while one background rebuild updates them.
+
+        A cold build is explicit (202), never an empty zero-usage index. Cached
+        measurements retain their body/etag and get a refreshing header until
+        the current data and pricing revisions have completed.
+        """
+        with self.lock:
+            key = (self.data_rev, self.pricing_rev)
+            cached = self._index
+        if not key[0]:
+            raise FoldPending("first analytics fold pending")
+        if cached is not None and cached[0] == key:
+            return cached[1], cached[2], 200, "fresh"
+        self._warm_index(force=True)
+        if cached is not None:
+            return cached[1], cached[2], 200, "refreshing"
+        self._index_ready.wait(0.5)
+        with self.lock:
+            cached = self._index
+            current = (self.data_rev, self.pricing_rev)
+        if cached is not None:
+            return cached[1], cached[2], 200, "fresh" if cached[0] == current else "refreshing"
+        if self._index_ready.is_set():
+            raise FoldPending("analytics build failed; retry after checking capture health")
+        return json.dumps({"state": "building", "message": "Preparing session measurements.",
+                           "retry_after": 2}), None, 202, "building"
 
     def analytics_index(self):
         """The project analytics index as (JSON body, etag), computed once per revision pair.
@@ -666,7 +855,7 @@ class Live:
             if cached is not None and cached[0] == key:
                 return cached[1], cached[2]
             sessions = json.loads(data_json).get("sessions", [])
-            value = metrics_index.index(self.root, sessions)
+            value = metrics_index.index(self.root, sessions, yield_control=self.yield_analytics)
             body = json.dumps(value, ensure_ascii=True)
             etag = util.sha256_hex(body)
             with self.lock:
@@ -682,7 +871,88 @@ class Live:
                 self.failure("pricing_gaps", error)
             return body, etag
 
-    def _warm_index(self):
+    def overview(self):
+        """/hub/overview.json as (body, etag). Every page reads it and one computation takes about a
+        second on a large record (task contracts, proof gates, capture health), so viewers share one
+        while the record head (_overview_head) stays put, for at most OVERVIEW_S so inputs outside
+        the record (reports, receipts, leases running out) still refresh. A read that arrives while
+        the value is computed waits for it instead of starting a second computation."""
+        from alpaca import hub
+        head = _overview_head(self.root)
+        with self._overview_lock:
+            cached = self._overview
+            if cached is not None and head is not None and cached[1] == head and time.time() - cached[0] < OVERVIEW_S:
+                return cached[2], cached[3]
+            body = json.dumps(hub.overview(self.root), ensure_ascii=True).encode("utf-8")
+            etag = util.sha256_hex(body)
+            self._overview = (time.time(), head, body, etag)
+            return body, etag
+
+    def inflight(self):
+        """The In-flight snapshot (alpaca.analytics.inflight), reused for INFLIGHT_S so several viewers
+        polling every 15 s cost one read. Transcripts are read incrementally between snapshots."""
+        from alpaca.analytics import inflight
+        with self._inflight_lock:
+            cached = self._inflight
+            if cached is not None and time.time() - cached[0] < INFLIGHT_S:
+                return cached[1]
+            value = inflight.snapshot(self.root)
+            self._inflight = (time.time(), value)
+            return value
+
+    def vcs(self, days):
+        """The Version control snapshot (alpaca.gitview), kept VCS_S per window so polling viewers share one read."""
+        from alpaca import gitview
+        if days not in (1, 7, 30, 90):
+            raise ValueError("days must be 1, 7, 30 or 90")
+        with self._vcs_lock:
+            cached = self._vcs.get(days)
+            if cached is not None and time.time() - cached[0] < VCS_S:
+                return cached[1]
+            value = gitview.snapshot(self.root, days)
+            self._vcs[days] = (time.time(), value)
+            return value
+
+    def burn(self, window, start=None, end=None):
+        """The Sessions tab token and cost board (alpaca.analytics.burn) as (JSON body, etag).
+
+        Kept per (data_rev, pricing_rev, window, start, end, minute): the fold moves when a
+        transcript or a child transcript grows, and a rolling window (or a range that ends today)
+        moves with the clock, so one minute is the longest a board is reused. A custom range
+        (start and end from the browser) replaces the window; a bad one is a ValueError (400)
+        before any work. Only the last BURN_KEEP boards are kept, since ranges are open-ended.
+        Concurrent requests wait on one computation.
+        """
+        from alpaca.analytics import burn as burn_board
+        if start or end:
+            burn_board.custom_range(start, end, time.time())
+            window = "range"
+        elif window not in burn_board.WINDOWS:
+            raise ValueError("unknown window; use one of %s" % ", ".join(burn_board.WINDOWS))
+        which = (window, start or None, end or None)
+        with self._burn_lock:
+            with self.lock:
+                key = (self.data_rev, self.pricing_rev) + which + (int(time.time() // 60),)
+                data_json = self.data_json
+            if not key[0]:
+                raise FoldPending("first analytics fold pending")
+            cached = self._burn.get(which)
+            if cached is not None and cached[0] == key:
+                return cached[1], cached[2]
+            sessions = json.loads(data_json).get("sessions", [])
+            if window == "range":
+                value = burn_board.board(self.root, sessions, start=start, end=end)
+            else:
+                value = burn_board.board(self.root, sessions, window)
+            body = json.dumps(value, ensure_ascii=True)
+            etag = util.sha256_hex(body)
+            self._burn.pop(which, None)
+            self._burn[which] = (key, body, etag)
+            while len(self._burn) > BURN_KEEP:
+                self._burn.pop(next(iter(self._burn)))
+            return body, etag
+
+    def _warm_index(self, *, force=False):
         """Recompute a stale index off the watcher thread after the fold or the pricing moved.
 
         Two reasons to warm: a viewer is connected and asked for the index within INDEX_VIEW_S,
@@ -696,7 +966,7 @@ class Live:
             key = (self.data_rev, self.pricing_rev)
             stale = bool(key[0]) and (self._index is None or self._index[0] != key)
             viewer = self.clients > 0 and now - self._index_requested_at < INDEX_VIEW_S
-            wanted = viewer or now - self._gaps_at >= GAPS_MIN_S
+            wanted = force or viewer or now - self._gaps_at >= GAPS_MIN_S
         running = self._warm_thread is not None and self._warm_thread.is_alive()
         if not stale:
             self._warm_pending = False
@@ -706,11 +976,15 @@ class Live:
             return
         self._warm_pending = False
 
+        self._index_ready.clear()
+
         def warm():
             try:
                 self.analytics_index()
             except Exception as error:
                 self.failure("analytics_index", error)
+            finally:
+                self._index_ready.set()
         self._warm_thread = threading.Thread(target=warm, daemon=True)
         self._warm_thread.start()
 
@@ -729,11 +1003,26 @@ class Live:
                                "board": board_revision, "pricing": self.pricing_rev})
 
 
-FILES_ROOT_DENY = {".git", ".venv", "node_modules", "__pycache__", ".pytest_cache", "analytics"}
+FILES_ROOT_DENY = paths.BROWSER_ROOT_DENY
+#: The generic text files the file browser reads. A domain profile adds its own extensions through
+#: `paths()["text_exts"]` (alpaca/profile.py), merged in by `files_text_exts`.
 FILES_TEXT_EXTS = {".md", ".markdown", ".txt", ".html", ".htm", ".json", ".yaml", ".yml",
-                   ".toml", ".cfg", ".ini", ".csv", ".log", ".py", ".sh", ".sv", ".v", ".vh",
-                   ".tcl", ".rst", ".sql", ".c", ".h", ".cpp", ".hpp", ".mk", ".cmake", ".txt", ""}
+                   ".toml", ".cfg", ".ini", ".csv", ".log", ".py", ".sh", ".rst", ".sql", ".c", ".h",
+                   ".cpp", ".hpp", ".mk", ".cmake", ""}
 FILES_MAX_BYTES = 512 * 1024
+#: The first bytes of every SQLite database file; the text reader refuses a file that starts so.
+SQLITE_MAGIC = paths.SQLITE_MAGIC
+
+
+def files_text_exts(root):
+    """The extensions the file browser reads for the project at `root`: FILES_TEXT_EXTS plus the
+    profile's `paths()["text_exts"]` (".proto" or "proto"), lower case. A failed profile read adds none."""
+    from alpaca import profile
+    try:
+        extra = profile.listed(profile.load(root).paths(), "text_exts")
+    except Exception:
+        extra = []
+    return FILES_TEXT_EXTS | {("" if e.startswith(".") else ".") + e.lower() for e in extra if e.strip(".")}
 
 
 def files_auth(root):
@@ -759,33 +1048,33 @@ def _files_resolve(root, rel):
     """The absolute path for a browse request, or None when the allowlist forbids it.
 
     Allowed: the project tree, minus `.git`/`.venv`/build dirs, and under `.alpaca` ONLY
-    `proofs/` and `wiki/` (so the record db, transcripts, instance and serve state stay closed).
-    Secret-shaped names are refused everywhere. A `..` that climbs out of the root is refused by
-    the realpath containment check.
+    `proofs/` and `wiki/decisions/` (so the record db, transcripts, instance and serve state stay
+    closed). The rest of `.alpaca/wiki` is the Rune2 vault, which holds withdrawn and quarantined
+    captures as files: only Rune2's doors serve it, so `paths.in_vault` refuses it here by its real
+    path, through any link or other name. Private runtime files are refused
+    everywhere by the same rule the proof seal applies (`paths.private_runtime`), which reads a
+    kept evidence copy's name without its `NN-` number. A `..` that climbs out of
+    the root is refused by the realpath containment check. A reader opens the answer through
+    `_files_open`, which checks the opened file again.
     """
     rel = (rel or "").strip().lstrip("/")
     base = os.path.realpath(root)
     full = os.path.realpath(os.path.join(base, rel))
-    if not (full == base or full.startswith(base + os.sep)):
-        return None
-    relnorm = "" if full == base else os.path.relpath(full, base)
-    parts = [] if relnorm in ("", ".") else relnorm.split(os.sep)
-    if parts and parts[0] in FILES_ROOT_DENY:
-        return None
-    # Dot-dirs and dot-files are closed everywhere (.claude and .codex hold session transcripts,
-    # .git holds history, .env holds secrets). The one exception is `.alpaca`, and under it only
-    # `proofs/` and `wiki/`.
-    for idx, part in enumerate(parts):
-        if part.startswith(".") and not (idx == 0 and part == ".alpaca"):
-            return None
-    if parts and parts[0] == ".alpaca" and not (len(parts) >= 2 and parts[1] in ("proofs", "wiki")):
-        return None
-    name = (parts[-1] if parts else "").lower()
-    if (name in ("files-auth", "terminal-url", ".env") or name == "alpaca.db"
-            or name.endswith((".db", ".sqlite", ".sqlite3", ".pem", ".key", ".token", ".tar.gz"))
-            or name.startswith("id_rsa")):
-        return None
-    return full
+    # The rule itself is `paths.browser_serves`: dot folders and dot files are closed everywhere
+    # (.claude and .codex hold session transcripts, .git holds history, .env holds secrets) except
+    # `.alpaca`, and under it only `proofs/` and `wiki/`, minus the vault and private runtime
+    # files. The proof seal copies evidence by the same rule.
+    return full if paths.browser_serves(base, full) else None
+
+
+def _files_open(root, full):
+    """Open `full`, an answer of `_files_resolve`, as a binary file object, or None. The opened
+    file's own path is run back through `_files_resolve` (`paths.open_checked`), so a folder on
+    the path that became a link after the check cannot lead the open into the vault or a private
+    file."""
+    base = os.path.realpath(root)
+    return paths.open_checked(
+        full, lambda real: _files_resolve(root, os.path.relpath(real, base)) == real)
 
 
 def files_list(root, rel):
@@ -822,13 +1111,22 @@ def files_read(root, rel):
     if full is None or not os.path.isfile(full):
         return {"error": "no such file", "path": rel}
     ext = os.path.splitext(full)[1].lower()
-    if ext not in FILES_TEXT_EXTS:
+    if ext not in files_text_exts(root):
         return {"error": "not a readable text file", "path": rel, "ext": ext}
+    fh = _files_open(root, full)
+    if fh is None:
+        return {"error": "no such file", "path": rel}
     try:
-        size = os.path.getsize(full)
-        with open(full, "r", encoding="utf-8", errors="replace") as fh:
-            text = fh.read(FILES_MAX_BYTES + 1)
+        with io.TextIOWrapper(fh, encoding="utf-8", errors="replace") as text_fh:
+            if fh.read(len(SQLITE_MAGIC)) == SQLITE_MAGIC:
+                # a database by its bytes, whatever its name: a renamed record db, a browser
+                # profile's cookie or login store
+                return {"error": "not a readable text file", "path": rel, "ext": ext}
+            fh.seek(0)
+            size = os.fstat(text_fh.fileno()).st_size
+            text = text_fh.read(FILES_MAX_BYTES + 1)
     except OSError:
+        fh.close()
         return {"error": "cannot read", "path": rel}
     truncated = len(text) > FILES_MAX_BYTES
     if truncated:
@@ -837,12 +1135,42 @@ def files_read(root, rel):
     return {"path": os.path.relpath(full, base), "size": size, "truncated": truncated, "text": text}
 
 
+def _file_resolve(root, rel):
+    """The real path `/file` may serve for `rel`; False when it climbs out of the root, None when
+    it is closed: `PRIVATE_DIRS` (all of `.alpaca`, `.git`, `.venv`), the Rune2 vault and private
+    runtime files (`paths.in_vault`, `paths.private_runtime`). The route opens the answer with
+    `paths.open_checked` and runs the opened file's own path back through here."""
+    full = os.path.realpath(os.path.join(root, rel))
+    base = os.path.realpath(root)
+    if not (full == base or full.startswith(base + os.sep)):
+        return False
+    for name in PRIVATE_DIRS:
+        closed = os.path.realpath(os.path.join(base, name))
+        if full == closed or full.startswith(closed + os.sep):
+            return None
+    if paths.in_vault(base, full) or paths.private_runtime(base, full):
+        return None
+    return full
+
+
 #: Files the public sign-in page and the workspace hub may load before a session exists.
 LOGIN_ASSETS = {"vault.css": "text/css; charset=utf-8", "vault.js": "text/javascript; charset=utf-8",
                 "vault-globe.js": "text/javascript; charset=utf-8",
+                "orb.js": "text/javascript; charset=utf-8",
+                "vendor/thinking-orbs.js": "text/javascript; charset=utf-8",
                 "countries-110m.json": "application/json",
                 "vendor/plex-sans.woff2": "font/woff2", "vendor/plex-sans-medium.woff2": "font/woff2",
                 "vendor/plex-mono.woff2": "font/woff2"}
+
+
+def _project_name(root):
+    """The project's name from `project.yaml`, else its folder name."""
+    from alpaca import project
+    try:
+        name = project.load(root).get("name")
+    except Exception:
+        name = None
+    return str(name or os.path.basename(os.path.realpath(root)))
 
 
 def workspaces(root):
@@ -863,7 +1191,7 @@ def workspaces(root):
     except ValueError:
         entries = []
     mine = next((e for e in entries if e.get("id") == ident), None)
-    own = {"id": ident, "name": (mine or {}).get("name") or "Alpaca",
+    own = {"id": ident, "name": (mine or {}).get("name") or _project_name(root),
            "project": os.path.basename(os.path.realpath(root)), "kind": "Operations workspace",
            "href": "/hub/", "summary": "/board/data.json", "self": True}
     if mine:
@@ -894,28 +1222,10 @@ def workspace_summary(root, ident):
     return 200, json.dumps(workspace.remote_status(item), ensure_ascii=True).encode("utf-8")
 
 
-def _cockpit_html():
-    """The legacy cockpit page: a live mission-control view over the same runtime and record
-    endpoints as the hub. Crosses the whole-page ASCII boundary like the analytics page."""
-    path = os.path.join(os.path.dirname(os.path.dirname(build_index.__file__)), "web", "cockpit.html")
-    return render.ascii_entities(util.read_text(path))
-
-
-def _serve_html(root):
-    tpl = util.read_text(os.path.join(os.path.dirname(build_index.__file__), "app.html"))
-    html = tpl.replace("__DATA__", "null")
-    health = """<div id="alpaca-serve-health" role="status" aria-live="polite" style="position:fixed;right:12px;bottom:12px;z-index:99;padding:6px 9px;border-radius:5px;background:#17324d;color:#ffffff;font:12px sans-serif">Dashboard health: loading</div>
-<script>(function(){var e=document.getElementById('alpaca-serve-health');function refresh(){fetch('/health.json').then(function(r){if(!r.ok)throw Error('health status '+r.status);return r.json()}).then(function(h){e.textContent='Page: '+(h.projection?.state||h.state||'unknown')+'; capture: '+(h.observability?.status||'unavailable')+(h.detail?(' ('+h.detail+')'): '');e.style.background=(h.status==='ok'?'#176b3a':'#8a5a00')}).catch(function(){e.textContent='Dashboard health: unavailable';e.style.background='#8a1f2d'}).finally(function(){setTimeout(refresh,1500)})}refresh()}())</script>"""
-    html = html.replace("</body>", health + "\n</body>")
-    # M4.9: the served page crosses the same whole-page ASCII boundary as the written analytics
-    # page (render.ascii_entities), so the phone-safe ASCII rule holds in one place.
-    return render.ascii_entities(html)
-
-
 def make_handler(live, root, remote=False):
     from alpaca import weblogin
-    page = _serve_html(root).encode("utf-8")
     throttle = weblogin.Throttle()
+    totp_guard = weblogin.TotpGuard()
 
     class H(http.server.BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -935,6 +1245,8 @@ def make_handler(live, root, remote=False):
                     self.send_response(304)
                     self.send_header("ETag", tag)
                     self.send_header("Cache-Control", cache)
+                    for name, value in (headers or {}).items():
+                        self.send_header(name, value)
                     self.end_headers()
                     return
             self.send_response(code)
@@ -949,6 +1261,9 @@ def make_handler(live, root, remote=False):
             compressible = any(t in ctype for t in ("json", "text", "javascript", "svg", "xml"))
             if compressible and "gzip" in ae.lower() and len(body) >= 1024:
                 import gzip as _gz
+                # The decoded size, so a reader of the stream can show true byte progress
+                # (Content-Length below counts the compressed bytes; vault.js prefetchWorkspace).
+                self.send_header("X-Body-Length", str(len(body)))
                 body = _gz.compress(body, 6)
                 self.send_header("Content-Encoding", "gzip")
                 self.send_header("Vary", "Accept-Encoding")
@@ -1004,7 +1319,7 @@ def make_handler(live, root, remote=False):
                 live.touch()
                 return self._hub(path, parse_qs(u.query))
             if path == "/" or path == "/index.html":
-                # The landing page is the workspace hub; the Alpaca tile opens the cockpit at /hub/.
+                # The landing page is the workspace hub; this project's tile opens the cockpit at /hub/.
                 live.touch()
                 return self._login_page("workspaces.html")
             if path == "/analytics" or path == "/analytics.html":
@@ -1016,8 +1331,14 @@ def make_handler(live, root, remote=False):
             if path == "/analytics/" or path == "/analytics/index.html":
                 live.touch()
                 return self._hub("/hub/", parse_qs(u.query))
-            if path == "/analytics/legacy/":
-                return self._send(page, "text/html; charset=utf-8")
+            if path in ("/cockpit/legacy/", "/analytics/legacy/"):
+                # The two single-file legacy pages are retired; an old bookmark lands on
+                # the workspace page that replaced it.
+                self.send_response(301)
+                self.send_header("Location", "/hub/" if path.startswith("/cockpit") else "/analytics/")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return None
             if path in ("/board", "/board/", "/board.html", "/board/index.html"):
                 # The classic board page is retired; an old bookmark lands on the cockpit.
                 self.send_response(301)
@@ -1028,9 +1349,6 @@ def make_handler(live, root, remote=False):
             if path in ("/cockpit", "/cockpit/", "/cockpit/index.html"):
                 live.touch()
                 return self._hub("/hub/", parse_qs(u.query))
-            if path == "/cockpit/legacy/":
-                live.touch()
-                return self._send(_cockpit_html().encode("utf-8"), "text/html; charset=utf-8")
             if path == "/board/data.json":
                 live.touch()
                 body, etag = live.board_snapshot()
@@ -1065,29 +1383,18 @@ def make_handler(live, root, remote=False):
                               "application/json", code)
 
         def _hub(self, path, query):
+            with live.foreground_read(path):
+                return self._hub_read(path, query)
+
+        def _hub_read(self, path, query):
             """Read services and an explicit static allowlist for the operations workbench."""
             from pathlib import Path
             from alpaca import hub
             from alpaca.analytics.detail import detail
             one = lambda key, default="": (query.get(key) or [default])[0]
             web = Path(__file__).parent / "web"
-            assets = {"hub.css": "text/css; charset=utf-8", "hub.js": "text/javascript; charset=utf-8",
-                      "document.js": "text/javascript; charset=utf-8",
-                      "analytics.js": "text/javascript; charset=utf-8", "analytics.css": "text/css; charset=utf-8",
-                      "cockpit.js": "text/javascript; charset=utf-8", "cockpit.css": "text/css; charset=utf-8",
-                      "mission.js": "text/javascript; charset=utf-8", "mission.css": "text/css; charset=utf-8",
-                      "roadmap.js": "text/javascript; charset=utf-8", "roadmap.css": "text/css; charset=utf-8",
-                      "roadmap-routing.js": "text/javascript; charset=utf-8",
-                      "runlog.js": "text/javascript; charset=utf-8", "runlog.css": "text/css; charset=utf-8",
-                      "live.js": "text/javascript; charset=utf-8", "live.css": "text/css; charset=utf-8",
-                      "theme.js": "text/javascript; charset=utf-8", "theme.css": "text/css; charset=utf-8",
-                      "icons.js": "text/javascript; charset=utf-8",
-                      "liveflags.js": "text/javascript; charset=utf-8", "morph.js": "text/javascript; charset=utf-8",
-                      "system.js": "text/javascript; charset=utf-8",
-                      "vendor/plex-sans.woff2": "font/woff2", "vendor/plex-sans-medium.woff2": "font/woff2",
-                      "vendor/plex-mono.woff2": "font/woff2"}
             if path in ("/hub", "/hub/", "/hub/index.html"):
-                return self._send((web / "hub.html").read_bytes(), "text/html; charset=utf-8")
+                return self._send(hub_page(root).encode("utf-8"), "text/html; charset=utf-8")
             if path.startswith("/hub/assets/profile/"):
                 # a profile's own web modules and styles (alpaca/profile.py `web` assets)
                 from alpaca import profile
@@ -1103,13 +1410,20 @@ def make_handler(live, root, remote=False):
                 with open(found, "rb") as fh:
                     return self._send(fh.read(), kind)
             if path.startswith("/hub/assets/"):
-                name = path[len("/hub/assets/"):]
+                name, assets = path[len("/hub/assets/"):], hub_assets()
                 if name not in assets or not (web / name).is_file():
                     return self._send(b"not found", "text/plain", 404)
-                return self._send((web / name).read_bytes(), assets[name])
+                body = (web / name).read_bytes()
+                if name.startswith("vendor/arthur/"):
+                    # Arthur's artwork is about 10 MB the avatar loads in full on every page load:
+                    # the browser keeps it and revalidates it on a reload, and an
+                    # unchanged file answers 304 with no body. The tag is the content's sha256.
+                    return self._send(body, assets[name], etag=_content_tag(web / name, body), cache="no-cache")
+                return self._send(body, assets[name])
             try:
                 if path == "/hub/overview.json":
-                    value = hub.overview(root)
+                    body, etag = live.overview()
+                    return self._send(body, "application/json", etag=etag, cache="no-cache")
                 elif path == "/hub/mission.json":
                     from alpaca import mission
                     value = mission.project(root, at=one("at") or None)
@@ -1118,9 +1432,21 @@ def make_handler(live, root, remote=False):
                         return self._json({"error": "Evidence reading requires a configured web login"}, 403)
                     from alpaca import mission
                     value = mission.evidence(root, int(one("event", "0")))
+                elif path == "/hub/research.json":
+                    # the research view (operator-surface.md section 7.2): a bad run id is a
+                    # ValueError (400); an unknown run is answered here, since the chain's
+                    # KeyError answer names a session
+                    from alpaca.research import view as research_view
+                    if "run" in query:
+                        value = research_view.run(root, one("run"))
+                        if value is None:
+                            return self._json({"error": "Research run not found in this project"}, 404)
+                    else:
+                        value = research_view.runs(root)
                 elif path == "/hub/history.json":
                     value = hub.history(root, before=one("before") or None, limit=int(one("limit", "50")),
-                                        query=one("q"), kind=one("kind", "work"), session=one("session"), ref=one("ref"))
+                                        query=one("q"), kind=one("kind", "work"), session=one("session"), ref=one("ref"),
+                                        day=one("day"), calendar=one("calendar") == "1")
                 elif path == "/hub/system.json":
                     from alpaca import sysmon
                     value = sysmon.snapshot(root)
@@ -1144,7 +1470,32 @@ def make_handler(live, root, remote=False):
                     live.data_ready.wait(DATA_WAIT_S)
                     live.note_index_request()
                     try:
-                        body, etag = live.analytics_index()
+                        body, etag, code, freshness = live.analytics_snapshot()
+                    except FoldPending as pending:
+                        return self._send(json.dumps({"error": str(pending)}).encode("utf-8"), "application/json",
+                                          503, headers={"Retry-After": str(RETRY_FOLD_S)})
+                    return self._send(body.encode("utf-8"), "application/json", code=code, etag=etag, cache="no-cache",
+                                      headers={"X-Alpaca-Analytics-State": freshness, "Retry-After": "2"} if code == 202
+                                      else {"X-Alpaca-Analytics-State": freshness})
+                elif path == "/hub/vcs.json":
+                    # Read-only git (alpaca/gitview.py), reused for VCS_S.
+                    from alpaca import gitview
+                    try:
+                        value = live.vcs(int(one("days", "7") or "7"))
+                    except gitview.GitError as error:
+                        return self._json({"error": "Git could not be read: %s" % str(error)[:200]}, 503)
+                elif path == "/hub/inflight.json":
+                    # Polled every 15 s by the In-flight tab; "before" reads earlier activity.
+                    from alpaca.analytics import inflight
+                    if one("before"):
+                        value = inflight.more(root, one("task"), int(one("before")))
+                    else:
+                        value = live.inflight()
+                elif path == "/hub/burn.json":
+                    live.data_ready.wait(DATA_WAIT_S)
+                    try:
+                        # start/end: a custom range the browser computed from its local days.
+                        body, etag = live.burn(one("window", "24h") or "24h", one("start") or None, one("end") or None)
                     except FoldPending as pending:
                         return self._send(json.dumps({"error": str(pending)}).encode("utf-8"), "application/json",
                                           503, headers={"Retry-After": str(RETRY_FOLD_S)})
@@ -1190,7 +1541,8 @@ def make_handler(live, root, remote=False):
         def _authed(self, want):
             """True for a valid session cookie or matching Basic credentials. A wrong Basic
             header counts as a failed attempt, so the header path cannot bypass the throttle."""
-            if weblogin.valid(root, want, weblogin.read_cookie(root, self.headers.get("Cookie"))):
+            if weblogin.valid(root, weblogin.session_credential(want, weblogin.totp_secret(root)),
+                              weblogin.read_cookie(root, self.headers.get("Cookie"))):
                 return True
             if not (self.headers.get("Authorization") or "").startswith("Basic "):
                 return False
@@ -1235,6 +1587,7 @@ def make_handler(live, root, remote=False):
                 return self._send((web / name).read_bytes(), LOGIN_ASSETS[name], cache=cache)
             if path == "/login/info.json":
                 return self._json({"configured": bool(want), "user": weblogin.needs_user(want),
+                                   "totp": bool(weblogin.totp_secret(root)),
                                    "signed_in": bool(want) and self._authed(want)})
             if path in ("/login", "/login/"):
                 if want and self._authed(want):
@@ -1285,14 +1638,21 @@ def make_handler(live, root, remote=False):
                 form = {}
             user = str(form.get("user") or "") if isinstance(form, dict) else ""
             code = str(form.get("code") or "") if isinstance(form, dict) else ""
-            if not weblogin.credential_ok(want, user, code):
+            # With an authenticator enrolled only its current code signs in; the fixed code does not.
+            secret = weblogin.totp_secret(root)
+            if secret:
+                accepted = weblogin.user_ok(want, user) and totp_guard.check(secret, code)
+            else:
+                accepted = weblogin.credential_ok(want, user, code)
+            if not accepted:
                 throttle.fail(client)
                 return self._json({"error": "Access code not accepted."}, 401)
             throttle.succeed(client)
             body = json.dumps({"ok": True}).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
-            self.send_header("Set-Cookie", weblogin.set_cookie(root, weblogin.issue(root, want), self._secure()))
+            self.send_header("Set-Cookie", weblogin.set_cookie(
+                root, weblogin.issue(root, weblogin.session_credential(want, secret)), self._secure()))
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
@@ -1302,7 +1662,8 @@ def make_handler(live, root, remote=False):
         def _files_api(self, path, query):
             """The gated file browser. Closed (403) unless a login is configured; otherwise every
             request carries HTTP Basic credentials that match `files_auth`. The allowlist in
-            `_files_resolve` is what keeps the record db, transcripts and secrets out of reach."""
+            `_files_resolve` is what keeps the record db, transcripts, secrets and the Rune2 vault out
+            of reach."""
             want = files_auth(root)
             if not want:
                 return self._json({"error": "file browsing is not enabled on this server"}, 403)
@@ -1344,19 +1705,21 @@ def make_handler(live, root, remote=False):
         def _file(self, rel):
             if not rel:
                 return self._send(b"missing path", "text/plain", 400)
-            full = os.path.realpath(os.path.join(root, rel))
-            base = os.path.realpath(root)
-            if not (full == base or full.startswith(base + os.sep)):
+            full = _file_resolve(root, rel)
+            if full is False:
                 return self._send(b"forbidden", "text/plain", 403)
-            for name in PRIVATE_DIRS:
-                closed = os.path.realpath(os.path.join(base, name))
-                if full == closed or full.startswith(closed + os.sep):
-                    return self._send(b"not found", "text/plain", 404)
+            if full is None:
+                return self._send(b"not found", "text/plain", 404)
             ext = os.path.splitext(full)[1].lower()
             if ext not in READABLE or not os.path.isfile(full):
                 return self._send(b"not found", "text/plain", 404)
+            base = os.path.realpath(root)
+            fh = paths.open_checked(
+                full, lambda real: _file_resolve(root, os.path.relpath(real, base)) == real)
+            if fh is None:
+                return self._send(b"not found", "text/plain", 404)
             try:
-                with open(full, "rb") as fh:
+                with fh:
                     body = fh.read()
             except OSError:
                 return self._send(b"not found", "text/plain", 404)
@@ -1482,18 +1845,23 @@ def code_signature():
 def code_importable(root):
     """Import the new code in a child process before the server replaces itself, so a file
     caught half-written or a syntax error keeps the old server up instead of taking it down."""
-    probe = ("import alpaca.serve, alpaca.hub, alpaca.work_record, alpaca.export, alpaca.proof")
+    from alpaca import child
+    probe = ("alpaca.serve", "alpaca.hub", "alpaca.work_record", "alpaca.export", "alpaca.proof")
     try:
-        done = subprocess.run([sys.executable, "-c", probe], cwd=root, capture_output=True,
+        # through the one launcher: no working folder on the child's path
+        done = subprocess.run(child.python_argv("alpaca.import_probe", *probe, served_root=root),
+                              cwd=root, env=child.child_env(served_root=root), capture_output=True,
                               text=True, timeout=60)
     except (OSError, subprocess.SubprocessError) as e:
         return False, str(e)
     return done.returncode == 0, (done.stderr or "").strip()[-400:]
 
 
-def _reexec_argv():
-    """The command line that started this server, as `python -m alpaca ...`."""
-    return [sys.executable, "-m", "alpaca"] + sys.argv[1:]
+def _reexec_argv(root=None):
+    """The command line that started this server, as `python -m alpaca ...` through the one
+    launcher."""
+    from alpaca import child
+    return child.python_argv("alpaca", *sys.argv[1:], served_root=root)
 
 
 def _run(root, port, keep=False, remote=False):
@@ -1587,7 +1955,9 @@ def _run(root, port, keep=False, remote=False):
             os.set_inheritable(fd, True)
             os.environ[LISTEN_FD_ENV] = str(fd)
             sys.stderr.flush()
-            os.execv(sys.executable, _reexec_argv())
+            from alpaca import child
+            argv = _reexec_argv(root)
+            os.execve(argv[0], argv, child.child_env(served_root=root))
         _cleanup()
 
 
@@ -1629,11 +1999,12 @@ def ensure_running(root, wait_s=1.5):
             fh = open(log, "ab")
         except OSError:
             fh = subprocess.DEVNULL
+        from alpaca import child
         try:
-            subprocess.Popen([sys.executable, "-m", "alpaca", "serve", "--port", str(port)]
-                             + (["--remote"] if public else []),
-                             cwd=root, stdout=fh, stderr=fh, stdin=subprocess.DEVNULL,
-                             start_new_session=True, close_fds=True)
+            subprocess.Popen(child.python_argv("alpaca", "serve", "--port", str(port),
+                                               *(["--remote"] if public else []), served_root=root),
+                             cwd=root, env=child.child_env(served_root=root), stdout=fh, stderr=fh,
+                             stdin=subprocess.DEVNULL, start_new_session=True, close_fds=True)
         except OSError:
             return None
         deadline = time.time() + wait_s
@@ -1676,11 +2047,9 @@ def start_detached(root, port=None, keep=False, wait_s=15.0, remote=False):
             unit = None
     if not unit:
         port = port or _instance_port(root)
-        cmd = [sys.executable, "-m", "alpaca", "serve", "--port", str(port)]
-        if keep:
-            cmd.append("--keep")
-        if remote:
-            cmd.append("--remote")
+        from alpaca import child
+        cmd = child.python_argv("alpaca", "serve", "--port", str(port), *(["--keep"] if keep else []),
+                                *(["--remote"] if remote else []), served_root=root)
         if not _spawn(root, cmd):
             return None
     deadline = time.time() + wait_s
@@ -1710,9 +2079,10 @@ def _spawn(root, cmd):
         fh = open(_log_path(root), "ab")
     except OSError:
         fh = subprocess.DEVNULL
+    from alpaca import child
     try:
-        subprocess.Popen(cmd, cwd=root, stdout=fh, stderr=fh, stdin=subprocess.DEVNULL,
-                         start_new_session=True, close_fds=True)
+        subprocess.Popen(cmd, cwd=root, env=child.child_env(served_root=root), stdout=fh, stderr=fh,
+                         stdin=subprocess.DEVNULL, start_new_session=True, close_fds=True)
     except OSError:
         return False
     finally:
@@ -1724,7 +2094,15 @@ def _spawn(root, cmd):
 def service_units(root, *, port=None, python=None):
     """Reproducible user-service contracts. Generation neither installs nor starts units.
     The dashboard port is `port`, else this instance's registered port (alpaca workspace add), else
-    _default_port(root); never a reserved port by default."""
+    _default_port(root); never a reserved port by default.
+
+    Each unit starts Python by the launcher rule of `alpaca/child.py`:
+    `-I` right after the interpreter, so neither the working folder nor PYTHONPATH (nor any
+    other PYTHON* variable, from the unit's environment file included) reaches the import path.
+    `bin/alpaca-python -I -m` starts the module through the tree's `alpaca/boot.py`, which loads the
+    package by its location, with the venv interpreter or else python3; an explicit
+    `python` gets the boot of this process's package in the argv. `UnsetEnvironment=PYTHONPATH`
+    keeps it from the children the services start."""
     root = os.path.realpath(root)
     if port is None:
         port = _instance_port(root)
@@ -1736,7 +2114,12 @@ def service_units(root, *, port=None, python=None):
     # value here is the executable, which systemd never $-expands.)
     def quote(value):
         return '"' + str(value).replace("%", "%%").replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\r", "\\r") + '"'
-    executable = python or os.path.join(root, "bin", "alpaca-python")
+    executable = quote(python or os.path.join(root, "bin", "alpaca-python"))
+    if python:
+        from alpaca import child
+        executable += " -I " + quote(child.boot_path())
+    else:
+        executable += " -I"
     ident = hashlib.sha256(root.encode()).hexdigest()[:12]
     prefix = "alpaca-" + ident
     units = {}
@@ -1745,6 +2128,7 @@ def service_units(root, *, port=None, python=None):
         units[prefix + "-" + role + ".service"] = (
             "[Unit]\nDescription=Alpaca %s (%s)\nStartLimitIntervalSec=120\nStartLimitBurst=10\n\n"
             "[Service]\nType=simple\nWorkingDirectory=%s\nEnvironmentFile=-%s\n"
+            "UnsetEnvironment=PYTHONPATH\n"
             "%sExecStart=%s -m alpaca %s\nRestart=%s\nRestartSec=5\n"
             "TimeoutStopSec=30\nKillMode=control-group\nUMask=0077\n"
             "StandardOutput=journal\nStandardError=journal\nSyslogIdentifier=%s-%s\n\n"
@@ -1753,7 +2137,7 @@ def service_units(root, *, port=None, python=None):
                 # The dashboard is restarted on any exit, including a clean `alpaca serve --stop`,
                 # and keeps its exact port so the tunnel always finds it.
                 "Environment=ALPACA_SERVE_STRICT_PORT=1\n" if role == "dashboard" else "",
-                quote(executable), arguments, "always" if role == "dashboard" else "on-failure",
+                executable, arguments, "always" if role == "dashboard" else "on-failure",
                 prefix, role))
     return units
 
@@ -1777,6 +2161,19 @@ def cmd_serve(args):
             print("alpaca serve: %s" % error)
             return cli.USAGE
         print(json.dumps({"files": files, "installed": False, "started": False}))
+        return cli.PASS
+    if getattr(args, "totp_enroll", False):
+        from alpaca import weblogin
+        try:
+            secret = weblogin.totp_enroll(root)
+        except FileExistsError as error:
+            print("alpaca serve: an authenticator is already enrolled (%s). Delete that file to "
+                  "enroll a new one; every browser is then signed out." % error)
+            return cli.USAGE
+        print("Authenticator enrolled. In Google Authenticator: + > Enter a setup key,")
+        print("  account: Alpaca %s   key: %s   type: Time based" % (os.path.basename(os.path.realpath(root)), secret))
+        print("or import: %s" % weblogin.totp_uri(secret, os.path.basename(os.path.realpath(root))))
+        print("From now on /login takes the 6-digit code. Existing browser sessions are signed out.")
         return cli.PASS
     if args.stop:
         st = _read_state(root)
@@ -1881,6 +2278,8 @@ def _parser(sub):
     p.add_argument("--status", action="store_true")
     p.add_argument("--detach", action="store_true",
                    help="start in its own session, so it outlives this shell")
+    p.add_argument("--totp-enroll", action="store_true",
+                   help="create an authenticator (TOTP) secret; /login then takes its codes instead of the fixed code")
     p.add_argument("--keep", action="store_true",
                    help="do not retire the server after an idle spell")
 

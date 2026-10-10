@@ -1,8 +1,10 @@
-"""Provider protocols - the seams where real CPU models plug in.
+"""Provider protocols - the seams between the engine and its deterministic providers.
 
-The template ships deterministic, dependency-free defaults (providers/deterministic.py) so it runs
-and its tests pass with pure stdlib. A populated instance swaps these for real models by name in
-rune.toml - the rest of the engine is blind to which implementation is behind the seam.
+Rune2 ships only deterministic, dependency-free providers (providers/deterministic.py): a hash
+embedder, identity and lexical rerankers, structural, ensemble and routed entailers and a null
+extractor. The registry (providers/registry.py) is closed to those names, so no model, embedder or
+reranker plugs in (design/rune2-memory/architecture.md 3.2). The engine is blind to which of them is
+behind the seam; configurations swap them by name in project.yaml or rune.toml.
 """
 from __future__ import annotations
 
@@ -30,8 +32,7 @@ class Entailer(Protocol):
     def entail(self, claim: str, source_text: str) -> tuple[str, float]:
         """Return (label, score) where label in {'supported','unsupported','contradicted'}.
 
-        A real deployment routes numeric/temporal/logical claims to Paladin, prose to HHEM/MiniCheck,
-        and ABSTAINS on ensemble disagreement - never a lone LLM judge.
+        The deterministic ensemble abstains on checker disagreement; no model judge exists.
         """
         ...
 

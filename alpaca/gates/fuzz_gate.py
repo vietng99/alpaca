@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import random
 import sys
+import shutil
 import tempfile
 
 from alpaca import db, util
@@ -166,6 +167,7 @@ def _round(seed, tamper_name, verify_fn=None) -> dict:
                 "outcome": outcome, "reasons": reasons, "violations": violations}
     finally:
         conn.close()
+        shutil.rmtree(base, ignore_errors=True)
 
 
 # a verify that lies: always PASS. The synthetic regression the gate must catch.

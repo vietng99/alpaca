@@ -32,7 +32,8 @@ WORK, PROBE, SERVICE = "work", "probe", "service"
 
 #: the synthetic session ids. They are a writer, not a sitting, so they are never counted as
 #: sessions and never listed beside one.
-SERVICE_IDS = frozenset(("observability-collector", "cli", "instrument", "unknown"))
+#: `wiki-capture` writes the `transcript-version` events of the wiki capture (t-430).
+SERVICE_IDS = frozenset(("observability-collector", "cli", "instrument", "unknown", "wiki-capture"))
 
 #: the kinds a session opens and closes with. A session whose whole record is these did nothing
 #: but open and close.
@@ -42,9 +43,10 @@ LIFECYCLE_KINDS = frozenset(("init", "session-start", "session-end", "transcript
 #: kinds a closing session writes as a side effect: SessionEnd refreshes the profile projections,
 #: so a session that did nothing of its own can still author row verdicts, gate runs and receipt
 #: replays. They say the record moved, not that this session worked. A domain profile adds its
-#: own (alpaca/profile.py `events`).
+#: own (alpaca/profile.py `events`). `capture-no-collector` is the hooks' note that nobody captures
+#: (t-070 round 2 C-D, I-5); it was a `drain-failed` before, and is a side effect as that was.
 SIDE_EFFECT_KINDS = frozenset(("verdict", "run", "bridge", "capture-failed", "drain-failed",
-                               "lease-expired", "analytics-failed"))
+                               "capture-no-collector", "lease-expired", "analytics-failed"))
 
 
 def _policy(conn):
@@ -69,7 +71,7 @@ TURN_HOOKS = frozenset(("stop", "post_tool", "user_prompt", "pre_compact", "suba
 BURST_KINDS = frozenset(("verdict", "bridge", "claim"))
 
 NOISE_KINDS = frozenset(("heartbeat", "turn-end", "transcript-snapshot", "style-rearm", "run",
-                         "subagent-stop"))
+                         "subagent-stop", "transcript-version"))
 
 #: a work session reads as active when its last beat is this close to the newest event on the
 #: record.

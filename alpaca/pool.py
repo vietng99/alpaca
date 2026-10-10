@@ -41,7 +41,7 @@ POST_INPUT_CAP = 4 * 1024
 #: the key order every pool line carries, checked by the tests that read the file back.
 KEYS = ("ts", "sid", "phase", "tool", "tool_use_id", "input", "response",
         "response_truncated", "response_sha256", "response_bytes", "cwd",
-        "input_truncated", "input_sha256", "input_bytes", "input_ref")
+        "input_truncated", "input_sha256", "input_bytes", "input_ref", "agent_id", "agent_type")
 
 PHASES = ("pre", "post")
 
@@ -132,7 +132,9 @@ def line(sid, phase, payload) -> dict:
             "input_truncated": in_truncated,
             "input_sha256": in_sha,
             "input_bytes": in_bytes,
-            "input_ref": in_ref}
+            "input_ref": in_ref,
+            "agent_id": payload.get("agent_id") or payload.get("agentId") or None,
+            "agent_type": payload.get("agent_type") or payload.get("agentType") or None}
 
 
 def _ends_with_newline(fd) -> bool:

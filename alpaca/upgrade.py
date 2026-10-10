@@ -41,7 +41,8 @@ from alpaca import manifest, paths, util
 MERGE = {"CLAUDE.md", "AGENTS.md"}
 # intents/ holds the project's own intent queue (onboarding and `op new --from-intent` write it),
 # so an upgrade keeps the live copy and only seeds it from the source when the project has none.
-PRESERVE = {"project.yaml", "intents"}
+# README.md carries the project's name once `alpaca new` fills its name block, so it is kept too.
+PRESERVE = {"project.yaml", "intents", "README.md"}
 
 # The ordered phases. The journal records entry to each before it acts. `promote` is the pivot:
 # a crash strictly before it rolls back to fully-old, a crash at or after it rolls forward to
@@ -531,7 +532,7 @@ def _cmd_upgrade(args):
     try:
         p = plan(root, source)
     except Exception as e:
-        return vc.emit_verdict("alpaca-upgrade", vc.FAIL, "%s: %s" % (type(e).__name__, e))
+        return vc.emit_verdict("alpaca-upgrade", vc.FAIL, vc.error_reason(e))
     if getattr(args, "plan", False):
         for rel in p.modified:
             print("  local edit will be replaced: %s" % rel)
@@ -547,9 +548,9 @@ def _cmd_upgrade(args):
     try:
         apply(root, source)
     except UpgradeLocked as e:
-        return vc.emit_verdict("alpaca-upgrade", vc.BLOCKED, str(e))
+        return vc.emit_verdict("alpaca-upgrade", vc.BLOCKED, vc.error_reason(e))
     except Exception as e:
-        return vc.emit_verdict("alpaca-upgrade", vc.FAIL, "%s: %s" % (type(e).__name__, e))
+        return vc.emit_verdict("alpaca-upgrade", vc.FAIL, vc.error_reason(e))
     return vc.emit_verdict("alpaca-upgrade", vc.PASS,
                            "mechanism refreshed, memory untouched", evidence=[os.path.abspath(source)])
 

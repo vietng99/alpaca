@@ -23,8 +23,10 @@ from alpaca import paths
 from alpaca.formation import manifest
 
 
-#: the six formations M3.9 ships. Nothing else, and none missing.
-SIX = ("solo", "builder-verifier", "fan-out", "bug-loop", "nuclear", "napalm")
+#: the eight shipped formations: the six of M3.9 plus the two research engine formations
+#: (design/research-engine/architecture.md section 12.1). Nothing else, and none missing.
+SIX = ("solo", "builder-verifier", "fan-out", "bug-loop", "nuclear", "napalm",
+       "research-improve", "research-repair")
 
 #: where a gate name may resolve to an instrument.
 INSTRUMENT_PACKAGES = ("alpaca.gates", "alpaca.checklist")

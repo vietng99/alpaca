@@ -71,7 +71,7 @@ def source(tmp_path_factory):
              if rel and not forbidden(rel) and not is_memory(rel, memory) and Path(REPO, rel).is_file()}
     target = tmp_path_factory.mktemp("release-source") / "dev-source"
     copy_files(files, target)
-    init_repository(target)
+    init_repository(target, tracked=files)
     return str(target)
 
 
@@ -92,6 +92,48 @@ def test_a_tree_that_tracks_its_memory_class_is_refused(tmp_path):
     with pytest.raises(Exception, match="SHIPMENT-FORBIDDEN-PATH"):
         MK.build(REPO, os.path.join(str(tmp_path), "rel.tar.gz"))
     assert not os.path.exists(os.path.join(str(tmp_path), "rel.tar.gz"))
+
+
+def _tracked_tree(root, files):
+    """A synthetic git tree at root: ALPACA-MANIFEST copied from REPO (its memory class names
+    .alpaca/) plus `files`, every file added to the index. No commit is needed: the builder reads
+    the tracked set with `git ls-files`."""
+    os.makedirs(root)
+    with open(os.path.join(REPO, "ALPACA-MANIFEST"), encoding="utf-8") as fh:
+        manifest_text = fh.read()
+    files = dict(files, **{"ALPACA-MANIFEST": manifest_text})
+    for rel, text in files.items():
+        path = os.path.join(root, *rel.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+    for argv in (["init", "-q"], ["add", "--"] + sorted(files)):
+        subprocess.run(["git", "-C", root] + argv, capture_output=True, text=True, encoding="utf-8",
+                       check=True)
+
+
+def test_a_sparse_tree_that_tracks_its_memory_class_is_refused_by_the_policy(tmp_path):
+    """A checkout that leaves the tracked memory class off the disk (a sparse worktree) still
+    gets the shipment policy's refusal, not the generic missing-file one: the policy reads the
+    tracked paths, so it runs before any file is looked at."""
+    root = os.path.join(str(tmp_path), "sparse")
+    _tracked_tree(root, {"README.md": "synthetic\n", ".alpaca/record.txt": "synthetic record\n"})
+    os.remove(os.path.join(root, ".alpaca", "record.txt"))
+    out = os.path.join(str(tmp_path), "rel.tar.gz")
+    with pytest.raises(Exception, match="SHIPMENT-FORBIDDEN-PATH") as raised:
+        MK.build(root, out)
+    assert ".alpaca/record.txt" in str(raised.value)
+    assert not os.path.exists(out)
+
+
+def test_a_missing_tracked_file_outside_the_memory_class_is_still_refused(tmp_path):
+    root = os.path.join(str(tmp_path), "gone")
+    _tracked_tree(root, {"README.md": "synthetic\n", "docs/note.md": "synthetic note\n"})
+    os.remove(os.path.join(root, "docs", "note.md"))
+    out = os.path.join(str(tmp_path), "rel.tar.gz")
+    with pytest.raises(MK.ReleaseError, match="missing tracked file: docs/note.md"):
+        MK.build(root, out)
+    assert not os.path.exists(out)
 
 
 def test_release_carries_no_memory_or_runtime_contamination(source, tmp_path):

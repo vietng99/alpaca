@@ -144,14 +144,32 @@ def _validate_content(content):
         raise ShipmentError("intent queue contains project tasks; restore the fresh template")
 
 
+def _tracked(root):
+    """The source commit's file paths when root is the top of a git work tree, else None.
+
+    In a repository only the source commit's files ship, the same selection the release build uses
+    (shipment_policy.committed_paths): a gitignored, untracked, or staged but uncommitted file inside
+    a mechanism directory is not product. A loose tree that is no repository has no such boundary
+    and ships as it stands."""
+    if not POLICY.is_repository_root(root):
+        return None
+    try:
+        return POLICY.committed_paths(root)
+    except ValueError as exc:
+        raise ShipmentError(str(exc)) from exc
+
+
 def _selection(root):
     classes = _classes((root / GEN.MANIFEST_NAME).read_text(encoding="utf-8"))
     forbidden = FORBIDDEN | set(classes["memory"])
+    tracked = _tracked(root)
     selected = {}
 
     def add(path):
         rel = path.relative_to(root).as_posix()
         if any(_under(rel, memory) for memory in classes["memory"]):
+            return
+        if tracked is not None and rel not in tracked and not path.is_symlink():
             return
         if path.is_symlink():
             raise ShipmentError("symlink in mechanism: " + rel)

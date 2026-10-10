@@ -197,8 +197,9 @@ def test_real_push_of_a_branch_named_with_a_term_is_refused(repo):
 def test_the_hook_prefers_the_install_launcher(repo):
     root, _bare = repo
     body = open(barrier.install(root), encoding="utf-8").read()
-    assert 'exec bin/alpaca-python "$pin/run.py" prepush "$@"' in body
-    assert body.rstrip().endswith('exec python3 "$pin/run.py" prepush "$@"')
+    # both starts are isolated (t-070 round 3, the launcher rule of alpaca/child.py)
+    assert 'exec bin/alpaca-python -I "$pin/run.py" prepush "$@"' in body
+    assert body.rstrip().endswith('exec python3 -I "$pin/run.py" prepush "$@"')
 
 
 def test_each_blob_is_read_once_however_many_commits_carry_it(repo, monkeypatch):

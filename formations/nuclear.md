@@ -7,14 +7,17 @@ roles:
     role: the sole spawner; drives rounds, never judges
   - id: red
     archetype: red
+    tier: high
     blind: true
     receives: [claim, pointer]
     role: tries to break the claim
   - id: blue
     archetype: eng
+    tier: high
     role: defends and repairs
   - id: judge
     archetype: judge
+    tier: top
     role: rules on the round; the verdict is the judge's, not a party's
 phases: [audit, decide, fix]
 gate_map:

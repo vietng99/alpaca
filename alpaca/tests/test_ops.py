@@ -26,18 +26,18 @@ def test_task_lifecycle(project, capsys):
     assert kinds[-3:] == ["task-claim", "task-move", "task-move"] or "task-move" in kinds
 
 def test_done_requires_proof(project):
-    conn = _setup(project); cli.main(["op", "new", "x"]); cli.main(["task", "add", "--title", "task", "op-001", "s"])
+    conn = _setup(project); cli.main(["op", "new", "x"]); cli.main(["task", "add", "--title", "task", "op-001", "s", "--phase", "build"])
     assert cli.main(["task", "move", "t-001", "done"]) == 1
 
 def test_lease_expiry_returns_task(project):
-    conn = _setup(project); cli.main(["op", "new", "x"]); cli.main(["task", "add", "--title", "task", "op-001", "s"])
+    conn = _setup(project); cli.main(["op", "new", "x"]); cli.main(["task", "add", "--title", "task", "op-001", "s", "--phase", "build"])
     cli.main(["task", "claim", "t-001", "--by", "w1", "--minutes", "1"])
     later = (datetime.datetime.now().astimezone() + datetime.timedelta(minutes=5)).isoformat(timespec="seconds")
     assert ops.expire_leases(conn, later) == ["t-001"]
     assert db.rows(conn, "tasks", "id=?", ("t-001",))[0]["status"] == "open"
 
 def test_op_close_needs_all_tasks_done(project):
-    conn = _setup(project); cli.main(["op", "new", "x"]); cli.main(["task", "add", "--title", "task", "op-001", "s"])
+    conn = _setup(project); cli.main(["op", "new", "x"]); cli.main(["task", "add", "--title", "task", "op-001", "s", "--phase", "build"])
     assert cli.main(["op", "close", "op-001", "--basis", "done"]) == 2
     cli.main(["task", "move", "t-001", "done", "--proof", proofkit.seal_for(project, "t-001")])
     assert cli.main(["op", "close", "op-001", "--basis", "done"]) == 0
@@ -70,7 +70,7 @@ def test_msg_post_empty_to_fails(project):
     assert db.rows(conn, "messages") == []
 
 def test_claim_only_open_tasks(project):
-    conn = _setup(project); cli.main(["op", "new", "x"]); cli.main(["task", "add", "--title", "task", "op-001", "s"])
+    conn = _setup(project); cli.main(["op", "new", "x"]); cli.main(["task", "add", "--title", "task", "op-001", "s", "--phase", "build"])
     cli.main(["task", "move", "t-001", "done", "--proof", proofkit.seal_for(project, "t-001")])
     assert cli.main(["task", "claim", "t-001", "--by", "w1"]) == 1
     assert db.rows(conn, "tasks", "id=?", ("t-001",))[0]["status"] == "done"
@@ -82,7 +82,7 @@ def test_task_title_is_short_and_recorded(project, capsys):
     assert cli.main(["task", "add", "op-001", long_statement, "--title", "  "]) == 1
     assert "--title is required" in capsys.readouterr().out
     assert cli.main(["task", "add", "op-001", long_statement, "--title", "x" * 61]) == 1
-    assert cli.main(["task", "add", "op-001", long_statement, "--title", "B.0 cva6 first GDS"]) == 0
+    assert cli.main(["task", "add", "op-001", long_statement, "--title", "B.0 cva6 first GDS", "--phase", "build"]) == 0
     assert db.rows(conn, "tasks") and len(db.rows(conn, "tasks")) == 1
     row = db.rows(conn, "tasks", "id=?", ("t-001",))[0]
     assert row["title"] == "B.0 cva6 first GDS" and row["statement"] == long_statement

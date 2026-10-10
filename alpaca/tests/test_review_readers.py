@@ -88,7 +88,7 @@ def test_the_proof_reader_shows_the_summary_and_section_buttons(shown):
 
 
 def test_the_hub_serves_the_document_module():
-    serve = (WEB.parent / "serve.py").read_text()
+    from alpaca import serve
     hub = (WEB / "hub.js").read_text()
-    assert '"document.js": "text/javascript; charset=utf-8"' in serve
+    assert serve.hub_assets()["document.js"] == "text/javascript; charset=utf-8"   # registry shell module
     assert "from './document.js'" in hub and "data-document-section" in hub

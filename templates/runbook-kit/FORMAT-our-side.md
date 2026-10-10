@@ -12,6 +12,13 @@ reads the spec and the runbook together:
 - each fail case with `detect` and `then` tells our runner what to do when it recognizes that
   failure; a recovery stage runs only when a fail case sends to it.
 
+For a research runbook (`runbook: 3`) our intake does the same for its stages, adds one row for
+each spec item its metrics, bug cases and parts cover, and takes its `research` block as the
+contract every research run starts from. Our research engine runs the gate stages, the metrics
+and the bug cases on each attempt; the contract is frozen when a run starts, so no agent can
+change a target, a margin or a protected path during the run. Loosening a target, or setting
+one on a metric that had none, needs the owner's recorded decision.
+
 Our runner runs the stages in file order (a recovery stage only when a fail case sends to it),
 applies the checks, the fail cases and the retry rules as this document describes, and keeps
 the evidence of every attempt.

@@ -137,6 +137,35 @@ Then `/alpaca-runbook-forge` writes the runbook in interview mode, with
 `source: interview:<slot>` on every value it takes from a slot, and `/alpaca-from-notes` goes on
 to intake.
 
+## Research contracts
+
+A research runbook (format 3, an improve or repair loop that agents run) needs more than the
+twelve slots. Turn the research slots on first:
+
+```
+bin/alpaca interview use research
+```
+
+It adds fourteen slots after the defaults (`templates/interview/research-slots.yaml`):
+`research-mode`, `research-metric`, `research-noise`, `research-artifact`, `research-targets`,
+`research-accept`, `research-editable`, `research-protected`, `research-gates`, `research-stop`,
+`research-budget`, `research-proposal`, `research-controls`, `research-repair`. Each slot's
+`fields:` names the format 3 fields it fills, and `templates/research/improve.yaml` and
+`repair.yaml` name the slot beside each field. Ask `research-mode` first: a slot whose `mode:` is
+the other mode is waived with the reason in its `waive:` line (in repair mode, `research-metric`
+with "repair mode has no metric").
+
+- A target is the owner's number. Never propose one; record it only as the operator states it,
+  with where it comes from (a spec item or the owner's decision).
+- `research-artifact` asks whether every part of a metric is measured on the same artifact. When
+  the answer is no, the metric is fixed before the sign-off, not recorded as it is.
+- `research-stop` sets N; at N the run always halts and asks the owner. An answer that asks for
+  more rounds sets a larger N; there is no "continue" answer.
+
+After the sign-off, `/alpaca-runbook-forge` or the fill-in template turns the signed research
+slots into the runbook's `research` block; `bin/alpaca runbook check <file> --spec <spec>` then
+names any field still missing.
+
 ## With no one to answer
 
 In a run with no one to answer the rounds, still build the rounds and pick the recommended option
@@ -213,6 +242,86 @@ ones the notes leave open.
 
 - How do you build it, run it and test it today?
 - How do you measure the numbers in the done bar?
+
+### `research-mode`
+
+- What number or bug would make you call this run a success?
+- Is this change measured by a number (improve) or proved by a test that fails today (repair)?
+- Does the run work on this project, or on another repository, and from which branch?
+
+### `research-metric`
+
+- Which command prints the number today, and where does it print it: as result lines, or in a
+  JSON file, and under which field?
+- If two runs of the same code gave different numbers, which one would you trust?
+
+### `research-noise`
+
+- Run the measurement five times on unchanged code: how far apart are the numbers?
+- What gain would you still call noise?
+
+### `research-artifact`
+
+- Is every part of the number measured on the same build?
+- Could an attempt improve one part on a build the other part never sees?
+
+### `research-targets`
+
+- What value would make you stop?
+- Does that number come from the spec, or is it your own decision?
+- May anyone but you change it?
+
+### `research-accept`
+
+- Once every target is met, do you want the run to stop, or to keep looking for changes that
+  improve every metric at once?
+- Must an improvement beat the current best by a margin, or is any gain enough?
+
+### `research-editable`
+
+- Which folders may a change touch?
+- Is there a folder with the same name elsewhere that must stay out?
+
+### `research-protected`
+
+- Which files decide the score or the test result?
+- Which published results or notes must an agent never see?
+- Which tools and shared checkouts does the measurement read from outside the repository?
+
+### `research-gates`
+
+- What must pass before a number means anything (build, lint, tests)?
+- Which step is too heavy to run twice at once on this machine?
+
+### `research-stop`
+
+- How many rounds before you want to look at the result yourself?
+- How many attempts may run at once?
+
+### `research-budget`
+
+- What may one run cost in money, in tokens and in hours?
+- How many GiB of free disk does one attempt's worktree and build need?
+
+### `research-proposal`
+
+- What must every proposal say beyond its title, hypothesis and files?
+- Which kinds of change should the slots try in turn?
+- Is there a lessons file the proposers should read?
+
+### `research-controls`
+
+- How many rounds of a do-nothing agent prove the gates do not reward nothing?
+- If a random-edit control runs, which script mutates the code and which stage must a mutation
+  pass?
+- Is there held-out data only the final result should see?
+
+### `research-repair`
+
+- For each bug, is there a test that fails today because of it, which tests are they, and from
+  which commit?
+- Which old tests must still pass, and how many at least?
+- Which files usually change together?
 
 ## Never
 

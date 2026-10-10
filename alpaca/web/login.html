@@ -9,6 +9,7 @@
 <link rel="stylesheet" href="/login/assets/vault.css">
 <script src="/login/assets/vault-globe.js" defer></script>
 <script src="/login/assets/vault.js" defer></script>
+<script type="module" src="/login/assets/orb.js"></script>
 </head>
 <body data-page="login">
 <div class="screen">
@@ -57,7 +58,7 @@
                    autocomplete="current-password" maxlength="64" required placeholder="&bull;&bull;&bull;&bull;&bull;&bull;"
                    aria-describedby="error">
           </label>
-          <button type="submit" class="submit" id="submit"><span class="spin" aria-hidden="true"></span>Unlock</button>
+          <button type="submit" class="submit" id="submit"><alpaca-orb class="spin" state="working" size="20" label="Signing in"></alpaca-orb>Unlock</button>
         </form>
         <p class="error" id="error" role="alert" hidden></p>
       </div>

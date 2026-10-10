@@ -1,3 +1,5 @@
+<!-- alpaca:project-name -->
+<!-- /alpaca:project-name -->
 <p align="center">
   <picture>
     <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/banner.svg">
@@ -135,7 +137,37 @@ bin/alpaca task move t-001 done --proof local:.alpaca/proofs/op-001/t-001.md
 
 ## Quickstart
 
-From a git clone (Python 3.10 or newer with venv support):
+You need Python 3.10 or newer with venv support, and git. Install Alpaca once:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/vietng99/alpaca/main/install.sh | bash
+```
+
+Then start each project with one command:
+
+```sh
+alpaca new
+```
+
+`alpaca new` asks for the project name and the working directory. It then:
+
+1. copies Alpaca into that directory, one full copy per project;
+2. writes the project name at the top of the README;
+3. creates the local Python environment and onboards the project;
+4. runs `bin/alpaca doctor` and starts the hub.
+
+It prints the hub address, for example `http://127.0.0.1:7366/`. Open Claude Code or Codex in the new folder and start working.
+
+The installer checks every file of the release against the sha256 recorded in its `MANIFEST.json`. If any file differs, nothing is installed. The installer writes exactly two things: the release under `~/.local/share/alpaca/` and one launcher at `~/.local/bin/alpaca`. It changes no shell profile and no global agent configuration. To uninstall, delete both.
+
+Inside a project folder, `alpaca` runs that project's own `bin/alpaca`. Every project stays on the Alpaca version it was created from.
+
+**The hub runs on your machine only.** It listens on `127.0.0.1`, and each session prints its address when it starts. `bin/alpaca serve --status` prints the address again. To reach it from another machine, use the `ssh -L` tunnel that `alpaca serve` prints, or publish it behind a sign-in (see [docs/workspaces.md](docs/workspaces.md)).
+
+<details>
+<summary><b>Install without the one-line installer</b></summary>
+
+From a git clone:
 
 ```sh
 git clone <repository-url> my-project
@@ -145,9 +177,9 @@ bin/alpaca onboard --name my-project --who alex:owner --what "One line on what t
 bin/alpaca doctor
 ```
 
-That is the whole install. Then open Claude Code or Codex in the folder.
+`install.sh` also takes `--from DIR` (an unpacked release), `--archive FILE --sha256 HEX`, `--prefix` and `--bin-dir`. Run `bash install.sh --help` for details.
 
-Bootstrap creates a local Python environment inside the copy. It changes no global agent configuration.
+</details>
 
 <details>
 <summary><b>Onboarding flags and notes</b></summary>
@@ -186,7 +218,7 @@ Bootstrap creates a local Python environment inside the copy. It changes no glob
 
 Session cards show recorded activity. Agent visibility depends on capture; a task claim alone does not prove the process is running.
 
-Wiki capture runs through session lifecycle commands or the enabled collector. Raw notes need review before becoming trusted lessons. LLM extraction is off by default and requires a custom provider adapter.
+Wiki capture runs through session lifecycle commands or the enabled collector. Raw notes need review before becoming trusted lessons. The wiki engine, Rune2, makes no model call and opens no network connection: its providers are deterministic, and any other provider name is refused. The model of the live chat session reads the evidence and may propose facts, observations or summaries, which Rune2 checks against their sources and keeps as candidates until another session admits them. See "Native Rune2 memory" in the [operator guide](docs/operators.md).
 
 <details>
 <summary><b>Also in the hub: history, handoffs, reports and host health</b></summary>
@@ -305,7 +337,7 @@ Alpaca is domain-neutral. Set a `profile:` in `project.yaml` to bring your own s
 Also in the box:
 
 - **Formations** for work that needs more than one agent: `solo`, `builder-verifier`, `fan-out`, `bug-loop`, `nuclear`, `napalm`.
-- **Claude Code skills**, ready in any clone: `/alpaca-first-chat`, `/alpaca-onboard`, `/alpaca-op`, `/alpaca-from-notes`, `/alpaca-interview`, `/alpaca-runbook-forge`, `/alpaca-log-review`.
+- **Claude Code skills**, ready in any clone: `/alpaca-first-chat`, `/alpaca-onboard`, `/alpaca-op`, `/alpaca-from-notes`, `/alpaca-interview`, `/alpaca-runbook-forge`, `/alpaca-log-review`, and `/autoresearch` (the research engine, from contract to report).
 
 ## Autodrive levels
 
@@ -353,7 +385,7 @@ Claude Code has native lifecycle hooks. Codex follows AGENTS.md and uses explici
 - `.alpaca/`: fresh per-installation runtime created on use; never shipped.
 - `MANUAL.md` and `docs/manual.html`: command reference and phone-readable manual.
 - `doctrine/`, `MAP.md`, `contracts/`, `formations/`: the rules, the boot router, and the work shapes.
-- `.claude/skills/alpaca-*`: Alpaca's own skills (`/alpaca-first-chat`, `/alpaca-onboard`, `/alpaca-op`, `/alpaca-from-notes`, `/alpaca-interview`, `/alpaca-runbook-forge`, `/alpaca-log-review`). They are project skills, so Claude Code offers them in any clone with nothing to install.
+- `.claude/skills/alpaca-*` and `.claude/skills/autoresearch/`: Alpaca's own skills (`/alpaca-first-chat`, `/alpaca-onboard`, `/alpaca-op`, `/alpaca-from-notes`, `/alpaca-interview`, `/alpaca-runbook-forge`, `/alpaca-log-review`, and `/autoresearch`, which has no `alpaca-` prefix). They are project skills, so Claude Code offers them in any clone with nothing to install.
 - `plugin/alpaca/`: optional bundled skills (load with `claude --plugin-dir ./plugin/alpaca`, see `docs/operators.md`).
 - `docs/runbook-format.md`, `templates/runbook-example/` and `/alpaca-runbook-forge`: the runbook format (a domain's stages, checks, knobs, retry rules and owner gates), a worked example, and the skill that writes a runbook from a spec. `alpaca runbook check` checks one.
 - `alpaca intake <spec> <runbook>`: turns a spec-kit or OpenSpec spec and its runbook into the op's checklist rows (one per success criterion, edge case or scenario, each with its bar), one task contract per stage and per owner gate (none for a recovery stage), and the profile stages; after a spec or runbook change it supersedes only the rows whose criterion or bar changed. `--dry-run` shows the plan. See `docs/intake.md`.

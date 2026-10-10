@@ -24,7 +24,7 @@ import sys
 
 import pytest
 
-from alpaca import clock, db, messages, project as proj, questions, util
+from alpaca import clock, db, messages, ownerword, project as proj, questions, util
 from alpaca.posture import level, loops
 
 
@@ -280,3 +280,165 @@ def test_stop_hook_is_silent_below_full_autodrive(project):
     p = _hook("alpaca.hooks.stop", {"session_id": "s1", "stop_hook_active": False}, project)
     assert p.returncode == 0 and p.stdout == ""
     assert db.events(db.connect(project), kind="turn-end")
+
+
+# --------------------------------------------------------------------------- the L6 exits
+def _write(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+
+
+def test_autodrive_off_in_the_project_config_releases_the_l6_stop(project):
+    """`/autodrive off` writes OFF; the mirror records the default-level, so the stop is allowed."""
+    conn = db.connect(project)
+    level.set_local(conn, "s1", 6, "run the whole op")
+    assert loops.stop_should_refuse(conn, "s1", root=project)[0] is True
+    _write(os.path.join(project, ".alpaca", "config", ".autodrive-level.s1"), "OFF\n")
+    rec = level.mirror(conn, "s1", root=project)
+    assert rec and rec["level"] == level.default_level(project)
+    assert rec["goal"] == level.OFF_GOAL
+    assert loops.stop_should_refuse(conn, "s1", root=project)[0] is False
+    assert level.mirror(conn, "s1", root=project) is None          # stable, no flip back
+
+
+def test_an_off_session_file_does_not_fall_through_to_the_shared_file(project):
+    cfg = os.path.join(project, ".alpaca", "config")
+    _write(os.path.join(cfg, ".autodrive-level"), "L6\n")
+    _write(os.path.join(cfg, ".autodrive-level.s1"), "OFF\n")
+    assert level.skill_state("s1", root=project)[0] == level.OFF
+
+
+def test_a_drop_in_the_account_dir_reaches_the_record_and_a_raise_does_not(project):
+    """The shared skill writes to the account dir. A later OFF there is a drop and is honored (and
+    rewrites the project file); an L6 there over a lower record level is never honored."""
+    conn = db.connect(project)
+    level.set_local(conn, "s1", 6, "run the whole op")
+    account = os.path.join(os.environ["CLAUDE_CONFIG_DIR"], ".autodrive-level.s1")
+    _write(account, "OFF\n")
+    level.mirror(conn, "s1", root=project)
+    assert level.in_force(conn, "s1", root=project) == level.default_level(project)
+    with open(os.path.join(project, ".alpaca", "config", ".autodrive-level.s1")) as fh:
+        assert fh.read().strip() == "OFF"
+    assert level.mirror(conn, "s1", root=project) is None
+    assert loops.stop_should_refuse(conn, "s1", root=project)[0] is False
+    _write(account, "L6\n")
+    assert level.mirror(conn, "s1", root=project) is None
+    assert level.in_force(conn, "s1", root=project) == level.default_level(project)
+
+
+def test_an_account_drop_older_than_the_level_decision_is_ignored(project):
+    conn = db.connect(project)
+    account = os.path.join(os.environ["CLAUDE_CONFIG_DIR"], ".autodrive-level.s1")
+    _write(account, "OFF\n")
+    level.set_local(conn, "s1", 6, "a new goal set after the old off")
+    since = level.latest_decision_epoch(conn, "s1")
+    os.utime(account, (since - 60, since - 60))
+    assert level.mirror(conn, "s1", root=project) is None
+    assert level.in_force(conn, "s1", root=project) == 6
+
+
+def test_a_done_marker_from_an_earlier_goal_does_not_release_a_new_goal(project):
+    conn = db.connect(project)
+    level.set(conn, "s1", 6, "goal one")
+    loops.mark_done(conn, "s1", reason="goal one reached")
+    assert loops.stop_should_refuse(conn, "s1", root=project)[0] is False
+    level.set(conn, "s1", 6, "goal two")
+    assert loops.stop_should_refuse(conn, "s1", root=project)[0] is True
+
+
+def test_the_skill_done_file_releases_the_l6_stop(project):
+    conn = db.connect(project)
+    level.set(conn, "s1", 6, "run the whole op")
+    _write(os.path.join(os.environ["CLAUDE_CONFIG_DIR"], ".autodrive-done.s1"), "")
+    assert loops.stop_should_refuse(conn, "s1", root=project)[0] is False
+
+
+def test_an_owner_only_gate_releases_the_stop_for_its_own_turn_only(project):
+    conn = db.connect(project)
+    level.set(conn, "s1", 6, "run the op up to the ship hold")
+    with pytest.raises(ValueError):
+        loops.mark_gate(conn, "s1", "lunch", ref="t-1", reason="x")
+    with pytest.raises(ValueError):
+        loops.mark_gate(conn, "s1", "ship", ref="t-1", reason="")
+    loops.mark_gate(conn, "s1", "ship", ref="t-117", reason="ship needs the owner", root=project)
+    assert [m for m in messages.read(conn, "owner") if "owner-only gate ship" in m["body"]]
+    db.append_event(conn, session="s1", actor="alpaca", kind="turn-end", data={})
+    refuse, reason = loops.stop_should_refuse(conn, "s1", root=project)
+    assert refuse is False and "ship" in reason
+    db.append_event(conn, session="s1", actor="alpaca", kind="turn-end", data={})
+    assert loops.stop_should_refuse(conn, "s1", root=project)[0] is True
+
+
+def test_the_refusal_names_the_exits(project):
+    conn = db.connect(project)
+    level.set(conn, "s1", 6, "run the whole op")
+    refuse, reason = loops.stop_should_refuse(conn, "s1", root=project)
+    assert refuse is True
+    assert "session done" in reason and "session gate" in reason and "/autodrive off" in reason
+
+
+def test_stop_hook_mirrors_an_off_before_it_decides(project):
+    from alpaca import cli
+    cli.main(["init"])
+    conn = db.connect(project)
+    level.set_local(conn, "s1", 6, "run the whole op")
+    _write(os.path.join(os.environ["CLAUDE_CONFIG_DIR"], ".autodrive-level.s1"), "OFF\n")
+    p = _hook("alpaca.hooks.stop", {"session_id": "s1", "stop_hook_active": False}, project)
+    assert p.returncode == 0
+    out = json.loads(p.stdout) if p.stdout.strip() else {}
+    assert out.get("decision") != "block"
+
+
+def test_session_done_gate_and_off_commands(project, capsys):
+    from alpaca import cli
+    cli.main(["init"])
+    assert cli.main(["--session", "s1", "session", "start", "--operator", "claude",
+                     "--level", "L6", "--goal", "run the op"]) == cli.PASS
+    conn = db.connect(project)
+    assert loops.stop_should_refuse(conn, "s1", root=project)[0] is True
+    assert cli.main(["--session", "s1", "session", "gate", "owner-action", "--ref", "t-111",
+                     "--reason", "the CLI login is the owner's"]) == cli.PASS
+    assert loops.stop_should_refuse(conn, "s1", root=project)[0] is False
+    assert cli.main(["--session", "s1", "session", "gate", "nap", "--ref", "t-1",
+                     "--reason", "x"]) != cli.PASS
+    assert cli.main(["--session", "s1", "session", "done", "--reason", "goal met"]) == cli.PASS
+    assert loops.done_marker_present(conn, "s1", root=project)
+    capsys.readouterr()
+    assert cli.main(["--session", "s1", "session", "level", "OFF"]) == cli.PASS
+    assert json.loads(capsys.readouterr().out)["autodrive"] == "OFF"
+    assert level.in_force(conn, "s1", root=project) == level.default_level(project)
+
+
+# --------------------------------------------------------------------------- the shared skill hook
+# The host's shared autodrive skill, under the pooled accounts folder the product already knows
+# (alpaca/ownerword.py ACCOUNTS_ROOT); ALPACA_SHARED_AUTODRIVE_STOP names another copy. No host path
+# is written here.
+SHARED_STOP = os.environ.get("ALPACA_SHARED_AUTODRIVE_STOP") or os.path.join(
+    ownerword.ACCOUNTS_ROOT, "_shared-skills", "src", "autodrive", "autodrive-stop.sh")
+
+
+def _shared_stop(project, sid):
+    env = {**os.environ, "CLAUDE_PROJECT_DIR": project}
+    return subprocess.run(["bash", SHARED_STOP], input=json.dumps({"session_id": sid, "cwd": project}),
+                          capture_output=True, text=True, env=env)
+
+
+@pytest.mark.skipif(not os.path.isfile(SHARED_STOP), reason="the shared autodrive skill is absent")
+def test_the_shared_skill_hook_honors_the_project_done_and_gate(project):
+    """The shared /autodrive Stop hook runs beside this one. At L6 it blocks (exit 2) until the
+    project's done marker or a gate recorded this turn; a gate is consumed by one stop."""
+    conn = db.connect(project)
+    sid = "s-shared-1"
+    _write(os.path.join(os.environ["CLAUDE_CONFIG_DIR"], ".autodrive-level.%s" % sid), "L6\n")
+    assert _shared_stop(project, sid).returncode == 2
+    loops.mark_gate(conn, sid, "owner-action", ref="t-111", reason="login", root=project)
+    assert _shared_stop(project, sid).returncode == 0
+    assert _shared_stop(project, sid).returncode == 2          # consumed: next turn blocks again
+    loops.mark_done(conn, sid, reason="goal met", root=project)
+    assert _shared_stop(project, sid).returncode == 0
+    # a new /autodrive L6 goal rewrites the level file and re-arms the block
+    import time
+    time.sleep(1.1)
+    _write(os.path.join(os.environ["CLAUDE_CONFIG_DIR"], ".autodrive-level.%s" % sid), "L6\n")
+    assert _shared_stop(project, sid).returncode == 2

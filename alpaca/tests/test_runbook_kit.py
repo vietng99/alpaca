@@ -201,7 +201,8 @@ def test_checker_is_carried_from_the_product_and_only_reads(built):
 
 
 def test_checker_runs_without_alpaca_on_its_path(alone, tmp_path):
-    probe = subprocess.run([sys.executable, "-I", "-c", "import alpaca"], cwd=alone,
+    # -S: the venv of a bootstrapped tree holds alpaca-root.pth, which names the project root
+    probe = subprocess.run([sys.executable, "-I", "-S", "-c", "import alpaca"], cwd=alone,
                            capture_output=True, text=True, env={"PATH": os.environ.get("PATH", "")})
     assert probe.returncode != 0 and "No module named 'alpaca'" in probe.stderr
     proc = kit_run(alone, ["example/runbook.yaml"], cwd=alone)

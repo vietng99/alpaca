@@ -243,19 +243,23 @@ class TestModeClassification(unittest.TestCase):
             self.assertIn(classify_mode(qt), ("GLOBAL", "LOCAL", "DESCENT"))
 
 
-# ============================================================ NARROW profile is the default (Step 3)
+# ============================================================ the default profile and the NARROW off state
 class TestNarrowProfileOffState(unittest.TestCase):
     def test_meta_default_profile_is_narrow(self):
+        # op-008 t-068 (architecture.md 8.2, evaluation.md A3): the graph arm is the default only if bar A3 holds. It does not hold
+        # at the t-068 after-run (dec-7574faf2ea3b; X ties X-lex in every category, t-068 x-report.md), so `narrow` is the default.
         self.assertEqual(META_DEFAULTS["retrieval_profile"], "narrow")
         cfg = Config.for_vault(tempfile.mkdtemp(prefix="tewiki_m211_narrow_"))
         self.addCleanup(shutil.rmtree, str(cfg.vault_dir), ignore_errors=True)
         self.assertEqual(cfg.meta.get("retrieval_profile"), "narrow")
 
-    def test_profile_flags_keep_vector_and_graph_off_by_default(self):
-        # the controller derives (use_vector, use_graph) from the profile; NARROW = both OFF.
+    def test_profile_flags_keep_vector_off_unless_asked(self):
+        # the controller derives (use_vector, use_graph) from the profile; NARROW = both OFF,
+        # GRAPH = the walk only (no vector work), HYBRID = the vector arm only, FULL = both.
         def flags(profile):
-            return (profile in ("hybrid", "full"), profile == "full")
-        self.assertEqual(flags("narrow"), (False, False))   # default: vector OFF, graph OFF
+            return (profile in ("hybrid", "full"), profile in ("graph", "full"))
+        self.assertEqual(flags("narrow"), (False, False))   # vector OFF, graph OFF
+        self.assertEqual(flags("graph"), (False, True))     # graph only
         self.assertEqual(flags("hybrid"), (True, False))    # opt-in vector, graph still OFF
         self.assertEqual(flags("full"), (True, True))        # both opt-in
 

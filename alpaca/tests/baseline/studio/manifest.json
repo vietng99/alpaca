@@ -1,0 +1,925 @@
+{
+ "capture": {
+  "at": "2026-03-18T14:20:00Z",
+  "base_clock": "fixed",
+  "reduced_motion": true,
+  "timezone": "UTC",
+  "locale": "en-US",
+  "device_scale_factor": 1,
+  "chrome_flags": "alpaca/tests/studio/cdp.mjs BASE_FLAGS",
+  "masks": [
+   "#alpaca-version"
+  ],
+  "stubs": {
+   "/hub/system.json": "system.json",
+   "/hub/vcs.json": "vcs.json",
+   "/health.json": "health.json"
+  },
+  "images": 60,
+  "bytes": 9351489
+ },
+ "images": {
+  "login-1440-light": {
+   "view": "login",
+   "path": "/login",
+   "width": 1440,
+   "height": 900,
+   "theme": "light",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 1020870,
+   "errors": []
+  },
+  "login-1440-dark": {
+   "view": "login",
+   "path": "/login",
+   "width": 1440,
+   "height": 900,
+   "theme": "dark",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 772587,
+   "errors": []
+  },
+  "login-390-light": {
+   "view": "login",
+   "path": "/login",
+   "width": 390,
+   "height": 844,
+   "theme": "light",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 207402,
+   "errors": []
+  },
+  "login-390-dark": {
+   "view": "login",
+   "path": "/login",
+   "width": 390,
+   "height": 844,
+   "theme": "dark",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 176404,
+   "errors": []
+  },
+  "hub-1440-light": {
+   "view": "hub",
+   "path": "/",
+   "width": 1440,
+   "height": 900,
+   "theme": "light",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 795390,
+   "errors": []
+  },
+  "hub-1440-dark": {
+   "view": "hub",
+   "path": "/",
+   "width": 1440,
+   "height": 900,
+   "theme": "dark",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 525855,
+   "errors": []
+  },
+  "hub-390-light": {
+   "view": "hub",
+   "path": "/",
+   "width": 390,
+   "height": 844,
+   "theme": "light",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 198857,
+   "errors": []
+  },
+  "hub-390-dark": {
+   "view": "hub",
+   "path": "/",
+   "width": 390,
+   "height": 844,
+   "theme": "dark",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 176299,
+   "errors": []
+  },
+  "cockpit-1440-light": {
+   "view": "cockpit",
+   "path": "/hub/#cockpit",
+   "width": 1440,
+   "height": 900,
+   "theme": "light",
+   "masks": [
+    [
+     24,
+     875,
+     183,
+     17
+    ]
+   ],
+   "ready": true,
+   "stable": true,
+   "bytes": 135333,
+   "errors": []
+  },
+  "cockpit-1440-dark": {
+   "view": "cockpit",
+   "path": "/hub/#cockpit",
+   "width": 1440,
+   "height": 900,
+   "theme": "dark",
+   "masks": [
+    [
+     24,
+     875,
+     183,
+     17
+    ]
+   ],
+   "ready": true,
+   "stable": true,
+   "bytes": 135616,
+   "errors": []
+  },
+  "cockpit-390-light": {
+   "view": "cockpit",
+   "path": "/hub/#cockpit",
+   "width": 390,
+   "height": 844,
+   "theme": "light",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 59307,
+   "errors": []
+  },
+  "cockpit-390-dark": {
+   "view": "cockpit",
+   "path": "/hub/#cockpit",
+   "width": 390,
+   "height": 844,
+   "theme": "dark",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 59685,
+   "errors": []
+  },
+  "overview-1440-light": {
+   "view": "overview",
+   "path": "/hub/#overview",
+   "width": 1440,
+   "height": 900,
+   "theme": "light",
+   "masks": [
+    [
+     24,
+     875,
+     183,
+     17
+    ]
+   ],
+   "ready": true,
+   "stable": true,
+   "bytes": 147561,
+   "errors": []
+  },
+  "overview-1440-dark": {
+   "view": "overview",
+   "path": "/hub/#overview",
+   "width": 1440,
+   "height": 900,
+   "theme": "dark",
+   "masks": [
+    [
+     24,
+     875,
+     183,
+     17
+    ]
+   ],
+   "ready": true,
+   "stable": true,
+   "bytes": 148195,
+   "errors": []
+  },
+  "overview-390-light": {
+   "view": "overview",
+   "path": "/hub/#overview",
+   "width": 390,
+   "height": 844,
+   "theme": "light",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 64258,
+   "errors": []
+  },
+  "overview-390-dark": {
+   "view": "overview",
+   "path": "/hub/#overview",
+   "width": 390,
+   "height": 844,
+   "theme": "dark",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 65410,
+   "errors": []
+  },
+  "roadmap-1440-light": {
+   "view": "roadmap",
+   "path": "/hub/#roadmap",
+   "width": 1440,
+   "height": 900,
+   "theme": "light",
+   "masks": [
+    [
+     24,
+     864,
+     183,
+     16
+    ]
+   ],
+   "ready": true,
+   "stable": true,
+   "bytes": 161829,
+   "errors": []
+  },
+  "roadmap-1440-dark": {
+   "view": "roadmap",
+   "path": "/hub/#roadmap",
+   "width": 1440,
+   "height": 900,
+   "theme": "dark",
+   "masks": [
+    [
+     24,
+     864,
+     183,
+     16
+    ]
+   ],
+   "ready": true,
+   "stable": true,
+   "bytes": 162499,
+   "errors": []
+  },
+  "roadmap-390-light": {
+   "view": "roadmap",
+   "path": "/hub/#roadmap",
+   "width": 390,
+   "height": 844,
+   "theme": "light",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 59053,
+   "errors": []
+  },
+  "roadmap-390-dark": {
+   "view": "roadmap",
+   "path": "/hub/#roadmap",
+   "width": 390,
+   "height": 844,
+   "theme": "dark",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 59176,
+   "errors": []
+  },
+  "roadmap-mission-1440-light": {
+   "view": "roadmap-mission",
+   "path": "/hub/#roadmap?view=mission",
+   "width": 1440,
+   "height": 900,
+   "theme": "light",
+   "masks": [
+    [
+     24,
+     864,
+     183,
+     16
+    ]
+   ],
+   "ready": true,
+   "stable": true,
+   "bytes": 139304,
+   "errors": []
+  },
+  "roadmap-mission-1440-dark": {
+   "view": "roadmap-mission",
+   "path": "/hub/#roadmap?view=mission",
+   "width": 1440,
+   "height": 900,
+   "theme": "dark",
+   "masks": [
+    [
+     24,
+     864,
+     183,
+     16
+    ]
+   ],
+   "ready": true,
+   "stable": true,
+   "bytes": 140333,
+   "errors": []
+  },
+  "roadmap-mission-390-light": {
+   "view": "roadmap-mission",
+   "path": "/hub/#roadmap?view=mission",
+   "width": 390,
+   "height": 844,
+   "theme": "light",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 52913,
+   "errors": []
+  },
+  "roadmap-mission-390-dark": {
+   "view": "roadmap-mission",
+   "path": "/hub/#roadmap?view=mission",
+   "width": 390,
+   "height": 844,
+   "theme": "dark",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 53322,
+   "errors": []
+  },
+  "inflight-1440-light": {
+   "view": "inflight",
+   "path": "/hub/#inflight",
+   "width": 1440,
+   "height": 900,
+   "theme": "light",
+   "masks": [
+    [
+     24,
+     875,
+     183,
+     17
+    ]
+   ],
+   "ready": true,
+   "stable": true,
+   "bytes": 168217,
+   "errors": []
+  },
+  "inflight-1440-dark": {
+   "view": "inflight",
+   "path": "/hub/#inflight",
+   "width": 1440,
+   "height": 900,
+   "theme": "dark",
+   "masks": [
+    [
+     24,
+     875,
+     183,
+     17
+    ]
+   ],
+   "ready": true,
+   "stable": true,
+   "bytes": 168427,
+   "errors": []
+  },
+  "inflight-390-light": {
+   "view": "inflight",
+   "path": "/hub/#inflight",
+   "width": 390,
+   "height": 844,
+   "theme": "light",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 69104,
+   "errors": []
+  },
+  "inflight-390-dark": {
+   "view": "inflight",
+   "path": "/hub/#inflight",
+   "width": 390,
+   "height": 844,
+   "theme": "dark",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 69533,
+   "errors": []
+  },
+  "research-1440-light": {
+   "view": "research",
+   "path": "/hub/#research",
+   "width": 1440,
+   "height": 900,
+   "theme": "light",
+   "masks": [
+    [
+     24,
+     875,
+     183,
+     17
+    ]
+   ],
+   "ready": true,
+   "stable": true,
+   "bytes": 100678,
+   "errors": []
+  },
+  "research-1440-dark": {
+   "view": "research",
+   "path": "/hub/#research",
+   "width": 1440,
+   "height": 900,
+   "theme": "dark",
+   "masks": [
+    [
+     24,
+     875,
+     183,
+     17
+    ]
+   ],
+   "ready": true,
+   "stable": true,
+   "bytes": 100156,
+   "errors": []
+  },
+  "research-390-light": {
+   "view": "research",
+   "path": "/hub/#research",
+   "width": 390,
+   "height": 844,
+   "theme": "light",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 42514,
+   "errors": []
+  },
+  "research-390-dark": {
+   "view": "research",
+   "path": "/hub/#research",
+   "width": 390,
+   "height": 844,
+   "theme": "dark",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 42807,
+   "errors": []
+  },
+  "work-1440-light": {
+   "view": "work",
+   "path": "/hub/#work",
+   "width": 1440,
+   "height": 900,
+   "theme": "light",
+   "masks": [
+    [
+     24,
+     875,
+     183,
+     17
+    ]
+   ],
+   "ready": true,
+   "stable": true,
+   "bytes": 140920,
+   "errors": []
+  },
+  "work-1440-dark": {
+   "view": "work",
+   "path": "/hub/#work",
+   "width": 1440,
+   "height": 900,
+   "theme": "dark",
+   "masks": [
+    [
+     24,
+     875,
+     183,
+     17
+    ]
+   ],
+   "ready": true,
+   "stable": true,
+   "bytes": 142050,
+   "errors": []
+  },
+  "work-390-light": {
+   "view": "work",
+   "path": "/hub/#work",
+   "width": 390,
+   "height": 844,
+   "theme": "light",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 46746,
+   "errors": []
+  },
+  "work-390-dark": {
+   "view": "work",
+   "path": "/hub/#work",
+   "width": 390,
+   "height": 844,
+   "theme": "dark",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 47172,
+   "errors": []
+  },
+  "activity-1440-light": {
+   "view": "activity",
+   "path": "/hub/#activity",
+   "width": 1440,
+   "height": 900,
+   "theme": "light",
+   "masks": [
+    [
+     24,
+     875,
+     183,
+     17
+    ]
+   ],
+   "ready": true,
+   "stable": true,
+   "bytes": 129952,
+   "errors": []
+  },
+  "activity-1440-dark": {
+   "view": "activity",
+   "path": "/hub/#activity",
+   "width": 1440,
+   "height": 900,
+   "theme": "dark",
+   "masks": [
+    [
+     24,
+     875,
+     183,
+     17
+    ]
+   ],
+   "ready": true,
+   "stable": true,
+   "bytes": 130470,
+   "errors": []
+  },
+  "activity-390-light": {
+   "view": "activity",
+   "path": "/hub/#activity",
+   "width": 390,
+   "height": 844,
+   "theme": "light",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 55745,
+   "errors": []
+  },
+  "activity-390-dark": {
+   "view": "activity",
+   "path": "/hub/#activity",
+   "width": 390,
+   "height": 844,
+   "theme": "dark",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 57015,
+   "errors": []
+  },
+  "messages-1440-light": {
+   "view": "messages",
+   "path": "/hub/#messages",
+   "width": 1440,
+   "height": 900,
+   "theme": "light",
+   "masks": [
+    [
+     24,
+     875,
+     183,
+     17
+    ]
+   ],
+   "ready": true,
+   "stable": true,
+   "bytes": 127208,
+   "errors": []
+  },
+  "messages-1440-dark": {
+   "view": "messages",
+   "path": "/hub/#messages",
+   "width": 1440,
+   "height": 900,
+   "theme": "dark",
+   "masks": [
+    [
+     24,
+     875,
+     183,
+     17
+    ]
+   ],
+   "ready": true,
+   "stable": true,
+   "bytes": 127420,
+   "errors": []
+  },
+  "messages-390-light": {
+   "view": "messages",
+   "path": "/hub/#messages",
+   "width": 390,
+   "height": 844,
+   "theme": "light",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 52852,
+   "errors": []
+  },
+  "messages-390-dark": {
+   "view": "messages",
+   "path": "/hub/#messages",
+   "width": 390,
+   "height": 844,
+   "theme": "dark",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 53590,
+   "errors": []
+  },
+  "library-1440-light": {
+   "view": "library",
+   "path": "/hub/#library",
+   "width": 1440,
+   "height": 900,
+   "theme": "light",
+   "masks": [
+    [
+     24,
+     875,
+     183,
+     17
+    ]
+   ],
+   "ready": true,
+   "stable": true,
+   "bytes": 152483,
+   "errors": []
+  },
+  "library-1440-dark": {
+   "view": "library",
+   "path": "/hub/#library",
+   "width": 1440,
+   "height": 900,
+   "theme": "dark",
+   "masks": [
+    [
+     24,
+     875,
+     183,
+     17
+    ]
+   ],
+   "ready": true,
+   "stable": true,
+   "bytes": 152852,
+   "errors": []
+  },
+  "library-390-light": {
+   "view": "library",
+   "path": "/hub/#library",
+   "width": 390,
+   "height": 844,
+   "theme": "light",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 66493,
+   "errors": []
+  },
+  "library-390-dark": {
+   "view": "library",
+   "path": "/hub/#library",
+   "width": 390,
+   "height": 844,
+   "theme": "dark",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 67440,
+   "errors": []
+  },
+  "sessions-1440-light": {
+   "view": "sessions",
+   "path": "/hub/#sessions",
+   "width": 1440,
+   "height": 900,
+   "theme": "light",
+   "masks": [
+    [
+     24,
+     875,
+     183,
+     17
+    ]
+   ],
+   "ready": true,
+   "stable": true,
+   "bytes": 188674,
+   "errors": []
+  },
+  "sessions-1440-dark": {
+   "view": "sessions",
+   "path": "/hub/#sessions",
+   "width": 1440,
+   "height": 900,
+   "theme": "dark",
+   "masks": [
+    [
+     24,
+     875,
+     183,
+     17
+    ]
+   ],
+   "ready": true,
+   "stable": true,
+   "bytes": 189676,
+   "errors": []
+  },
+  "sessions-390-light": {
+   "view": "sessions",
+   "path": "/hub/#sessions",
+   "width": 390,
+   "height": 844,
+   "theme": "light",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 73336,
+   "errors": []
+  },
+  "sessions-390-dark": {
+   "view": "sessions",
+   "path": "/hub/#sessions",
+   "width": 390,
+   "height": 844,
+   "theme": "dark",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 74368,
+   "errors": []
+  },
+  "sessions-range-1440-light": {
+   "view": "sessions-range",
+   "path": "/hub/#sessions?from=2026-03-16&to=2026-03-17",
+   "width": 1440,
+   "height": 900,
+   "theme": "light",
+   "masks": [
+    [
+     24,
+     875,
+     183,
+     17
+    ]
+   ],
+   "ready": true,
+   "stable": true,
+   "bytes": 187116,
+   "errors": []
+  },
+  "sessions-range-1440-dark": {
+   "view": "sessions-range",
+   "path": "/hub/#sessions?from=2026-03-16&to=2026-03-17",
+   "width": 1440,
+   "height": 900,
+   "theme": "dark",
+   "masks": [
+    [
+     24,
+     875,
+     183,
+     17
+    ]
+   ],
+   "ready": true,
+   "stable": true,
+   "bytes": 188452,
+   "errors": []
+  },
+  "sessions-range-390-light": {
+   "view": "sessions-range",
+   "path": "/hub/#sessions?from=2026-03-16&to=2026-03-17",
+   "width": 390,
+   "height": 844,
+   "theme": "light",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 76458,
+   "errors": []
+  },
+  "sessions-range-390-dark": {
+   "view": "sessions-range",
+   "path": "/hub/#sessions?from=2026-03-16&to=2026-03-17",
+   "width": 390,
+   "height": 844,
+   "theme": "dark",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 77265,
+   "errors": []
+  },
+  "vcs-1440-light": {
+   "view": "vcs",
+   "path": "/hub/#vcs",
+   "width": 1440,
+   "height": 900,
+   "theme": "light",
+   "masks": [
+    [
+     24,
+     875,
+     183,
+     17
+    ]
+   ],
+   "ready": true,
+   "stable": true,
+   "bytes": 164905,
+   "errors": []
+  },
+  "vcs-1440-dark": {
+   "view": "vcs",
+   "path": "/hub/#vcs",
+   "width": 1440,
+   "height": 900,
+   "theme": "dark",
+   "masks": [
+    [
+     24,
+     875,
+     183,
+     17
+    ]
+   ],
+   "ready": true,
+   "stable": true,
+   "bytes": 165545,
+   "errors": []
+  },
+  "vcs-390-light": {
+   "view": "vcs",
+   "path": "/hub/#vcs",
+   "width": 390,
+   "height": 844,
+   "theme": "light",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 67888,
+   "errors": []
+  },
+  "vcs-390-dark": {
+   "view": "vcs",
+   "path": "/hub/#vcs",
+   "width": 390,
+   "height": 844,
+   "theme": "dark",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 68504,
+   "errors": []
+  }
+ }
+}

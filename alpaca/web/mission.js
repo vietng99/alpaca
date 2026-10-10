@@ -7,6 +7,8 @@ const symbols={verified:'&#10003;',failing:'&#215;',stale:'&#8635;',unknown:'&#1
 const date=v=>v?new Date(v).toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'Not recorded';
 const chip=(s)=>`<span class="mm-state mm-${esc(s)}"><i aria-hidden="true">${symbols[s]||'?'}</i>${esc(labels[s]||s)}</span>`;
 const href=(route,params={})=>'#'+route+(Object.keys(params).length?'?'+new URLSearchParams(params):'');
+// The map is a view of the Roadmap page; its links go there directly (#mission still redirects).
+const mapHref=(params={})=>href('roadmap',{view:'mission',...params});
 const store=new Map(), models=new Map();
 const keyFor=d=>d.title;
 function stateFor(d){const key=keyFor(d);if(!store.has(key))store.set(key,{mode:'work',selected:null,depth:'all',query:'',tag:'',all:true,suggested:false,closed:[],focus:null,componentOnly:false});return store.get(key);}
@@ -55,7 +57,7 @@ function workOverview(data,dev){
  const tasks=[...dev.tasks.values()],nodes=[...dev.nodes.values()];
  const working=tasks.filter(t=>t.status==='doing').length,ready=nodes.filter(n=>n.state==='ready'),blocked=nodes.filter(n=>['blocked','approval','resources'].includes(n.state));
  const todo=tasks.filter(t=>t.status==='open').length,done=nodes.filter(n=>n.state==='done'&&n.evidence==='valid').length;
- return `<div class="mm-stats">${[[working,'In progress','active'],[ready.length,'Ready to work','active'],[todo,'To do',''],[blocked.length,'Blocked','stale'],[done,'Proof sealed','verified']].map(([n,l,c])=>`<div><strong class="mm-count-${c}">${n}</strong><span>${l}</span></div>`).join('')}</div>
+ return `<div class="mm-stats">${[[working,'In progress','active'],[ready.length,'Ready','active'],[todo,'Not started',''],[blocked.length,'Blocked','stale'],[done,'Proof sealed','verified']].map(([n,l,c])=>`<div><strong class="mm-count-${c}">${n}</strong><span>${l}</span></div>`).join('')}</div>
  <div class="mm-next"><strong>Ready next</strong>${ready.length?ready.slice(0,3).map(n=>`<button data-task="${esc(n.id)}">${esc(dev.tasks.get(n.id)?.title||n.id)} <small>${esc(n.id)}</small></button>`).join(''):'<span>No task is currently ready. Review the blockers in the development plan.</span>'}</div>`;
 }
 function renderDevelopment(data,st){
@@ -71,7 +73,7 @@ export function renderMission(data,{compact=false,node=null}={}){
  if(!data)return '<section class="panel mm-empty"><h2>Mission map</h2><p>Map data is unavailable. Refresh to try again.</p></section>';
  models.set(keyFor(data),data);const st=stateFor(data);if(node&&data.nodes.some(n=>n.id===node)){st.selected=node;const group=data.nodes.find(n=>n.id===node).group;st.closed=st.closed.filter(g=>g!==group);}
  const counts=data.counts,dev=development(data),summary=`${data.nodes.filter(n=>n.lifecycle==='current').length} components across ${data.groups.length} sectors`;
- if(compact)return `<section class="panel mm-overview"><div class="panel-head"><div><h2>Mission map</h2><p>Development across ${data.groups.length} sectors</p></div><a class="text-link" href="#mission">Open development map &rarr;</a></div><div class="mm-overview-grid">${data.groups.map(g=>{const w=groupSummary(data,g,dev);return `<a class="mm-overview-area mm-dev-${esc(w.tone)}" href="${esc(href('mission',{group:g.id}))}"><strong>${esc(g.title)}</strong><small>${esc(w.label)}${w.total?' &middot; '+(w.done===null?w.total+' linked':w.done+'/'+w.total+' tasks'):''}</small></a>`;}).join('')}</div></section>`;
+ if(compact)return `<section class="panel mm-overview"><div class="panel-head"><div><h2>Mission map</h2><p>Development across ${data.groups.length} sectors</p></div><a class="text-link" href="${esc(mapHref())}">Open development map &rarr;</a></div><div class="mm-overview-grid">${data.groups.map(g=>{const w=groupSummary(data,g,dev);return `<a class="mm-overview-area mm-dev-${esc(w.tone)}" href="${esc(mapHref({group:g.id}))}"><strong>${esc(g.title)}</strong><small>${esc(w.label)}${w.total?' &middot; '+(w.done===null?w.total+' linked':w.done+'/'+w.total+' tasks'):''}</small></a>`;}).join('')}</div></section>`;
  const tags=[...new Set(data.nodes.flatMap(n=>n.tags))].sort();
  return `<section class="mm-root" data-mm-root="${esc(keyFor(data))}">
  <div class="mm-heading"><div><h1>Mission map</h1><p>Follow the components being updated, the work ahead, and what each change affects.</p></div><span class="mm-scope">${esc(summary)}</span></div>
@@ -103,7 +105,7 @@ function detail(data,st){
  <section><h3>Recorded checks</h3>${node.checks.length?node.checks.map(c=>`<div class="mm-check"><strong>${esc(c.data.check)}</strong><span>${esc(c.data.result)} &middot; ${esc(date(c.ts))}</span><code>${esc(c.data.command.join(' '))}</code><button class="mm-inline" data-mm-evidence="${c.id}">Read check evidence</button></div>`).join(''):'<p>No checks have run for this capability.</p>'}<div data-mm-log></div></section>
  <section><h3>Relationships</h3>${related.length?related.map(e=>`<div class="mm-relationship">${linkNode(e.source)}<span>${esc(e.kind.replaceAll('_',' '))}</span>${linkNode(e.target)}<p>${esc(e.reason)}</p><small>${esc(e.confidence)} &middot; ${esc(e.evidence.join(', '))}</small></div>`).join(''):'<p>No relationships recorded.</p>'}</section>
  <details><summary>Mapped files &middot; ${node.files.length}</summary><ul class="mm-file-list">${node.files.map(f=>`<li><code>${esc(f)}</code></li>`).join('')}</ul></details>
- <section><h3>Change history</h3>${node.history.length?`<ol class="mm-history">${node.history.map(e=>`<li><strong>${esc(e.kind.replace('mission-','').replaceAll('-',' '))}${e.data.result?' &middot; '+esc(e.data.result):''}</strong><small>${esc(date(e.ts))}</small><a href="${esc(e.kind==='mission-snapshot'?href('mission',{at:e.id,node:node.id}):href('activity',{ref:node.id,kind:'all'}))}">Record ${e.id}</a></li>`).join('')}</ol>`:'<p>No changes recorded.</p>'}</section>`;
+ <section><h3>Change history</h3>${node.history.length?`<ol class="mm-history">${node.history.map(e=>`<li><strong>${esc(e.kind.replace('mission-','').replaceAll('-',' '))}${e.data.result?' &middot; '+esc(e.data.result):''}</strong><small>${esc(date(e.ts))}</small><a href="${esc(e.kind==='mission-snapshot'?mapHref({at:e.id,node:node.id}):href('activity',{ref:node.id,kind:'all'}))}">Record ${e.id}</a></li>`).join('')}</ol>`:'<p>No changes recorded.</p>'}</section>`;
 }
 
 function paint(root,data,st,{refreshPlan=true}={}){
@@ -177,7 +179,7 @@ export function bindMission(container){
   if(t.matches('[data-mm-tag]'))st.tag=t.value;
   if(t.matches('[data-mm-all]'))st.all=t.checked;
   if(t.matches('[data-mm-suggested]'))st.suggested=t.checked;
-  if(t.matches('[data-mm-history]')){location.hash=href('mission',t.value?{at:t.value}:{});return;}
+  if(t.matches('[data-mm-history]')){location.hash=mapHref(t.value?{at:t.value}:{});return;}
   paint(root,data,st);
  });
  root.addEventListener('toggle',e=>{if(e.target.matches('[data-mm-group]')){st.closed=[...root.querySelectorAll('[data-mm-group]')].filter(g=>!g.open).map(g=>g.dataset.mmGroup);requestAnimationFrame(()=>draw(root,data,st));}},true);

@@ -170,16 +170,18 @@ def _check_budget(conn, op, new_workers, session, by):
             % (", ".join(str(w) for w in new_workers), budget, op))
 
 
-def spawn(conn, op, worker, *, by=ORCHESTRATOR, role=None, session=None) -> dict:
+def spawn(conn, op, worker, *, by=ORCHESTRATOR, role=None, session=None, model=None) -> dict:
     """Spawn one `worker` for `op`. Only the orchestrator may; a spawn by any other actor is
     recorded as a refusal event and raises SoleSpawnerRefused. A spawn past the declared budget
-    raises BudgetExceeded. Returns the `dispatch-spawn` event on success."""
+    raises BudgetExceeded. `model` is the model the worker runs on (`shield.model_of`); when given
+    it is recorded on the event. Returns the `dispatch-spawn` event on success."""
     if by != ORCHESTRATOR:
         _refuse_spawn(conn, op, worker, by, session,
                       "a spawn from %r is refused: only the orchestrator spawns" % by)
     _check_budget(conn, op, [worker], session, by)
     return db.append_event(conn, session=session or ORCHESTRATOR, actor=by, kind=SPAWN_KIND,
-                           op=op, data={"op": op, "worker": worker, "role": role})
+                           op=op, data=_with_model({"op": op, "worker": worker, "role": role},
+                                                   model))
 
 
 # --------------------------------------------------------------------------- assignments
@@ -196,12 +198,21 @@ def _roles_map(rows, roles) -> dict:
     return dict(zip(rows, roles))
 
 
-def assign(conn, op, rows, roles, *, by=ORCHESTRATOR, session=None, clock=None) -> list:
+def _with_model(data: dict, model) -> dict:
+    """Add the worker's model to an event's data when the caller resolved one."""
+    if model:
+        data["model"] = str(model)
+    return data
+
+
+def assign(conn, op, rows, roles, *, by=ORCHESTRATOR, session=None, clock=None,
+           model=None) -> list:
     """The orchestrator posts one assignment per row. Each assignment is a `dispatch-assign` event
     keyed on the row plus a `handoff` message to the worker, and each is a spawn bounded by the
     declared budget. A non-orchestrator caller is refused (recorded + SoleSpawnerRefused); a set of
-    assignments past the budget is refused (recorded + BudgetExceeded). Returns the assignments as
-    a list of {row, worker, role, event}."""
+    assignments past the budget is refused (recorded + BudgetExceeded). `model` (one model for
+    every row, or a {row_id: model} map) is recorded on each assignment. Returns the assignments
+    as a list of {row, worker, role, event}."""
     rows = list(rows)
     mapping = _roles_map(rows, roles)
     if by != ORCHESTRATOR:
@@ -214,7 +225,9 @@ def assign(conn, op, rows, roles, *, by=ORCHESTRATOR, session=None, clock=None) 
             worker = mapping[r]
             ev = db.append_event(conn, session=session or ORCHESTRATOR, actor=ORCHESTRATOR,
                                  kind=ASSIGN_KIND, op=op, ref=r,
-                                 data={"op": op, "row": r, "worker": worker})
+                                 data=_with_model({"op": op, "row": r, "worker": worker},
+                                                  model.get(r) if isinstance(model, dict)
+                                                  else model))
             try:
                 messages.post(conn, ORCHESTRATOR, worker, "handoff",
                               "assigned row %s in %s" % (r, op), pointer=r,

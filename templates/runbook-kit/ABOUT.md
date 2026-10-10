@@ -8,7 +8,7 @@ from the product's own files, so it follows them:
 | kit file | built from |
 |---|---|
 | `check_runbook.py` | alpaca/runbook.py, alpaca/gates/verdict.py and the OpenSpec change reader of alpaca/intake.py, carried by the builder |
-| `runbook.schema.json` | the field tables of alpaca/runbook.py |
+| `runbook.schema.json` | the field tables of alpaca/runbook.py, the research tables included |
 | `FORMAT.md` | docs/runbook-format.md, rewritten by the builder's rules, plus `FORMAT-note.md` and `FORMAT-our-side.md` |
 | `AGENTS.md` | `AGENTS-intro.md`, the body of .claude/skills/alpaca-runbook-forge/SKILL.md, `AGENTS-deliver.md`, `AGENTS-never.md` |
 | `.claude/skills/runbook-forge/SKILL.md` | `SKILL-head.md` and the AGENTS.md body |

@@ -159,6 +159,28 @@ def test_apply_is_idempotent(tmp_path):
 
 # ------------------------------------------------------------------ (B) fail-closed refusal
 
+def test_current_record_gets_reference_lookup_without_changing_events(project):
+    conn = db.connect(project)
+    try:
+        db.append_event(conn, session='test', actor='test', kind='msg', ref='t-001',
+                        data={'body': 'reference lookup witness'})
+        conn.execute('DROP INDEX IF EXISTS idx_events_ref_id')
+        before = [tuple(row) for row in conn.execute('SELECT * FROM events ORDER BY id')]
+        version = migrate.current_version(conn)
+        migrate.apply(conn)
+        query = conn.execute('EXPLAIN QUERY PLAN SELECT * FROM events WHERE ref=? ORDER BY id',
+                             ('t-001',)).fetchall()
+        assert any('SEARCH events USING INDEX' in row[3] for row in query)
+        assert migrate.current_version(conn) == version
+        assert [tuple(row) for row in conn.execute('SELECT * FROM events ORDER BY id')] == before
+        assert db.verify_chain(conn)[0] is True
+        # Once repaired, reopening a current record must need no write lock.
+        conn.execute('PRAGMA query_only=ON')
+        assert migrate.apply(conn) == version
+    finally:
+        conn.close()
+
+
 def test_missing_not_null_constraint_is_refused_fail_closed(tmp_path):
     # A mangled store whose events.hash lost its NOT NULL is refused, and the reason
     # names the constraint and a recovery step.

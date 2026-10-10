@@ -145,3 +145,18 @@ def test_pasted_prompt_as_text_blocks_counts(tmp_path):
     p = tmp_path / "s.jsonl"
     p.write_text(json.dumps({"type": "user", "timestamp": "2026-09-15T10:00:00.000Z", "message": {"content": [{"type": "text", "text": "pasted prompt"}]}}) + "\n", encoding="utf-8")
     assert [x["text"] for x in ps.parse(str(p))["human_prompts"]] == ["pasted prompt"]
+
+
+def test_bootstrap_instructions_are_not_session_titles(tmp_path):
+    import json
+    p = tmp_path / 'native.jsonl'
+    def user(text, ident):
+        return {'type': 'response_item', 'payload': {'type': 'message', 'role': 'user',
+            'id': ident, 'content': [{'type': 'input_text', 'text': text}]}}
+    p.write_text('\n'.join(json.dumps(x) for x in [
+        user('# AGENTS.md instructions for /project\n<INSTRUCTIONS>rules</INSTRUCTIONS>', 'u1'),
+        user('<environment_context>root</environment_context>', 'u2'),
+        user('Fix slow session analytics', 'u3')]) + '\n')
+    d = ps.parse(p, include_children=False)
+    assert d['title'] == 'Fix slow session analytics'
+    assert [x['text'] for x in d['human_prompts']] == ['Fix slow session analytics']

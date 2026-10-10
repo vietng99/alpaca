@@ -37,5 +37,10 @@ Format {{FORMAT}} in short (`<kit>/FORMAT.md` has it in full):
   only then). A fail case that answers an edge case lists it in its `covers`.
 - Give a knob, a check, a fail case and an owner gate a `source` when you know where it comes
   from: `spec:SC-002` for a spec item, `default` for a default you chose.
+- A research runbook (`runbook: 3`) is the contract of a loop in which agents improve a measured
+  number or fix reported bugs: format {{FORMAT}} plus a `spec` and a `research` block (step 4a,
+  and "The research block" in `<kit>/FORMAT.md`). Write a `target` only when the spec states the
+  number, with `source: spec:<item id>`; never pick the repeats, margins, rounds, slots or budget
+  yourself.
 
 The steps below are the ones our own agents follow.

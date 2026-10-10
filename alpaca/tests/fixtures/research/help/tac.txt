@@ -1,0 +1,10 @@
+Write each file to standard output, last line first.
+
+Usage: tac [OPTION]... [FILE]...
+
+Options:
+  -b, --before              attach the separator before instead of after
+  -r, --regex               interpret the sequence as a regular expression
+  -s, --separator <STRING>  use STRING as the separator instead of newline
+  -h, --help                Print help
+  -V, --version             Print version

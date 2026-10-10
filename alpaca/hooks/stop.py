@@ -22,6 +22,8 @@ import sys
 from alpaca.hooks import common
 
 EVERY = 10
+#: Half the 20 s Stop ceiling in .claude/settings.json (OB-18); the hard deadline of fail_open binds first.
+CAPTURE_CAP_S = 10.0
 
 #: the synthetic final reply a harness writes when the account hits its usage limit.
 LIMIT_REPLY = re.compile(r"\AYou.ve hit your .*limit|\AClaude AI usage limit reached")
@@ -108,13 +110,15 @@ def _reply_text(payload, root, sid):
 
 
 def handle(payload):
-    from alpaca import db, pad, paths
-    from alpaca.analytics import build_index
+    from alpaca import db, paths
     root = paths.root(payload.get("cwd"))
     sid = common.session_of(payload)
     conn = db.connect(root)
     db.append_event(conn, session=sid, actor="alpaca", kind="turn-end", data={})
-    pad.write(root)
+    # The pad, the data push, the analytics build and the transcript copy each run as a step of the
+    # one runner (`common.run_step`, t-070 RC5): in the hook, a child process stopped at its share of
+    # the deadline, so a call blocked in the kernel cannot hold the turn's end (A-4).
+    common.run_step(payload, "stop", "pad", share=0.4)
     # A usage-limit stop is never refused (see the module docstring): record it and let it end.
     limited = limit_stop(payload)
     if limited:
@@ -125,7 +129,9 @@ def handle(payload):
     result = {}
     if not limited and not payload.get("stop_hook_active"):
         try:
-            from alpaca.posture import loops
+            from alpaca.posture import level as posture_level, loops
+            # an owner's `/autodrive off` made since the last tool call reaches the record first
+            posture_level.mirror(conn, sid, root=root)
             refuse, reason = loops.stop_should_refuse(conn, sid, root=root)
             if refuse:
                 result.update(decision="block", reason=reason)
@@ -157,8 +163,7 @@ def handle(payload):
     # so a render failure never touches the pad or the analytics refresh below; the handler is
     # fail-open regardless (M1.5).
     try:
-        from alpaca import export
-        export.write_if_changed(root)
+        common.run_step(payload, "stop", "export", share=0.4)
     except Exception:
         if payload.get("_strict"):
             raise
@@ -169,14 +174,8 @@ def handle(payload):
         n = int(db.meta_get(conn, key, "0")) + 1
         db.meta_set(conn, key, str(n))
     if n % EVERY == 0:
-        try:
-            build_index.collect(root, only=sid)
-            build_index.build(root)
-        except Exception as exc:
-            db.append_event(conn, session=sid, actor="alpaca", kind="analytics-build-failed",
-                            data={"error": "%s: %s" % (type(exc).__name__, exc)})
-            if payload.get("_strict"):
-                raise
+        # a failed or stopped build appends `analytics-build-failed` (`common.run_step`)
+        common.run_step(payload, "stop", "analytics", share=0.6, session=sid)
     # E1: keep the local copy of the registered transcript current -- LAST, after the result is
     # computed and everything else has run. A transcript is JSONL and grows by appending, so a turn
     # usually costs one tail append, but the copy is the one step here whose cost follows the size
@@ -187,19 +186,51 @@ def handle(payload):
     # No event on this path: a Stop happens every turn and the boundary snapshots (PreCompact,
     # SessionEnd) carry the recorded fact.
     try:
-        from alpaca import transcripts
-        transcripts.snapshot(root, sid, conn=conn)
+        common.run_step(payload, "stop", "snapshot", share=0.6, session=sid)
     except BaseException:
         pass
     conn.close()
     return result
 
+def capture_open_session(payload, hook="stop"):
+    """OB-18: capture the open session's uncaptured event notes (FR-8), no transcript. Runs from
+    `main` after the decision line is flushed, never inside `handle` (so `session stop`, which calls
+    only `handle`, captures nothing), within half the 20 s hook ceiling, through the one capture
+    runner (`common.capture_step`, t-070 RC4): a capture still running at the hook's deadline is
+    stopped from outside and appends `capture-deferred`, as a capture its budget cut short does (A-6);
+    a failure appends `drain-failed`; neither changes the hook's output. With observability on, the
+    collector owns capture, as in the SessionEnd and PreCompact hooks; when no collector is alive
+    then, the step notes it (`capture_runner.note_absent_collector`, A-8).
+
+    The same holds while this project's `collect watch` collector is running
+    (`observability.collector_alive`), with or without the `enabled` flag: the collector lands every
+    event after its checkpoint, so the step is skipped, nothing is written and nothing is appended.
+    On a live-size store the step read the echo index (about 30 s) on every turn end, so the 8 s hook
+    deadline cut it each time after it had held the turn and competed for the wiki write lock
+    (merge of op-008 into main, review B2). With no live collector it captures as before.
+
+    The FR-7 checkpoint verb runs this same step for an open Codex session, which has no Stop hook
+    (OA-4, `pre_compact.checkpoint`); `hook` names the boundary in the events it appends. Returns the
+    capture report, or None when nothing was captured here."""
+    from alpaca import capture_runner, observability, paths
+    root = paths.root(payload.get("cwd"))
+    if observability.enabled(root):
+        capture_runner.note_absent_collector(root, common.session_of(payload), hook)
+        return None
+    if observability.collector_alive(root):
+        return None
+    result = common.capture_step(payload, hook, cap_s=CAPTURE_CAP_S, transcripts=False)
+    return result.value if result.status == "ok" else None
+
+
 @common.fail_open
 def main():
-    result = handle(common.read_stdin())
+    payload = common.read_stdin()
+    result = handle(payload)
     if result.get("decision"):
         sys.stdout.write(json.dumps(result) + "\n")
         sys.stdout.flush()
+    capture_open_session(payload)
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ description: >-
   every boundary the level says a human owns and advancing the ones it does not.
   Not a judge and not a writer: it sequences, the orchestrator records.
 tools: Read, Bash
+tier: session
 ---
 
 You are autodrive - the loop that carries an op from one phase to the next at the autodrive level

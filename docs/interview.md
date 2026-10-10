@@ -72,7 +72,17 @@ slots:
     becomes: an SC item and a check on the cleanup job
 ```
 
-A slot file that cannot be read, or a slot without an `id` or `fills`, is BLOCKED.
+A slot file that cannot be read, or a slot without an `id` or `fills`, is BLOCKED. The project
+file may also turn on slot sets the product ships (see "Research contracts" below):
+
+```yaml
+include: [research]
+slots: []
+```
+
+The slot map is then the defaults, the slots of each included set in the listed order, and the
+project's own slots last (a project slot replaces a set slot of the same `id` too). An unknown set
+name, or a set slot whose `id` is a default slot's, is BLOCKED.
 
 ### The log
 
@@ -94,6 +104,7 @@ alpaca interview status [--json]
 alpaca interview set <slot> --answered|--default|--waived|--open --value <text> --source <ref> [--reason <text>]
 alpaca interview readback [--json]
 alpaca interview signoff --by <name> [--json]
+alpaca interview use <set> [--json]
 ```
 
 - `status` shows each slot with its latest state and value, a progress line
@@ -118,6 +129,15 @@ alpaca interview signoff --by <name> [--json]
   `slots.yaml`, a product upgrade), when a slot is open, or when a note was kept after it: new raw
   input the interview has not seen. A note that was there at signing and that no answer cites
   does not change it. Read back and sign off again.
+- `use <set>` turns a slot set on: it adds the set to the `include:` list of
+  `input/interview/slots.yaml`. It creates the file (`include: [<set>]` and `slots: []`) when there
+  is none, adds the set to a one-line `include: [a, b]` list, or appends an `include: [<set>]` line
+  to a file that has none; an include list of any other shape is refused (FAIL) with a message to
+  edit it by hand, and nothing is written. It prints the slot count before and after, and running
+  it again changes nothing. `--json` gives `verdict`, `file`, `slots` (the slot ids after the
+  change) and `progress`. An unknown set is BLOCKED, and so is a set name that is not a lower-case
+  letter followed by lower-case letters, digits and hyphens (`../slots`, for one); either refusal
+  writes nothing.
 
 ## The interview skill: /alpaca-interview
 
@@ -141,6 +161,67 @@ The skill runs the interview in rounds, in the style of flare
 With no one to answer (a run with no operator), the skill records its proposed defaults as
 `default` with the source `round:<n>/q<n>`, says so in the readback, and leaves the sign-off to
 the operator.
+
+## Research contracts
+
+A research runbook (`runbook: 3`) is the contract of an improve or repair loop that agents run: its
+`research` block says what is measured, what an attempt may change, what counts as better, when the
+run stops and what it may spend. The twelve default slots do not ask for that, so the research
+slots come as a set of their own, `templates/interview/research-slots.yaml`. Turn them on with:
+
+```
+alpaca interview use research
+```
+
+Status then lists 26 slots and fails until the fourteen research slots are settled too; readback
+and sign-off carry them like any slot, and a sign-off from before `use` is stale, because the slot
+map gained slots. Each research slot has, besides `id`, `fills` and `becomes`, a `fields:` list of
+the format 3 fields it fills, and a `mode:` (`improve`, `repair` or `both`). A slot the run's mode
+does not need is waived with the reason its `waive:` line gives.
+
+| slot | fills | mode |
+|---|---|---|
+| `research-mode` | improve or repair, the pack and runbook, the question the run answers, the repository and ref when not this project at HEAD | both |
+| `research-metric` | each metric: what it measures, its command and where it starts, how the number is read, its unit and direction | improve |
+| `research-noise` | deterministic or noisy; for a noisy metric the repeats, the fewest successful repeats, the middle value of an even count, the margin and the seeds | improve |
+| `research-artifact` | whether every component of each metric is measured on one artifact (one build, one output), and which one; when not, the metric is fixed before the sign-off | improve |
+| `research-targets` | the owner-only target of each metric that has one, and where the number comes from (a spec item or an owner decision) | improve |
+| `research-accept` | the accept rule, and whether the run stops or keeps looking for Pareto gains once every target is met | both |
+| `research-editable` | the paths an attempt may change, as rules from the repository root | both |
+| `research-protected` | the contract paths no attempt may change, the hidden, test, read, keep and output paths, and the tools and shared checkouts to fingerprint | both |
+| `research-gates` | the gate stages in order, which are heavy and their lock wait, each stage's and each metric repeat's timeout | both |
+| `research-stop` | the rounds N and slots K; at N the run always halts and asks the owner | both |
+| `research-budget` | any cap on the money, tokens or wall time one run may spend (none set: the run is uncapped), and the free disk in GiB it needs | both |
+| `research-proposal` | the pack's own proposal fields, the hypothesis categories, the lessons file and the longest note line | both |
+| `research-controls` | the no-op control rounds, the random-edit control with its mutation script, gate stage and seed, and the holdout stages and paths | both |
+| `research-repair` | each bug case with its report, base commit, reproducing test, timeout, repeats and suspect files; the pass-to-pass suite; a prepare stage; files that change together | repair |
+
+`research.defaults`, `research.runtime`, `research.verifier`, `research.audit` and
+`research.egress` have no slot: they are optional and a pack author sets them by hand. `covers`
+has no slot, and neither do the optional `covers` and `source` pairs on the other parts: the spec
+step names the spec items and the forge writes them. A metric's `source` is the exception:
+`research-targets` asks it with the target.
+
+### The fill-in contract templates
+
+`templates/research/improve.yaml` and `templates/research/repair.yaml` hold a line for every field
+of a research runbook in that mode. Each value to fill is a quoted placeholder,
+`"<FILL:<field path>>"` (`[]` stands for one item of a list), and each line's comment says whether
+the field is REQUIRED, REQUIRED-when a condition holds, or OPTIONAL with its default, what it
+means, and the interview slot that asks for it (`slot: none` when no slot does). To fill one by
+hand: copy it next to the pack's spec, fill each placeholder, copy each item marked "one item per
+..." once per item, and delete every line left unfilled (an OPTIONAL line not needed, a
+REQUIRED-when line whose condition does not hold, a field the pack defaults file already sets).
+Then check it:
+
+```
+alpaca runbook check <the filled file> --spec <the pack's spec>
+```
+
+The format 3 check refuses a value that still holds a placeholder (`FIELD-UNFILLED`) and names any
+required field missing from the merged block (`FIELD-MISSING`), so a REQUIRED line deleted by
+mistake is caught. For the field reference, `research_fields()` in `alpaca/runbook.py` lists every
+field with whether each mode requires it.
 
 ## After the sign-off
 

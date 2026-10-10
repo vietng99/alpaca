@@ -16,6 +16,12 @@ A slot with no line is open. `source` is a note path, a round and question (`rou
     alpaca interview set <slot> --answered|--default|--waived|--open --value <text> --source <ref> [--reason <text>]
     alpaca interview readback [--json]
     alpaca interview signoff --by <name> [--json]
+    alpaca interview use <set> [--json]
+
+A slot set is an optional list of slots shipped as `templates/interview/<set>-slots.yaml`, such as
+the research slots a format 3 research contract needs. `use` turns one on for the project: it
+adds the set to the `include:` list of `input/interview/slots.yaml`, and the slot map is then the
+defaults, each included set in the listed order, and the project's own slots.
 
 `status` exits 0 only when no slot is open, so a script can gate on it. `signoff` refuses while a
 slot is open, writes `input/interview/signed-<UTC stamp>-<sha12>.md` (the readback, the sha256 of
@@ -43,6 +49,13 @@ DIR = "input/interview"
 LOG = DIR + "/log.jsonl"
 PROJECT_SLOTS = DIR + "/slots.yaml"
 DEFAULT_SLOTS = "templates/interview/slots.yaml"
+SETS_DIR = "templates/interview"
+_SET_NAME = re.compile(r"^[a-z][a-z0-9-]*$")
+# the one include shape `use` edits: a single top-level line `include: [a, b]`
+_INCLUDE_LINE = re.compile(r"^include[ \t]*:[ \t]*\[([^\[\]#]*)\][ \t]*(#.*)?$")
+_INCLUDE_ANY = re.compile(r"^include[ \t]*:")
+PROJECT_HEADER = ("# This project's interview slots (docs/interview.md). `include:` turns on slot sets from\n"
+                  "# templates/interview/<set>-slots.yaml; `slots:` adds slots or replaces one of the same id.\n")
 _SLOT_ID = re.compile(r"^[a-z][a-z0-9-]*$")
 _ROUND = re.compile(r"^round:[1-9][0-9]*/q[1-9][0-9]*$")
 
@@ -62,13 +75,16 @@ def product_root():
 
 
 # ------------------------------------------------------------------------------ the slots
-def _read_slots(path, label):
+def _load_yaml(path, label):
     import yaml
     try:
         with open(path, encoding="utf-8") as fh:
-            data = yaml.safe_load(fh)
+            return yaml.safe_load(fh)
     except (OSError, yaml.YAMLError) as exc:
         raise InterviewError("%s cannot be read: %s" % (label, exc), code=BLOCKED)
+
+
+def _parse_slots(data, label):
     items = data.get("slots") if isinstance(data, dict) else None
     if not isinstance(items, list):
         raise InterviewError("%s needs a `slots:` list" % label, code=BLOCKED)
@@ -88,22 +104,81 @@ def _read_slots(path, label):
     return out
 
 
-def slots(root):
-    """The slot list: the defaults, with the project's slots replacing a default of the same id
-    and new ids added after the defaults."""
+def _read_slots(path, label):
+    return _parse_slots(_load_yaml(path, label), label)
+
+
+def set_file(name):
+    """The product file of the slot set `name`: templates/interview/<name>-slots.yaml."""
+    return os.path.join(product_root(), *SETS_DIR.split("/"), "%s-slots.yaml" % name)
+
+
+def sets():
+    """The slot sets this product ships, by name."""
+    found = glob.glob(os.path.join(product_root(), *SETS_DIR.split("/"), "*-slots.yaml"))
+    return sorted(n for n in (os.path.basename(f)[:-len("-slots.yaml")] for f in found) if _SET_NAME.match(n))
+
+
+def _check_set(name, label):
+    if not isinstance(name, str) or not _SET_NAME.match(name) or not os.path.isfile(set_file(name)):
+        raise InterviewError("%s names the slot set %r, which this product does not ship; the sets are: %s"
+                             % (label, name, ", ".join(sets()) or "none"), code=BLOCKED)
+
+
+def _includes(data, label):
+    """The set names of a project file's `include:` list, in order; [] when it has none."""
+    names = data.get("include") if isinstance(data, dict) else None
+    if names is None:
+        return []
+    if not isinstance(names, list):
+        raise InterviewError("%s: `include:` is a list of slot set names, such as [research]" % label,
+                             code=BLOCKED)
+    out = []
+    for name in names:
+        _check_set(name, label)
+        if name not in out:
+            out.append(name)
+    return out
+
+
+def _compose(project):
+    """The slot map for a project file's parsed content (None when the project has no file)."""
     out = _read_slots(os.path.join(product_root(), *DEFAULT_SLOTS.split("/")), DEFAULT_SLOTS)
     for s in out:
         s["from"] = "default"
-    project = _path(root, PROJECT_SLOTS)
-    if os.path.isfile(project):
-        index = {s["id"]: i for i, s in enumerate(out)}
-        for s in _read_slots(project, PROJECT_SLOTS):
-            s["from"] = "project"
-            if s["id"] in index:
-                out[index[s["id"]]] = s
-            else:
-                out.append(s)
+    if project is None:
+        return out
+    defaults = {s["id"] for s in out}
+    for name in _includes(project, PROJECT_SLOTS):
+        label = "%s/%s-slots.yaml" % (SETS_DIR, name)
+        have = {s["id"] for s in out}
+        for s in _read_slots(set_file(name), label):
+            if s["id"] in defaults:
+                raise InterviewError("%s slot %s has the id of a default slot; a set only adds slots"
+                                     % (label, s["id"]), code=BLOCKED)
+            if s["id"] in have:
+                raise InterviewError("%s names the slot %s, which an earlier set already adds"
+                                     % (label, s["id"]), code=BLOCKED)
+            s["from"] = name
+            out.append(s)
+    index = {s["id"]: i for i, s in enumerate(out)}
+    for s in _parse_slots(project, PROJECT_SLOTS):
+        s["from"] = "project"
+        if s["id"] in index:
+            out[index[s["id"]]] = s
+        else:
+            out.append(s)
     return out
+
+
+def slots(root):
+    """The slot list: the defaults, then the slots of each set the project file includes, in the
+    listed order, then the project's own slots (a project slot replaces a slot of the same id, a
+    new id is added at the end)."""
+    project = _path(root, PROJECT_SLOTS)
+    if not os.path.isfile(project):
+        return _compose(None)
+    return _compose(_load_yaml(project, PROJECT_SLOTS))
 
 
 def slot_ids(root):
@@ -367,6 +442,64 @@ def signoff(root, by, *, session="cli"):
     return {"file": rel, "log_sha256": sha, "new": True}
 
 
+def _with_set(text, name):
+    """(new text, changed) with `name` in the project file's include list; InterviewError (FAIL)
+    for an include list of any shape but one top-level line `include: [a, b]`."""
+    lines = text.splitlines(keepends=True)
+    at = [i for i, line in enumerate(lines) if _INCLUDE_ANY.match(line)]
+    if not at:
+        if text and not text.endswith("\n"):
+            text += "\n"
+        return text + "include: [%s]\n" % name, True
+    m = _INCLUDE_LINE.match(lines[at[0]].rstrip("\r\n")) if len(at) == 1 else None
+    if m is None:
+        raise InterviewError("%s holds an include list this verb cannot edit (only one line of the form "
+                             "`include: [a, b]`); add %s to it by hand" % (PROJECT_SLOTS, name))
+    names = [n.strip() for n in m.group(1).split(",") if n.strip()]
+    if name in names:
+        return text, False
+    tail = "  " + m.group(2) if m.group(2) else ""
+    lines[at[0]] = "include: [%s]%s\n" % (", ".join(names + [name]), tail)
+    return "".join(lines), True
+
+
+def use(root, name):
+    """Turn the slot set `name` on for this project: add it to the `include:` list of
+    input/interview/slots.yaml, creating the file when it is absent. Idempotent. Returns
+    {file, set, changed, before, after, slots, progress}; nothing is written on a refusal."""
+    import yaml
+    if not isinstance(name, str) or not _SET_NAME.match(name):
+        raise InterviewError("a slot set name is lower-case letters, digits and hyphens; the sets are: %s"
+                             % (", ".join(sets()) or "none"), code=BLOCKED)
+    _check_set(name, "alpaca interview use")
+    before = slot_ids(root)
+    path = _path(root, PROJECT_SLOTS)
+    if os.path.isfile(path):
+        with open(path, encoding="utf-8") as fh:
+            old = fh.read()
+        text, changed = _with_set(old, name)
+    else:
+        text, changed = PROJECT_HEADER + "include: [%s]\nslots: []\n" % name, True
+    if changed:
+        try:
+            data = yaml.safe_load(text)
+        except yaml.YAMLError as exc:
+            raise InterviewError("%s would not parse after adding %s (%s); add it by hand"
+                                 % (PROJECT_SLOTS, name, exc))
+        if name not in _includes(data, PROJECT_SLOTS):
+            raise InterviewError("%s did not take the include line; add %s to its include list by hand"
+                                 % (PROJECT_SLOTS, name))
+        _compose(data)                      # refuses (BLOCKED) a map it cannot build; nothing written yet
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    after = slot_ids(root)
+    return {"file": PROJECT_SLOTS, "set": name, "changed": changed, "before": len(before),
+            "after": len(after), "slots": after, "progress": view(root)["progress"]}
+
+
 # ------------------------------------------------------------------------------ the verb
 def _short(value, width=60):
     text = " ".join(str(value).split())
@@ -444,15 +577,30 @@ def cmd_interview(args):
                       % result["file"])
                 print(verdict.gate_line(INSTRUMENT, PASS))
             return PASS
+        if verb == "use":
+            result = use(root, args.set)
+            if args.json:
+                print(json.dumps({"verdict": "PASS", "file": result["file"], "slots": result["slots"],
+                                  "progress": result["progress"]}, indent=1, sort_keys=True))
+            else:
+                if result["changed"]:
+                    print("%s slots on: %s includes %s (%d -> %d slots)" % (
+                        result["set"], result["file"], result["set"], result["before"], result["after"]))
+                else:
+                    print("%s slots already on: %s includes %s (%d -> %d slots)" % (
+                        result["set"], result["file"], result["set"], result["before"], result["after"]))
+                print("interview: %s" % result["progress"])
+                print(verdict.gate_line(INSTRUMENT, PASS))
+            return PASS
     except InterviewError as exc:
         return _fail(args, exc.code, str(exc))
-    print("usage: alpaca interview status|set|readback|signoff (see alpaca interview <verb> --help)",
+    print("usage: alpaca interview status|set|readback|signoff|use (see alpaca interview <verb> --help)",
           file=sys.stderr)
     return USAGE
 
 
 def _parser(sub):
-    p = sub.add_parser("interview", help="the slot map a runbook needs: status, set, readback, signoff")
+    p = sub.add_parser("interview", help="the slot map a runbook needs: status, set, readback, signoff, use")
     v = p.add_subparsers(dest="interview_verb")
     st = v.add_parser("status", help="each slot with its state, the open slots and the uncited notes; "
                                      "exit 0 only when no slot is open")
@@ -471,6 +619,10 @@ def _parser(sub):
     so = v.add_parser("signoff", help="write the signed readback with the sha256 of the log")
     so.add_argument("--by", default=None, help="who approved the readback")
     so.add_argument("--json", action="store_true")
+    us = v.add_parser("use", help="turn a slot set on (templates/interview/<set>-slots.yaml), such as "
+                                  "research: add it to the include list of input/interview/slots.yaml")
+    us.add_argument("set", help="the slot set, such as research")
+    us.add_argument("--json", action="store_true")
 
 
 def _register():

@@ -89,4 +89,5 @@ Every registered leaf, one invariant line each.
 - `doctrine/leaves/plain-language.md`: Shipped prose is plain: no ceremony words, no filler; the ban list is data and the check is one lint.
 - `doctrine/leaves/serial-with-resolve.md`: Two writers may reach for one reference; the collision is recorded and a later pass resolves it, rather than blocked by a hard lock.
 - `doctrine/leaves/two-change-classes.md`: Every write is agent-writable or human-owned by path; a human-owned write is a review card up to L4 and a recorded diff at L5+.
+- `doctrine/leaves/intent-fidelity.md`: An agent may not invent intent and call it the owner's: the signed brief, the owner's answers and the owner's orders are the authority, and an agent's own choice is labelled as the agent's.
 

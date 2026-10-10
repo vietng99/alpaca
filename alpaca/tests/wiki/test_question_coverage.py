@@ -6,9 +6,11 @@ import pytest
 from alpaca.wiki.clock import FixedClock
 from alpaca.wiki.config import Config
 from alpaca.wiki.engine.answer import answer
-from alpaca.wiki.engine.oracle import _required_subclaim_entail
+from alpaca.wiki.engine.oracle import _required_subclaim_entail, evaluate
 from alpaca.wiki.ingest.absorb import Absorber
 from alpaca.wiki.providers.deterministic import EnsembleEntailer, StructuralEntailer
+from alpaca.wiki.store.asof import AsOf
+from alpaca.wiki.store.db import DB
 
 
 SQLITE_REASON = "The project uses SQLite because deployments must run offline."
@@ -126,3 +128,69 @@ def test_answer_door_numeric_binding_and_causal_polarity(tmp_path, profile, ques
         assert any("networking" in citation.claim_text for citation in result.citations)
     else:
         assert result.abstained
+
+
+# An absent-target question (the shape of the C04 control items, op-008 t-067; synthetic words): the
+# claim cut from the top block (its first 300 characters) holds no negation word and the rest of the
+# block does, so the structural entailer judges the claim `contradicted` by its own block; no block
+# names "supercomputer", so the question is uncovered.
+UNCOVERED_BLOCK = (
+    "The asset catalog moved from the old file server to the new file server during the autumn "
+    "cleanup, and the earlier attempt to move the asset catalog kept every folder, every thumbnail "
+    "and the checksum list over each image. The archivists copied the files, checked the checksums twice "
+    "and switched the viewers over at the end of the month. It took one afternoon and no viewer lost "
+    "a picture during the switch."
+)
+UNCOVERED_QUESTION = "Did an earlier attempt to move the asset catalog onto a supercomputer fail?"
+
+
+@pytest.mark.parametrize("profile", ["narrow", "graph"])
+def test_uncovered_question_with_a_contradicted_claim_abstains(tmp_path, profile):
+    cfg = Config.for_vault(tmp_path)
+    cfg = replace(cfg, meta={**cfg.meta, "retrieval_profile": profile})
+    absorber = Absorber(cfg, clock=FixedClock(start="2020-01-01T00:00:00+00:00"))
+    try:
+        absorber.absorb_text("catalog-move.md", UNCOVERED_BLOCK)
+    finally:
+        absorber.close()
+
+    result = answer(cfg, UNCOVERED_QUESTION)
+    assert [c.verdict for c in result.citations] == ["contradicted"], "setup: the cited claim is contradicted"
+    assert not result.completeness.subclaim_coverage
+    assert result.verdict == "abstained", result
+    assert result.answer_text is None
+    assert result.extra["reason"] == "unmet predicate: SUBCLAIM_COVERAGE"
+
+
+class _ContradictsEverything:
+    name = "contradicts-everything"
+
+    def entail(self, claim, source):
+        return "contradicted", 0.9
+
+
+def test_contradicted_claim_is_a_conflict_only_when_the_cited_block_speaks_to_the_question(tmp_path):
+    claim = "An earlier attempt to move the asset catalog to the new server did fail."
+    block = claim + " The old server had no spare disk."
+    db = DB(Config.for_vault(tmp_path))
+    db.pour()
+
+    def roll_up(required_subclaims, entailer=StructuralEntailer()):
+        result = evaluate(db, entailer, AsOf("2030-01-01T00:00:00+00:00"),
+                          ["SUBCLAIM_COVERAGE"], [{"text": claim, "source_block_id": "b"}],
+                          {"b": block}, [], set(), [], [], ["b"],
+                          required_subclaims=required_subclaims)
+        assert [c.verdict for c in result.citations] == ["contradicted"]
+        return result.verdict, result.reason
+
+    try:
+        covered = roll_up(["Did an earlier attempt to move the asset catalog fail"])
+        uncovered = roll_up(["Did an earlier attempt to move the asset catalog onto a supercomputer fail"])
+        without_plan = roll_up(None)
+        sub_claim_contradicted = roll_up(["asset catalog supercomputer"], _ContradictsEverything())
+    finally:
+        db.close()
+    assert covered == ("conflict", "contradiction/overturner")
+    assert without_plan == ("conflict", "contradiction/overturner")
+    assert sub_claim_contradicted == ("conflict", "contradiction/overturner")
+    assert uncovered == ("insufficient", "unmet predicate: SUBCLAIM_COVERAGE")

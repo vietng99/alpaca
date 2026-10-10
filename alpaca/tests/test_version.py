@@ -44,13 +44,14 @@ def test_dev_checkout_names_its_commit(checkout, dev_channel):
     head = subprocess.run(['git', '-C', str(checkout), 'rev-parse', '--short=12', 'HEAD'],
                           capture_output=True, text=True, check=True).stdout.strip()
     got = version.info(str(checkout))
-    assert got == {'version': VERSION + '-dev+g' + head, 'base': VERSION, 'channel': 'dev',
-                   'commit': head, 'dirty': False}
+    assert got == {'version': VERSION, 'base': VERSION, 'channel': 'dev',
+                   'commit': head, 'dirty': False, 'build': VERSION + '-dev+g' + head}
 
 
 def test_uncommitted_code_marks_the_dev_version_dirty(checkout, dev_channel):
     (checkout / 'alpaca/code.py').write_text('x = 2\n')
-    assert version.string(str(checkout)).endswith('.dirty')
+    assert version.info(str(checkout))['build'].endswith('.dirty')
+    assert version.string(str(checkout)) == VERSION
 
 
 def test_record_churn_outside_the_code_is_not_dirty(checkout, dev_channel):
@@ -58,29 +59,32 @@ def test_record_churn_outside_the_code_is_not_dirty(checkout, dev_channel):
     _git(checkout, 'add', 'notes.txt')
     _git(checkout, 'commit', '-qm', 'notes')
     (checkout / 'notes.txt').write_text('two\n')
-    assert not version.string(str(checkout)).endswith('.dirty')
+    assert not version.info(str(checkout))['build'].endswith('.dirty')
 
 
 def test_dev_tree_without_git_is_a_plain_prerelease(tmp_path, dev_channel):
-    assert version.string(str(tmp_path)) == VERSION + '-dev'
+    assert version.info(str(tmp_path))['build'] == VERSION + '-dev'
+    assert version.string(str(tmp_path)) == VERSION
 
 
 def test_release_channel_is_the_bare_number(monkeypatch, checkout):
     monkeypatch.setattr(version, 'CHANNEL', 'release')
-    assert version.info(str(checkout)) == {'version': VERSION, 'base': VERSION, 'channel': 'release'}
+    assert version.info(str(checkout)) == {'version': VERSION, 'base': VERSION, 'channel': 'release',
+                                           'build': VERSION}
 
 
 def test_this_tree_reports_its_channel():
+    assert version.string() == VERSION
     if version.CHANNEL == 'release':
-        assert version.string() == VERSION
+        assert version.info()['build'] == VERSION
     else:
         assert version.CHANNEL == 'dev'
-        assert DEV.match(version.string()) or version.string() == VERSION + '-dev'
+        assert DEV.match(version.info()['build']) or version.info()['build'] == VERSION + '-dev'
 
 
 def test_cli_version_flag(capsys):
     assert cli.main(['--version']) == 0
-    assert capsys.readouterr().out.strip() == 'alpaca ' + version.string()
+    assert capsys.readouterr().out.strip() == 'Alpaca ' + VERSION
 
 
 def test_project_release_config_overlays_the_release_channel():
@@ -117,4 +121,4 @@ def test_release_build_turns_a_dev_tree_into_a_release_tree(tmp_path):
 
     assert report(root)['channel'] == 'dev'
     receipt = build_release(root, load_config(root), root / '.alpaca/releases/one/tree')
-    assert report(receipt.tree) == {'version': VERSION, 'base': VERSION, 'channel': 'release'}
+    assert report(receipt.tree) == {'version': VERSION, 'base': VERSION, 'channel': 'release', 'build': VERSION}
