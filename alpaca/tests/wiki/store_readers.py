@@ -31,6 +31,7 @@ import os
 import shutil
 import sqlite3
 import sys
+import threading
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
@@ -702,7 +703,12 @@ class Trace:
 @contextlib.contextmanager
 def traced(targets: dict):
     """Record which of `targets` ({(realpath, first line): key}) start running in this process
-    (sys.monitoring PY_START) outside `Trace.paused`; yields the `Trace`."""
+    (sys.monitoring PY_START) outside `Trace.paused`; yields the `Trace`. Python 3.10 and 3.11 have no
+    sys.monitoring: there the profile hook's call events count the same starts (`_profiled`)."""
+    if not hasattr(sys, "monitoring"):
+        with _profiled(targets) as trace:
+            yield trace
+        return
     mon = sys.monitoring
     tool = next(i for i in range(6) if mon.get_tool(i) is None)
     mon.use_tool_id(tool, "rune2-store-readers")
@@ -731,3 +737,31 @@ def traced(targets: dict):
         mon.register_callback(tool, mon.events.PY_START, None)
         mon.free_tool_id(tool)
         mon.restart_events()
+
+
+@contextlib.contextmanager
+def _profiled(targets: dict):
+    """`traced` on Python 3.10 and 3.11 (op-008 t-571): sys.setprofile and threading.setprofile; a call
+    event is a start (a generator's resume is one too, and counts the key it already counted)."""
+    trace = Trace()
+    paths = {}
+
+    def profile(frame, event, _arg):
+        if event != "call" or not trace.active:
+            return
+        code = frame.f_code
+        real = paths.get(code.co_filename)
+        if real is None:
+            real = paths[code.co_filename] = os.path.realpath(code.co_filename)
+        key = targets.get((real, code.co_firstlineno))
+        if key is not None:
+            trace.seen.add(key)
+
+    before, before_threads = sys.getprofile(), threading.getprofile()
+    threading.setprofile(profile)
+    sys.setprofile(profile)
+    try:
+        yield trace
+    finally:
+        sys.setprofile(before)
+        threading.setprofile(before_threads)

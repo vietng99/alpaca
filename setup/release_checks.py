@@ -14,6 +14,24 @@ from urllib.parse import unquote
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+#: The oldest Python setup/bootstrap.sh accepts. A release is installed and imported on it before a
+#: publish (the floor-python gate): 1.2.0 shipped a pattern only 3.11+ compiles (op-008 t-571).
+FLOOR = (3, 10)
+#: Imports every Alpaca module but the tests and the command entry point; prints each that fails.
+IMPORT_ALL = """
+import importlib, pkgutil, sys
+import alpaca
+failed = []
+for info in pkgutil.walk_packages(alpaca.__path__, 'alpaca.', onerror=lambda name: failed.append(name)):
+    if info.name.startswith('alpaca.tests') or info.name == 'alpaca.__main__':
+        continue
+    try:
+        importlib.import_module(info.name)
+    except Exception as exc:
+        failed.append(info.name + ': ' + type(exc).__name__ + ': ' + str(exc)[:200])
+print('\\n'.join(failed) or 'every module imports on Python ' + sys.version.split()[0])
+sys.exit(1 if failed else 0)
+"""
 
 
 def documentation(root):
@@ -36,7 +54,25 @@ def documentation(root):
     print('documentation: regenerated manual, ASCII HTML and README links PASS')
 
 
-def smoke(root):
+def floor_python():
+    """The interpreter of the floor version: ALPACA_FLOOR_PYTHON, else python3.10 on PATH."""
+    python = os.environ.get('ALPACA_FLOOR_PYTHON') or shutil.which('python%d.%d' % FLOOR)
+    if not python:
+        raise RuntimeError('no Python %d.%d found: install it or set ALPACA_FLOOR_PYTHON' % FLOOR)
+    version = subprocess.run([python, '-c', 'import sys; print(*sys.version_info[:2])'], text=True,
+                             capture_output=True, check=True).stdout.split()
+    if tuple(map(int, version)) != FLOOR:
+        raise RuntimeError('%s is Python %s, not %d.%d' % (python, '.'.join(version), *FLOOR))
+    return python
+
+
+def floor(root):
+    """The fresh installation smoke run on the floor Python, then every module imported there."""
+    smoke(root, floor_python(), import_all=True)
+
+
+def smoke(root, python=None, import_all=False):
+    python = python or sys.executable
     scratch = root / '.alpaca/release-smoke'
     scratch.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=scratch) as temporary:
@@ -51,7 +87,9 @@ def smoke(root):
                 print(result.stderr, file=sys.stderr)
                 raise RuntimeError('smoke command failed: ' + args[0])
             return result.stdout
-        run('bash', 'setup/bootstrap.sh', '--python', sys.executable)
+        run('bash', 'setup/bootstrap.sh', '--python', python)
+        if import_all:
+            run('.venv/bin/python', '-c', IMPORT_ALL)
         def cli(*args):
             return run('bin/alpaca', *args)
         (copy / '.alpaca/transcripts').mkdir(parents=True)
@@ -83,11 +121,12 @@ def smoke(root):
         proof.write_text(text)
         cli('proof', 'seal', task)
         cli('task', 'move', task, 'done', '--proof', 'local:' + rel)
-        print('fresh installation and sealed task proof: PASS')
+        print('fresh installation and sealed task proof on Python %s: PASS' % '.'.join(
+            run('.venv/bin/python', '-c', 'import sys; print(*sys.version_info[:2])').split()))
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('gate', choices=['docs', 'smoke'])
+    parser.add_argument('gate', choices=['docs', 'smoke', 'floor'])
     args = parser.parse_args()
-    (documentation if args.gate == 'docs' else smoke)(ROOT)
+    {'docs': documentation, 'smoke': smoke, 'floor': floor}[args.gate](ROOT)

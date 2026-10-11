@@ -12,6 +12,11 @@ import yaml
 from .checks import run_command
 
 
+#: The whole suite on a hosted runner. It ran 23 minutes on 2026-10-03 and passed 60 minutes at
+#: 96% on 2026-10-10 (op-008 t-571); a hosted job itself stops at 6 hours.
+TEST_TIMEOUT_S = 3 * 3600
+
+
 def test(root):
     # Public distribution configuration may intentionally omit private release settings.
     config = yaml.safe_load((root / 'project.yaml').read_text())
@@ -20,7 +25,7 @@ def test(root):
         raise ValueError('project has no test command')
     log = root / '.alpaca/releases/ci-test.log'
     log.parent.mkdir(parents=True, exist_ok=True)
-    code, _ = run_command(shlex.split(command), root, 3600, log)
+    code, _ = run_command(shlex.split(command), root, TEST_TIMEOUT_S, log)
     print(log.read_text(errors='replace'))
     return code
 

@@ -43,6 +43,20 @@ def test_op_pin_and_unpin_are_recorded_and_the_newest_wins(project, capsys):
     assert 'no op op-404' in capsys.readouterr().out
 
 
+def test_a_closed_op_carries_its_close_time_and_basis_for_the_finished_view(project):
+    """t-572: the overview gives each op its open and close times, and a closed op the basis of its
+    newest close, which the Roadmap's Finished operations view lists; an open op has no basis."""
+    root = Path.cwd().parent
+    cli.main(['init'])
+    assert cli.main(['op', 'new', 'Import the census', '--no-pin']) == 0
+    assert cli.main(['op', 'new', 'Still running', '--no-pin']) == 0
+    assert cli.main(['op', 'close', 'op-001', '--basis', 'the census loads; no task was needed']) == 0
+    closed, running = _overview_op(root, 'op-001'), _overview_op(root, 'op-002')
+    assert closed['status'] == 'closed' and closed['close_basis'] == 'the census loads; no task was needed'
+    assert closed['opened'] and closed['closed'] and closed['closed'] >= closed['opened']
+    assert running['status'] == 'open' and running['closed'] is None and running['close_basis'] is None
+
+
 def test_op_new_records_a_short_title_and_op_title_renames_it(project, capsys):
     root = Path.cwd().parent
     cli.main(['init'])

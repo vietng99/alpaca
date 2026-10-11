@@ -12,6 +12,7 @@ const paths = {
  activity:'<path d="M3 12h4l3-8 4 16 3-8h4"/>',
  messages:'<path d="M21 14a3 3 0 0 1-3 3H9l-6 4V6a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3zM7 8h10M7 12h7"/>',
  library:'<path d="M4 3h5v18H4zM12 3h4v18h-4zM18 4l3 16"/>',
+ records:'<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h3"/><circle cx="16" cy="16.5" r="2"/>',
  sessions:'<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4M7 8l3 3-3 3M13 13h4"/>',
  search:'<circle cx="10" cy="10" r="6"/><path d="m15 15 6 6"/>',
  arrow:'<path d="M4 12h15m-6-6 6 6-6 6"/>',

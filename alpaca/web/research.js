@@ -1,4 +1,4 @@
-// The research run view (design/research-engine/operator-surface.md section 7): the cockpit card
+// The research run view (docs/studio.md, Research): the cockpit card
 // renderResearchSection(data), the hub page renderResearchPage(data, params) and bindResearch().
 // It draws only what /hub/research.json carries from the record: a missing metric is never drawn
 // as zero, a round with no champion value breaks the champion line, and the y range spans only

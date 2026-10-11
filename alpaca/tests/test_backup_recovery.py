@@ -344,3 +344,21 @@ def test_a_profile_adds_backup_roots_and_tool_dirs(tmp_path, monkeypatch):
     assert '.alpaca/domain/receipts/r1.json' in names
     assert not any(p.startswith('domain/tools/') for p in names)
     conn.close()
+
+
+def test_a_failed_backup_whose_receipt_is_not_kept_names_both_failures(tmp_path, monkeypatch):
+    """The receipt's failure is added to the backup's own error as a note, on Python 3.10 too, where
+    exceptions have no add_note (op-008 t-571)."""
+    from alpaca import backup as backup_module
+
+    def fail(*_args, **_kwargs):
+        raise ValueError('source unreadable')
+
+    def unkept(*_args, **_kwargs):
+        raise OSError('disk full')
+
+    monkeypatch.setattr(backup_module, '_create', fail)
+    monkeypatch.setattr(backup_module, '_record_verification', unkept)
+    with pytest.raises(ValueError, match='source unreadable') as raised:
+        backup_module.create(tmp_path)
+    assert raised.value.__notes__ == ['Backup failure receipt could not be persisted: disk full']

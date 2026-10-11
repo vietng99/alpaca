@@ -141,7 +141,6 @@ import json
 import math
 import os
 import secrets
-import shutil
 import stat
 import sys
 
@@ -151,6 +150,7 @@ from alpaca.gates import monotonicity
 from alpaca.gates import verdict as vc
 from alpaca.research import contract as rcontract
 from alpaca.research import events, jail, locks, markers, paths, procs
+from alpaca import _nofollow
 from alpaca.research.errors import GateInfraError, LockTimeout, MarkerError
 from alpaca.research.types import (ChainResult, Contract, FailToPass, GateResult, JailSpec,
                                    MetricSample, MetricValue, PassToPass, TestReport,
@@ -2424,8 +2424,8 @@ def _abs(root, path):
 
 def _remove(path) -> None:
     """Remove a file or a folder tree without following links; a folder a jail made unreadable
-    is opened up first. Neither step recurses (os.fwalk, shutil.rmtree's descriptor walk), so a
-    tree of any depth is removed or raises OSError."""
+    is opened up first. The walk does not recurse (_nofollow.remove_tree), so a tree of any depth is
+    removed or raises OSError, on Python 3.10 too (op-008 t-571)."""
     try:
         st = os.lstat(path)
     except FileNotFoundError:
@@ -2433,26 +2433,7 @@ def _remove(path) -> None:
     if not stat.S_ISDIR(st.st_mode):
         os.unlink(path)
         return
-    _open_up(path)
-    shutil.rmtree(path)
-
-
-def _open_up(path) -> None:
-    """Give path and every folder under it mode 0700, top down and without recursion: os.fwalk
-    walks from descriptors, so neither depth nor the path length limit stops it, and each folder
-    is opened up before the walk descends into it. A link is never followed: os.fwalk lists a
-    link to a folder among the folders, so each name is checked with lstat before its chmod."""
-    try:
-        os.chmod(path, 0o700)
-    except OSError:
-        pass
-    for _here, dirnames, _files, dir_fd in os.fwalk(path, topdown=True, follow_symlinks=False):
-        for name in dirnames:
-            try:
-                if stat.S_ISDIR(os.stat(name, dir_fd=dir_fd, follow_symlinks=False).st_mode):
-                    os.chmod(name, 0o700, dir_fd=dir_fd)
-            except OSError:
-                pass
+    _nofollow.remove_tree(path)
 
 
 def _cleanup(path) -> str | None:

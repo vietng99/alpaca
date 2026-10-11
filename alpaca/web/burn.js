@@ -305,14 +305,26 @@ function signalsCard(d) {
     <div class="table-wrap"><table class="data-table burn-table burn-signals"><thead><tr><th scope="col">Session</th><th scope="col">Loops</th><th scope="col">Wasted</th><th scope="col">Off-task</th><th scope="col">Idle</th><th scope="col">Cache re-write</th><th scope="col">Owner wait</th><th scope="col">Runaway</th><th scope="col">Collisions</th><th scope="col">Friction</th><th scope="col">Hook time</th></tr></thead><tbody>${body}</tbody></table></div>
     <details class="burn-rules"><summary>How each signal is measured</summary><pre>${esc(d.rules || '')}</pre></details></section>`;
 }
+// With chosen days (window key `range`) the card keeps the tasks done inside them and recounts each
+// operation's done, captured and cost; the median and outlier flags stay those of the operation's
+// whole captured history, which the outlier rule names (the burn board shows only the chosen
+// days). The 1, 7, 30 and 90 day windows show all captured history, as they always did.
+export function outcomesFor(d) {
+  const w = d.window || {}, all = d.outcomes || [];
+  if (w.key !== 'range') return all;
+  return all.map(o => {
+    const tasks = (o.tasks || []).filter(t => t.done >= w.start && t.done <= w.end), captured = tasks.filter(t => t.captured);
+    return {...o, tasks, done: tasks.length, captured: captured.length, cost: captured.reduce((n, t) => n + (t.cost || 0), 0)};
+  }).filter(o => o.tasks.length);
+}
 function outcomesCard(d) {
-  const ops = d.outcomes || [];
-  if (!ops.length) return '';
+  const ops = outcomesFor(d), chosen = (d.window || {}).key === 'range';
+  if (!ops.length) return chosen && (d.outcomes || []).length ? `<section class="panel burn-card"><div class="burn-head"><h2>Cost per outcome</h2><p>No task was done in the chosen days.</p></div></section>` : '';
   const task = t => `<div class="burn-drow burn-trow"><span class="burn-dk">${esc(t.task)} ${esc(t.title)}${t.outlier ? ' <span class="burn-flag">'+esc((t.ratio || 0).toFixed(1))+'&times; the median</span>' : ''}${t.cycles > 1 ? ' <span class="burn-flag">reopened</span>' : ''}</span><span class="burn-dv">${t.captured ? esc(fmt(t.tokens)) : '&ndash;'}</span><span class="burn-dv">${t.captured ? esc(money(t.cost)) : 'not captured'}</span></div>`;
   const body = ops.map(o => `<div class="burn-op"><h4>${esc(o.op)} <span>${grp(o.done)} done &middot; ${grp(o.captured)} with captured spend &middot; ${esc(money(o.cost))} &middot; median ${o.median == null ? '&ndash;' : esc(money(o.median))}</span></h4>
     ${o.tasks.filter(t => t.captured).slice(0, 3).map(task).join('') || '<p class="burn-empty">No done task in this operation has captured spend.</p>'}
     ${o.tasks.length > 3 ? `<details><summary>All ${grp(o.tasks.length)} done tasks</summary>${o.tasks.map(task).join('')}</details>` : ''}</div>`).join('');
-  return `<section class="panel burn-card"><div class="burn-head"><h2>Cost per outcome</h2><p>What each done task cost from its claim to the move to done: every response its holding sessions and their subagents made while they held it, split evenly when a session held several tasks at once. All captured history, not only this window. An outlier costs more than 2&times; the median done task of its operation; a task done before its session&#39;s transcript was captured shows as not captured.</p></div>
+  return `<section class="panel burn-card"><div class="burn-head"><h2>Cost per outcome</h2><p>What each done task cost from its claim to the move to done: every response its holding sessions and their subagents made while they held it, split evenly when a session held several tasks at once. ${chosen ? 'Only the tasks done in the chosen days; the median is the operation&#39;s over all captured history.' : 'All captured history, not only this window.'} An outlier costs more than 2&times; the median done task of its operation; a task done before its session&#39;s transcript was captured shows as not captured.</p></div>
     <div class="burn-ops">${body}</div></section>`;
 }
 function sharedCard(d) {

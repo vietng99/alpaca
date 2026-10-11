@@ -106,6 +106,10 @@ def dev_files(root, cfg):
     return files
 
 
+#: Seconds a timed-out command has after SIGINT to report before the group is killed.
+INTERRUPT_GRACE_S = 60
+
+
 def run_command(command, cwd, timeout, log):
     env = command_environment()
     timed_out = False
@@ -117,7 +121,18 @@ def run_command(command, cwd, timeout, log):
                 code = process.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
                 timed_out = True
-                os.killpg(process.pid, signal.SIGKILL)
+                # SIGINT first: pytest stops and still prints its summary (the names of the tests
+                # that failed so far) before the group is killed (op-008 t-571: a CI run cut off
+                # by SIGKILL at 96% named none of its 13 failures)
+                for sig in (signal.SIGINT, signal.SIGKILL):
+                    try:
+                        os.killpg(process.pid, sig)
+                    except ProcessLookupError:
+                        break       # the whole group is gone
+                    try:
+                        process.wait(timeout=INTERRUPT_GRACE_S if sig == signal.SIGINT else None)
+                    except subprocess.TimeoutExpired:
+                        pass
                 process.wait()
                 code = 124
         except OSError as exc:

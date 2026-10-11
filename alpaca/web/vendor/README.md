@@ -39,7 +39,7 @@ directory from the unpacked package 2 (usage in that file). What it copies and w
   yawn_stretch, mimic_typing, dance, party_hat, headphones, detective, checklist, peekaboo). The
   package ships each as a full-size sheet (`assets/new-sheets`, about 25 MB together) and as six
   normalized 192 x 208 runtime frames (`assets/frames/<action>/00.png` to `05.png`). Only the frames are
-  used (brief section 2e): the script pastes the six frames left to right into one transparent
+  used: the script pastes the six frames left to right into one transparent
   1152 x 208 strip, `assets/strips/<action>.png`, with the pixels unchanged (it reads every strip
   back and compares each frame), so a new action has the same shape as an original one. Checklist
   keeps the package's pose order [1,1,2,3,4,5]: its frames 00 and 01 are the same pose.

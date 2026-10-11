@@ -41,6 +41,7 @@ from alpaca import runbook, util
 from alpaca.gates import verdict as vc
 from alpaca.research import events as rev, paths, pathscan, texts, verdicts, verify_gate
 from alpaca.research import sealed
+from alpaca import _nofollow
 from alpaca.research import verifier as _verifier_mod
 
 #: section 9.3: the flag set. The first four are the ones the task names.
@@ -534,8 +535,7 @@ def _remove(path) -> None:
     if os.path.islink(path) or os.path.isfile(path):
         os.remove(path)
     elif os.path.isdir(path):
-        _writable_tree(path)
-        shutil.rmtree(path)
+        _nofollow.remove_tree(path)          # opens up each folder; no recursion (op-008 t-571)
 
 
 def _collapse(text) -> str:

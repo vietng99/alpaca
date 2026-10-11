@@ -12,6 +12,7 @@ import {sessionList, dayRange, AGENT_CHOICES, SORT_CHOICES} from './sessionlist.
 import {renderBurn} from './burn.js';
 import {renderInflight, loadEarlier, inflightCount, inflightButton} from './inflight.js';
 import {renderVcs,bindVcs,captureVcs} from './vcs.js';
+import {renderRecords} from './records.js';
 import {renderCockpit, renderCockpitExtras, renderWorkCards, renderWorkTimeline, segmented, dayChart, runVisuals, collectionVisuals, categoryBars, eventSummary, liveTimeline, laneOf, todayKey, SPANS, clock, startClocks, setStageNames, profileProblems, STATE_LABELS} from './cockpit.js';
 import {createLive} from './live.js';
 import {patch as patchHtml, render as renderHtml} from './morph.js';
@@ -95,6 +96,19 @@ async function inflightView(ticket,automatic=false){
  // once the layout has settled (fonts, a narrow screen reflowing the cards).
  if(focus&&!automatic){const show=()=>{const card=document.getElementById('if-'+focus);if(card&&ticket===state.ticket)card.scrollIntoView({block:'start'});};requestAnimationFrame(show);setTimeout(show,400);}
 }
+// Records: operations, decisions and sealed proofs from the record, and the wiki's
+// status and cited briefings (#records?section=wiki&op=op-12), all read-only.
+async function recordsView(ticket,automatic=false){
+ const p=state.params,section=['ops','decisions','proofs','wiki'].includes(p.get('section'))?p.get('section'):'ops';
+ const subject=(p.get('subject')||p.get('op')||p.get('task')||'').trim();
+ const soft=promise=>promise.catch(error=>({error:error.message||String(error)}));
+ const [data,wiki,brief]=await Promise.all([api('/hub/records.json',{section:section==='wiki'?'ops':section,q:p.get('q'),limit:200}),
+  section==='wiki'?soft(api('/hub/wiki-status.json')):null,
+  section==='wiki'&&subject?soft(api('/hub/wiki-briefing.json',/^t-/.test(subject)?{task:subject}:{op:subject})):null]);
+ if(ticket!==state.ticket)return;if(automatic&&readerEngaged())return false;
+ mount(heading('Records','The official record of this project: operations, decisions and sealed proofs, and what the wiki knows. Read-only.','','RECORD')+
+  renderRecords({section,data,wiki,brief,subject,q:p.get('q'),href,date,badge,empty,search}));
+}
 // Version control: a read-only picture of the repository; #vcs?days=N picks the graph window.
 async function vcsView(ticket,automatic=false){
  const days=[1,7,30,90].includes(Number(state.params.get('days')))?Number(state.params.get('days')):7;
@@ -139,15 +153,36 @@ async function cockpit(ticket,automatic=false){
 }
 // Roadmap owns the plan: the pinned operation maps, then every workstream with its prerequisites.
 // Cockpit and Work & evidence link here instead of repeating it.
-// Roadmap has two views, switched by the tabs at its top: the task roadmap and the mission map
-// (?view=mission, with its node, group and at). Live refresh and the selection keep working as they
+// Roadmap has three views, switched by the tabs at its top: the task roadmap, the mission map
+// (?view=mission, with its node, group and at) and the finished operations (?view=finished). Live refresh and the selection keep working as they
 // did on the old Mission map page, because the mission view still renders through missionView.
-const roadmapTabs=mission=>`<nav class="tabs roadmap-tabs" aria-label="Roadmap views">${[[false,'Task roadmap',{}],[true,'Mission map',{view:'mission'}]].map(([on,label,params])=>`<a class="tab ${on===mission?'active':''}" href="${esc(href('roadmap',params))}"${on===mission?' aria-current="page"':''}>${label}</a>`).join('')}</nav>`;
+const roadmapTabs=(view,finished=0)=>`<nav class="tabs roadmap-tabs" aria-label="Roadmap views">${[['tasks','Task roadmap',{}],['mission','Mission map',{view:'mission'}],['finished',`Finished operations${finished?' <span class="tab-count">'+count(finished)+'</span>':''}`,{view:'finished'}]].map(([id,label,params])=>`<a class="tab ${id===view?'active':''}" href="${esc(href('roadmap',params))}"${id===view?' aria-current="page"':''}>${label}</a>`).join('')}</nav>`;
+// The finished operations: closed ops, newest close first, each with its close basis, task
+// counts and how long it ran; ?op=<id> opens one on its own task roadmap with the done work shown.
+// Read from the overview's ops (hub.overview: opened, closed, close_basis), nothing else is fetched.
+const closedOps=o=>(o.ops||[]).filter(x=>x.status==='closed').sort((a,b)=>(Date.parse(b.closed)||0)-(Date.parse(a.closed)||0)||String(b.id).localeCompare(String(a.id)));
+const opName=x=>x.short_title||String(x.title||'').split(':')[0].trim()||x.id;
+const ranFor=(a,b)=>{const d=(Date.parse(b)-Date.parse(a))/864e5;if(!Number.isFinite(d)||d<0)return '';const n=Math.round(d);return d<1?'ran under a day':`ran ${n} day${n===1?'':'s'}`;};
+const finishedRow=x=>`<article class="fin-op"><div class="fin-head"><a class="fin-title" href="${esc(href('roadmap',{view:'finished',op:x.id}))}"><span class="mono">${esc(x.id)}</span><span>${esc(opName(x))}</span></a><time class="fin-when" datetime="${esc(x.closed||'')}">${esc(x.closed?'Closed '+date(x.closed):'Close time not recorded')}</time></div><p class="fin-meta">${count(x.tasks_done)} of ${count(x.tasks_total)} tasks done${ranFor(x.opened,x.closed)?' / '+ranFor(x.opened,x.closed):''}</p>${x.close_basis?`<details class="fin-basis"><summary>Why it closed</summary><p>${esc(x.close_basis)}</p></details>`:''}</article>`;
+async function finishedView(ticket,automatic=false){
+ const o=await loadOverview();if(ticket!==state.ticket)return;if(automatic&&readerEngaged())return false;
+ const ops=closedOps(o),one=ops.find(x=>x.id===state.params.get('op'));
+ if(one){
+  const planned=(o.roadmap?.operations||[]).some(p=>p.op===one.id);
+  mount(roadmapTabs('finished',ops.length)+heading(opName(one),one.title||one.id,link('roadmap','All finished operations',{view:'finished'},'button'),one.id.toUpperCase()+' / FINISHED')+
+   `<div class="fin-summary">${finishedRow(one).replace('<article class="fin-op">','<article class="fin-op fin-op-open">')}${one.done_when?`<p class="fin-done-when"><span class="eyebrow">DONE WHEN</span>${esc(one.done_when)}</p>`:''}</div>`+
+   (planned?renderRoadmap(o,{op:one.id,selector:false,showAll:true}):'<p class="route-hint">This operation recorded no tasks.</p>'));
+  return;
+ }
+ mount(roadmapTabs('finished',ops.length)+heading('Finished operations','Closed operations, newest first, with the reason each one closed.',link('roadmap','Back to the task roadmap',{},'button'),'PLAN')+
+  (ops.length?`<div class="fin-list">${ops.map(finishedRow).join('')}</div>`:empty('No finished operations yet','An operation shows here once it closes: bin/alpaca op close OP --basis "why".')));
+}
 async function roadmapView(ticket,automatic=false){
  if(state.params.get('view')==='mission')return missionView(ticket,automatic);
+ if(state.params.get('view')==='finished')return finishedView(ticket,automatic);
  const o=await loadOverview();if(ticket!==state.ticket)return;if(automatic&&readerEngaged())return false;
  const pinned=(o.ops||[]).filter(x=>x.pinned&&x.status!=='closed');
- mount(roadmapTabs(false)+heading('Roadmap','Operations by phase, workstreams, and the prerequisites between tasks.',link('work','Open checklist',{},'button'),'PLAN')+
+ mount(roadmapTabs('tasks',closedOps(o).length)+heading('Roadmap','Operations by phase, workstreams, and the prerequisites between tasks.',link('work','Open checklist',{},'button'),'PLAN')+
   (pinned.length?pinned.map(x=>renderPhaseMap(o,x.id)).join(''):'<p class="route-hint">Pin an operation with <code>bin/alpaca op pin OP</code> to show its phases here.</p>')+
   renderRoadmap(o));
 }
@@ -162,7 +197,7 @@ async function researchView(ticket,automatic=false){
 async function missionView(ticket,automatic=false){
  const data=await api('/hub/mission.json',{at:state.params.get('at')});if(ticket!==state.ticket)return;if(automatic&&readerEngaged())return false;
  const group=state.params.get('group');const node=state.missionEntry===location.hash?null:state.params.get('node')||(group?data.nodes.find(n=>n.group===group)?.id:null);state.missionEntry=location.hash;
- mount(roadmapTabs(true)+renderMission(data,{node}));
+ mount(roadmapTabs('mission')+renderMission(data,{node}));
 }
 async function overview(ticket,automatic=false){const [o,h,docs,r]=await Promise.all([loadOverview(),api('/hub/history.json',{limit:5}),api('/hub/documents.json',{limit:4}),loadRuns()]);if(ticket!==state.ticket)return;if(automatic&&readerEngaged())return false;const active=o.tasks.filter(t=>!['done','cancelled','canceled'].includes(t.status));const done=o.tasks.filter(t=>t.status==='done');const lastRun=r.items?.[0];
 mount(heading('A clear view of the work.','Follow progress, understand decisions, and trace every result to its evidence.',link('activity','Explore activity',{},'button'),'OPERATIONS OVERVIEW')+
@@ -320,7 +355,7 @@ function changeFilter(key,value){const p=new URLSearchParams(state.params);for(c
 // fallback link) is rewritten in place to #roadmap?view=mission with its node, group and at kept.
 // The built-in page views (registry renderer 'builtin'), each called as view(ticket,automatic): a quiet
 // refresh passes automatic only to a page whose registry `quiet` is set, the 15 s timer to every `timer` page.
-const VIEWS={cockpit,inflight:inflightView,vcs:vcsView,roadmap:roadmapView,research:researchView,overview,work,runs,live,activity:(t,automatic)=>activity(t,false,automatic),messages,library,sessions};
+const VIEWS={cockpit,inflight:inflightView,vcs:vcsView,records:recordsView,roadmap:roadmapView,research:researchView,overview,work,runs,live,activity:(t,automatic)=>activity(t,false,automatic),messages,library,sessions};
 async function route(force=false,quiet=false){const moved=routeAlias(location.hash);if(moved)history.replaceState(null,'',moved);const focused=document.activeElement?.dataset?.filter;const caret=document.activeElement?.selectionStart;const ticket=++state.ticket;clearInterval(state.timer);state.timer=null;state.log=null;stopLive();stopSlot();const [rawName,query='']=location.hash.slice(1).split('?');const name=rawName==='lib'?'library':rawName|| (location.pathname.startsWith('/analytics')?'sessions':'cockpit');if((!PAGE[name]||PAGE[name].gate==='profile')&&!state.overview){try{await loadOverview();}catch{}}state.route=visiblePages().some(p=>p.id===name)?name:'cockpit';if(state.route!=='cockpit')document.body.classList.remove('presentation');state.params=new URLSearchParams(query);if(state.route!=='roadmap'||state.params.get('view')!=='mission')state.missionEntry=null;$('#sidebar').classList.remove('open');$('#menu').setAttribute('aria-expanded','false');if($('#inspector').open)$('#inspector').close();if($('#command').open)$('#command').close();updateChrome();document.title=`${visiblePages().find(p=>p.id===state.route).label} | Alpaca Operations Studio`;if(!quiet)mount(routeLoader(state.route==='roadmap'&&state.params.get('view')==='mission'?'mission':state.route));try{if(force){state.overview=null;state.runs=null;state.sessions=null;}await loadOverview();if(ticket!==state.ticket)return;updateChrome();const shown=await (VIEWS[state.route]||slotView)(ticket,quiet&&pageOf(state.route).quiet===true);if(ticket!==state.ticket)return;if(!focused&&!quiet)window.scrollTo(0,0);if(focused){const input=$(`[data-filter="${CSS.escape(focused)}"]`);if(input){input.focus();if(input.type==='search'&&caret!==null)input.setSelectionRange(caret,caret);}}if(!(quiet&&shown===false)){liveOrb(false);}if(!(quiet&&shown===false))showClock();$('#connection').classList.remove('error');$('#connection span').textContent='Live';}catch(e){if(ticket!==state.ticket)return;if(quiet)return liveFailed();mount(errorView(e));$('#connection').classList.add('error');$('#connection span').textContent='Offline';}}
 // A quiet refresh that fails keeps the page on screen. The connection label says so, and the caches
 // the page reads are marked stale again, so the next revision or idle moment retries.

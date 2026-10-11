@@ -1,6 +1,6 @@
 /* Keep this sheet after every other /hub/ stylesheet. */
 /* Workspace design system. Tokens only; every /hub/ stylesheet reads these. The values and
-   the rules for using them are in design/web-redesign/design-system.md. Light is the default; dark
+   the look they make is described in docs/studio.md. Light is the default; dark
    comes only from the theme switch. */
 :root,
 :root[data-theme="light"] {

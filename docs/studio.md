@@ -1,10 +1,8 @@
 # Alpaca Studio: look and behavior
 
-Status: written for task t-473 of op-045 against the Studio on `main` at commit 338d91c0e, then
-brought up to the merge of t-487 (Arthur package 2) and t-488 (roadmap on a phone, breadcrumb) at
-1a703dbd4, then the page registry (t-476, section 4.0) and the project slot (t-477, section 4.0): a
-project's own pages, cards and stylesheets through its profile. Section 8 says what a project may
-change.
+Status: describes the Studio as this release ships it, including the page registry and the project
+slot (section 4.0): a project's own pages, cards and stylesheets through its profile. Section 8 says
+what a project may change.
 
 ## 1. Purpose and how to read this
 
@@ -55,7 +53,7 @@ From the top:
    | # | Link | Shown |
    |---|---|---|
    | 1 | Overview | always |
-   | 2 | Roadmap | always (holds the Task roadmap and the Mission map) |
+   | 2 | Roadmap | always (holds the Task roadmap, the Mission map and the Finished operations) |
    | 3 | Cockpit | always |
    | 4 | In-flight | always; a count badge with a small working orb shows tasks in flight |
    | 5 | Research | always |
@@ -66,8 +64,9 @@ From the top:
    | | *a 1 px divider line* | between Activity and Messages |
    | 10 | Messages | always |
    | 11 | Library | always |
-   | 12 | Sessions | always |
-   | 13 | Version control | always |
+   | 12 | Records | always |
+   | 13 | Sessions | always |
+   | 14 | Version control | always |
 
    A project's own pages (section 4.0) take the place their `nav` number gives them in this order.
    The current page has a tinted background, accent-coloured text and a 2 px accent rail at the
@@ -257,7 +256,7 @@ def routes(self):                                            # the page's own da
   also serves the registry's `profile_routes` for it (`/hub/log.json`, `/live/log`), since `serve.py`
   serves no run log of its own. An object adds a page: `id` (lower-case letters, digits, dashes),
   `label`, `module` and `css` (asset names), `icon` (an `icons.js` name, `file` when unknown), `nav`
-  (its place among the built-in slots 1 to 13; after them when left out) and `needs` (the live flags
+  (its place among the built-in slots 1 to 14; after them when left out) and `needs` (the live flags
   of section 7.2 that refresh it; none by default). An id a built-in page or another entry holds,
   `lib`, `mission`, or a module that is not an asset, is left out and named in the profile's
   `web` hook error, which the cockpit shows (like a route that collides, `serve.py` `_profile_routes`).
@@ -267,7 +266,7 @@ def routes(self):                                            # the page's own da
   may export `bind(ctx)`, called once the markup is in `#main`, and `stop()`, called when the reader
   leaves. A module that fails to load or throws shows the error view with Try again. The page reads
   its own data from its profile routes through `ctx.api`; it never adds data to the overview, which
-  every page reads (pre-mortem 5 of `design/studio-template/design.md`).
+  every page reads, so every page stays as fast as the overview allows.
 - *ctx, version 1* (`ctx.v === 1`), the whole contract, so a page never imports a hub module:
   `page` (`{id, label}`), `params` (the address parameters after `?`), `overview` (the overview the
   hub already holds, read only), `api(path, params)` (a signed-in JSON read), `esc`, `icon(name)`,
@@ -337,7 +336,8 @@ documents).
 
 ### 4.3 Roadmap, task roadmap view (`#roadmap`)
 
-*Shows.* Two tabs at the top, **Task roadmap** and **Mission map**. The task view has a heading
+*Shows.* Three tabs at the top, **Task roadmap**, **Mission map** and **Finished operations** (with the
+number of closed ops). The task view has a heading
 ("Roadmap", with a button "Open checklist"), then one **operation map** for every pinned open op: a
 collapsible panel headed "Operation map Op12 - short title" with a strip of **phases** (each with a
 done bar, state "Complete", "Current phase", "Open" or "Not opened"), who is driving the op (a chip
@@ -364,6 +364,23 @@ recorded yet."
 *Refresh.* Every 15 s and on pushed changes the page is re-rendered with the scroll position put
 back. Fold state, opened card details, focus, chat, filter, scroll and panel collapse are kept in
 the browser's session storage under `alpaca.roadmap.*`, so a refresh or a reload keeps them.
+
+### 4.3a Roadmap, finished operations (`#roadmap?view=finished`)
+
+*Shows.* Every closed operation as a card, newest close first: the op id and short title, "Closed"
+with the date and time, "N of M tasks done", how long it ran (opened to closed), and a **Why it
+closed** fold holding the basis recorded by `alpaca op close OP --basis`. A card's title opens that op
+(`#roadmap?view=finished&op=op-12`): its full intent, the card, its **Done when** line, and its own
+task roadmap with the done work shown, so what an op delivered stays one click from the roadmap.
+
+*Reads.* `overview.json` only: each op carries `opened`, `closed` and `close_basis` (the basis of its
+newest `op-close` event).
+
+*Can do.* Open a finished op; "All finished operations" goes back; "Back to the task roadmap".
+
+*Empty.* "No finished operations yet" with the close command.
+
+*Refresh.* As the task view.
 
 ### 4.4 Roadmap, mission view (`#roadmap?view=mission`)
 
@@ -476,8 +493,8 @@ Warnings, Notes), the **contract** cards (Input, Expected output, Done bar, Fail
 and `logreview.json`.
 
 *Empty.* "No runs match. Run receipts will appear here as stages are executed." The page does not
-exist in the sidebar unless the profile turns it on and serves `log.json`; this repository names no
-profile.
+exist in the sidebar unless the project's profile turns it on and serves `log.json`; a project with
+no profile does not show it.
 
 *Refresh.* On pushed changes, re-rendered; a followed log reads new bytes by itself while open.
 
@@ -548,6 +565,33 @@ than the server limit shows a notice that it is partly displayed.
 *Empty.* "No documents match. Change the collection or search to find a report."
 
 *Refresh.* The `library` flag refreshes it on pushed changes (re-rendered, scroll kept).
+
+### 4.12a Records (`#records`)
+
+*Shows.* The project's official record and its wiki, read-only, in four tabs with their counts:
+**Operations** (every op: id, short title and intent, Open or Closed, opened and closed times, done
+tasks of all, and a **Briefing** link; an open op links to its checklist, a closed one to its page on
+Roadmap's Finished operations), **Decisions** (each recorded decision, newest first: its kind, time and
+id, the choice and its consequence, and a **Context and options** fold with the chosen option marked),
+**Sealed proofs** (every done task with a sealed proof, newest first: the task, which opens its record,
+its title and op, when it was done, and **Read report**, which opens the report in the Library reader)
+and **Wiki** (what the project wiki holds: serving state, documents, active blocks, nodes, links, where
+its knowledge time comes from and quarantined captures; and a box that takes an op or task id and
+shows the wiki's cited briefing of it, one source per line, with the gaps it found).
+
+*Reads.* `/hub/records.json?section=ops|decisions|proofs&q=` (`hub.records`, the record through
+`connect_readonly`); on the Wiki tab `/hub/wiki-status.json` (`hub.wiki_status`: a summary of
+`alpaca.wiki.service.status`, read once a minute because it reads the whole store) and
+`/hub/wiki-briefing.json?op=|task=` (`hub.wiki_briefing`: `service.briefing`, servable sources only,
+never stored). The two wiki routes need the web login the reports need (403 without one).
+
+*Can do.* Switch tabs; search a tab (the text of every field); open an op, a task record or a proof
+report; ask the wiki about an op or a task. Nothing on the page writes.
+
+*Empty.* "No operations recorded", "No decisions recorded", "No sealed proofs yet"; the Wiki tab says
+there is no store yet ("bin/alpaca wiki recover builds it").
+
+*Refresh.* On opening and on a search; no timer (the wiki status is costly).
 
 ### 4.13 Sessions (`#sessions`)
 
@@ -759,7 +803,7 @@ search, a date, the Roadmap or Mission tab) is no switch. A click ends a pace. T
 The artwork is the owner's own and ships in every project with no license line. The first package's
 11 strips are copied byte for byte. Its gaze atlas keeps every pixel but has its image data
 recompressed (zlib level 9), because the package's own compressed bytes matched a rule of the
-release leak scan by chance (brief 2f). The second package's 21 new actions are shipped as
+release leak scan by chance. The second package's 21 new actions are shipped as
 one 192 x 208 strip per action built from the package's own normalized frames, pixels unchanged.
 The package's `assets/avatar-manifest.js` ships byte for byte; it still names the full-size sheets,
 so the Studio reads it through `stripsManifest` (`alpaca/web/arthur.js`), which points each new
@@ -774,7 +818,7 @@ With reduced motion Arthur shows the first frame of the current pose: the pose s
 the state, but nothing animates and he does not follow the pointer. Pacing plays the move poses
 in place with no sliding.
 
-### 6.9 Package 2 actions (t-487)
+### 6.9 Package 2 actions
 
 The owner's second package adds 21 actions. 20 are wired; their loops are in section 6.4, their
 record reactions in section 6.5, and the rest are page reactions:
@@ -918,7 +962,7 @@ stylesheet, cards and bookmarks keep working after an upgrade.
   `pulse-orb`, `arthur-slot`, `arthur`, `arthur-caption`, `connection`, `inspector`, `command`,
   `toast`), and the order of the topbar groups.
 - **Route names.** The page ids `overview`, `roadmap`, `cockpit`, `inflight`, `research`, `work`,
-  `runs`, `live`, `activity`, `messages`, `library`, `sessions`, `vcs`; their address parameters
+  `runs`, `live`, `activity`, `messages`, `library`, `records`, `sessions`, `vcs`; their address parameters
   named in section 4; the retired addresses (`#mission`, `/cockpit/legacy/`, `/analytics/legacy/`,
   `/board`) that still redirect.
 - **Server paths and shapes.** The `/hub/*.json` endpoints named in section 4, `/events`,

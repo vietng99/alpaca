@@ -45,7 +45,7 @@ def test_the_workspace_nav_order_and_no_mission_page():
     # the nav comes from the page registry (pages.json), in its nav slots
     pages = [p["id"] for p in sorted(json.loads(_read("pages.json"))["pages"], key=lambda p: p["nav"])]
     assert pages == ['overview', 'roadmap', 'cockpit', 'inflight', 'research', 'work', 'runs', 'live',
-                     'activity', 'messages', 'library', 'sessions', 'vcs']
+                     'activity', 'messages', 'library', 'records', 'sessions', 'vcs']
     hub = _read("hub.js")
     assert "mission:missionView" not in hub and "'vcs','mission'" not in hub and "'roadmap','mission'" not in hub
     assert "if(state.params.get('view')==='mission')return missionView(ticket,automatic);" in hub

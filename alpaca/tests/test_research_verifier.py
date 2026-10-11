@@ -3049,9 +3049,11 @@ def test_a_head_clone_that_no_longer_holds_the_recorded_tree_stops_with_verify_t
         verifier._head_clone(world.root, "t-001", od["verification"],
                              {"head": od["tree"]["head"]})
     assert exc.value.code == "VERIFY-TREE"
-    # the recorded tree is the one a fresh clone of the sealed head holds
-    assert verifier._head_clone(world.root, "t-001", od["verification"], od["tree"]).base_commit \
-        == od["tree"]["clone_base"]
+    # the recorded tree is the one a fresh clone of the sealed head holds. Its tree, not its commit:
+    # the rebuilt base commit is dated now, so a rebuild a second later is another commit id with the
+    # same tree (the 3.12 runner, op-008 t-571)
+    info = verifier._head_clone(world.root, "t-001", od["verification"], od["tree"])
+    assert verifier._clone_tree(info.path, info.base_commit) == od["tree"]["clone_tree"]
 
 
 def test_the_path_scan_follows_cd_and_names_what_it_cannot_place(monkeypatch):

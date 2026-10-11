@@ -225,10 +225,10 @@ def test_project_yaml_names_the_profile_and_its_hooks_reach_the_call_sites(fake)
 
 
 def test_the_file_browser_reads_generic_text_and_the_profiles_own_extensions(fake):
-    """The generic list carries no domain extension; a profile's `paths()["text_exts"]` adds its own,
-    with or without the dot and in any case."""
+    """The generic list keeps every extension it read before the template (the Library is carried
+    unchanged); a profile's `paths()["text_exts"]` adds its own, with or without the dot and in any case."""
     from alpaca import serve
-    assert not {".sv", ".v", ".vh", ".tcl"} & serve.FILES_TEXT_EXTS
+    assert {".sv", ".v", ".vh", ".tcl"} <= serve.FILES_TEXT_EXTS
     (fake / "notes.md").write_text("generic\n", encoding="utf-8")
     (fake / "shader.fx").write_text("domain\n", encoding="utf-8")
     (fake / "query.ql").write_text("domain\n", encoding="utf-8")

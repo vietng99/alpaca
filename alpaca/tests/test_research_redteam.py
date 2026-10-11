@@ -816,6 +816,7 @@ def test_plant_5_patching_the_test_instead_of_the_code_is_caught(project, monkey
                  outcome=verdict["outcome"], broken_class=verdict["broken_class"])
 
 
+@needs_jail
 def test_plant_5_a_pack_that_leaves_its_tests_unprotected_is_refused_before_the_run(project,
                                                                                       monkeypatch):
     """The contract loader's line behind plant 5: a pack whose tracked files are not all hit by a

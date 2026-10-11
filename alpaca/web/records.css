@@ -1,0 +1,37 @@
+/* Records: official records and the wiki, read-only. Tokens only, from theme.css. */
+.records-tabs .tab-count{display:inline-block;min-width:18px;padding:0 6px;margin-left:4px;border-radius:999px;background:var(--surface-muted);color:var(--muted);font-size:var(--fs-xs);line-height:var(--lh-xs);text-align:center}
+.rec-table .row-sub{display:block;max-width:70ch;overflow-wrap:anywhere}
+.rec-table .rec-title{display:block;color:var(--text)}
+.rec-table .rec-date{white-space:nowrap;color:var(--muted)}
+.rec-table td.num,.rec-table th.num{text-align:right;white-space:nowrap}
+.rec-decisions{display:grid;gap:var(--sp-3)}
+.rec-decision{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md);padding:var(--sp-4) var(--sp-5);min-width:0}
+.rec-decision-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--sp-2) var(--sp-3);font-size:var(--fs-xs);line-height:var(--lh-xs);color:var(--muted)}
+.rec-kind{padding:1px 8px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-weight:500}
+.rec-ref{margin-left:auto}
+.rec-choice{margin-top:var(--sp-2);font-size:var(--fs-md);line-height:var(--lh-md);color:var(--text);font-weight:500;overflow-wrap:anywhere}
+.rec-consequence{margin-top:var(--sp-1);font-size:var(--fs-sm);line-height:var(--lh-sm);color:var(--muted);overflow-wrap:anywhere}
+.rec-more{margin-top:var(--sp-3)}
+.rec-more summary{cursor:pointer;font-size:var(--fs-xs);line-height:var(--lh-xs);color:var(--accent)}
+.rec-more p{margin-top:var(--sp-2);font-size:var(--fs-sm);line-height:var(--lh-sm);color:var(--text);overflow-wrap:anywhere}
+.rec-options{display:flex;flex-wrap:wrap;gap:var(--sp-2);margin-top:var(--sp-2);padding:0;list-style:none}
+.rec-options li{padding:2px 8px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:var(--fs-xs);line-height:var(--lh-xs);color:var(--muted);overflow-wrap:anywhere}
+.rec-options li.chosen{border-color:var(--accent);color:var(--text)}
+.rec-pointer{font-size:var(--fs-xs)!important;color:var(--muted)!important}
+.rec-facts{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,180px),1fr));gap:var(--sp-3) var(--sp-5)}
+.rec-fact{display:grid;gap:2px;min-width:0}
+.rec-fact span{font-size:var(--fs-xs);line-height:var(--lh-xs);color:var(--muted)}
+.rec-fact strong{font-size:var(--fs-md);line-height:var(--lh-md);color:var(--text);font-weight:500;overflow-wrap:anywhere}
+.rec-panel+.rec-panel{margin-top:var(--sp-5)}
+.rec-brief{display:grid;gap:var(--sp-2);margin:0;padding-left:var(--sp-5);font-size:var(--fs-sm);line-height:var(--lh-sm);color:var(--text)}
+.rec-brief li{overflow-wrap:anywhere}
+.rec-gaps{margin-top:var(--sp-4);font-size:var(--fs-sm);line-height:var(--lh-sm);color:var(--muted)}
+/* A phone shows each table row as a short stacked card instead of a sideways-scrolling table. */
+@media (max-width:640px){
+ .rec-table{min-width:0}
+ .rec-table thead{display:none}
+ .rec-table tr{display:grid;grid-template-columns:auto 1fr;gap:var(--sp-1) var(--sp-3);padding:var(--sp-3) var(--sp-4);border-bottom:1px solid var(--line)}
+ .rec-table td{display:block;padding:0;border:0;min-width:0}
+ .rec-table td:nth-child(n+3){grid-column:2}
+ .rec-table td.num{text-align:left}
+}

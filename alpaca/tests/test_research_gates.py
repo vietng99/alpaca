@@ -3307,11 +3307,18 @@ def test_the_tree_digest_reads_a_bounded_number_of_bytes(tmp_path, monkeypatch):
     assert gates._dir_digest(str(tree), bounded=False) == gates._dir_digest(str(tree),
                                                                             bounded=False)
     assert read.count("c.txt") == 2
-    # a sparse file of 1 PiB costs one stat, not a read
+    # a sparse file of 1 PiB costs one stat, not a read (ext4, the hosted runner's /tmp, takes at
+    # most 16 TiB: the largest size the file system takes, each far past the 1 GiB bound; t-571)
     os.truncate(str(tree / "src" / "c.txt"), 0)
     big = tree / "big"
     big.touch()
-    os.truncate(str(big), 1 << 50)
+    for shift in (50, 43, 40):
+        try:
+            os.truncate(str(big), 1 << shift)
+            break
+        except OSError as exc:
+            if exc.errno != errno.EFBIG or shift == 40:
+                raise
     monkeypatch.setattr(gates, "_MAX_DIGEST_BYTES", 1 << 30)
     finished, took, _ = _run_in_thread(lambda: gates._dir_digest(str(tree)), 30)
     os.truncate(str(big), 0)

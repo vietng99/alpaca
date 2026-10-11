@@ -1008,7 +1008,7 @@ FILES_ROOT_DENY = paths.BROWSER_ROOT_DENY
 #: `paths()["text_exts"]` (alpaca/profile.py), merged in by `files_text_exts`.
 FILES_TEXT_EXTS = {".md", ".markdown", ".txt", ".html", ".htm", ".json", ".yaml", ".yml",
                    ".toml", ".cfg", ".ini", ".csv", ".log", ".py", ".sh", ".rst", ".sql", ".c", ".h",
-                   ".cpp", ".hpp", ".mk", ".cmake", ""}
+                   ".cpp", ".hpp", ".mk", ".cmake", ".sv", ".v", ".vh", ".tcl", ""}
 FILES_MAX_BYTES = 512 * 1024
 #: The first bytes of every SQLite database file; the text reader refuses a file that starts so.
 SQLITE_MAGIC = paths.SQLITE_MAGIC
@@ -1459,6 +1459,20 @@ def make_handler(live, root, remote=False):
                     if not files_auth(root):
                         return self._json({"error": "Report reading requires a configured web login"}, 403)
                     value = hub.document(root, one("path"))
+                elif path == "/hub/records.json":
+                    value = hub.records(root, one("section", "ops"), query=one("q"), limit=one("limit", "200"),
+                                        offset=one("offset", "0") or 0)
+                elif path in ("/hub/wiki-status.json", "/hub/wiki-briefing.json"):
+                    # wiki text is project knowledge: read behind the same login as the reports
+                    if not files_auth(root):
+                        return self._json({"error": "Wiki reading requires a configured web login"}, 403)
+                    if path == "/hub/wiki-status.json":
+                        value = hub.wiki_status(root)
+                    else:
+                        try:
+                            value = hub.wiki_briefing(root, op=one("op"), task=one("task"))
+                        except ValueError as exc:
+                            return self._json({"error": str(exc)}, 400)
                 elif path == "/hub/session.json":
                     value = detail(root, one("sid"), before=one("before") or None,
                                    limit=int(one("limit", "80")), child=one("child") or None,

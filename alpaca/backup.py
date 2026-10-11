@@ -176,7 +176,13 @@ def create(root, *, destination=None, approved_sources=()):
         try:
             _record_verification(root, None, result)
         except OSError as record_error:
-            exc.add_note('Backup failure receipt could not be persisted: ' + str(record_error))
+            note = 'Backup failure receipt could not be persisted: ' + str(record_error)
+            if hasattr(exc, 'add_note'):
+                exc.add_note(note)
+            else:
+                # Python 3.10 has no add_note (3.11+); __notes__ is what add_note fills and what the
+                # exceptiongroup backport prints there (op-008 t-571)
+                exc.__notes__ = [*getattr(exc, '__notes__', ()), note]
         raise
 
 

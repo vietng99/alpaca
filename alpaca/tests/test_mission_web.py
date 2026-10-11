@@ -95,6 +95,7 @@ try {
   const search=root.querySelector('[data-mm-search]');search.value='usage';search.dispatchEvent(new Event('input',{bubbles:true}));await tick();
   assert('search_filters',root.querySelectorAll('[data-mm-node]:not([hidden])').length===1);
   assert('history_control',root.querySelector('[data-mm-history]').options.length>1);
+  await document.fonts.ready;assert('plex_font',[...document.fonts].some(f=>f.family.replace(/"/g,'')==='IBM Plex Sans'&&f.status==='loaded'));
   assert('no_overflow',document.documentElement.scrollWidth<=window.innerWidth+1);
   const legacy={...DATA,historical:true,at:1,development:{tasks:DATA.development.tasks,operations:[],unavailable:true},nodes:DATA.nodes.map(n=>({...n,tasks:n.tasks.map(t=>({...t,status:'done'}))}))};
   root.innerHTML=renderMission(legacy);bindMission(root);await tick();
@@ -121,7 +122,12 @@ def test_map_interactions_and_responsiveness(tmp_path, width):
                 self.send_response(200); self.end_headers(); self.wfile.write(('<!doctype html><html><head><meta charset="utf-8"></head><body><iframe src="/fixture" style="border:0;width:%dpx;height:1100px"></iframe><pre id="results">pending</pre></body></html>' % width).encode())
             elif self.path == '/fixture':
                 self.send_response(200); self.send_header('Content-Type', 'text/html'); self.end_headers(); self.wfile.write(page.encode())
-            else: super().do_GET()
+            else:
+                # the stylesheets load the vendored Plex fonts from /hub/assets/vendor/, as the hub
+                # serves them; without them the page is laid out in the host's fallback font, which
+                # overflows 320 px in DejaVu Sans (the hosted runner, op-008 t-571)
+                if self.path.startswith('/hub/assets/vendor/'): self.path = self.path[len('/hub/assets'):]
+                super().do_GET()
         def log_message(self, *args): pass
     server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(Handler, directory=str(WEB)))
     threading.Thread(target=server.serve_forever, daemon=True).start()

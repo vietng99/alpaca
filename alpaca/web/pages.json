@@ -17,7 +17,7 @@
     "endpoints": ["/hub/overview.json", "/health.json", "/events"]
   },
   "pages": [
-    {"id": "sessions", "label": "Sessions", "icon": "sessions", "nav": 12, "renderer": "builtin",
+    {"id": "sessions", "label": "Sessions", "icon": "sessions", "nav": 13, "renderer": "builtin",
      "js": ["analytics.js", "sessionlist.js", "burn.js"], "css": ["analytics.css", "burn.css"],
      "endpoints": ["/data.json", "/hub/analytics-index.json", "/hub/session.json", "/hub/analytics.json",
                    "/hub/analytics-children.json", "/hub/burn.json"],
@@ -29,7 +29,7 @@
      "needs": ["overview"], "quiet": true, "timer": true,
      "loader": [["searching", "Searching the project record"], ["listening", "Reading live session activity"],
                 ["working", "Measuring progress"], ["breathing", "Still reading; a large record takes a few seconds"]]},
-    {"id": "vcs", "label": "Version control", "icon": "vcs", "nav": 13, "renderer": "builtin",
+    {"id": "vcs", "label": "Version control", "icon": "vcs", "nav": 14, "renderer": "builtin",
      "js": ["vcs.js"], "css": ["vcs.css"], "endpoints": ["/hub/vcs.json"],
      "needs": ["overview"], "quiet": true, "timer": true,
      "loader": [["searching", "Searching the project record"], ["weaving", "Reading branches and commits"],
@@ -80,6 +80,12 @@
                 ["breathing", "Still reading; a large record takes a few seconds"]]},
     {"id": "library", "label": "Library", "icon": "library", "nav": 11, "renderer": "builtin",
      "js": [], "css": [], "endpoints": ["/hub/documents.json", "/hub/document.json", "/files/read"],
-     "needs": ["library"], "quiet": false, "timer": false}
+     "needs": ["library"], "quiet": false, "timer": false},
+    {"id": "records", "label": "Records", "icon": "records", "nav": 12, "renderer": "builtin",
+     "js": ["records.js"], "css": ["records.css"],
+     "endpoints": ["/hub/records.json", "/hub/wiki-status.json", "/hub/wiki-briefing.json"],
+     "needs": ["overview"], "quiet": false, "timer": false,
+     "loader": [["searching", "Reading the official records"], ["weaving", "Gathering operations, decisions and sealed proofs"],
+                ["breathing", "Still reading; the wiki takes a few seconds"]]}
   ]
 }

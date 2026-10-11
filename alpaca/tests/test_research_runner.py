@@ -711,6 +711,7 @@ def test_an_error_in_the_loop_records_finalize_and_forensics(project, monkeypatc
     conn.close()
 
 
+@needs_jail
 def test_the_run_start_records_the_runtime_mode_and_no_binary(project, monkeypatch):
     # the run-start event no longer names a runtime binary: the session spawns the agents itself,
     # so the version of the runtime is read from each job's transcript (research-job-result
@@ -1400,6 +1401,7 @@ def test_parallel_slots_never_reserve_past_the_dollar_cap(project, monkeypatch):
     assert len(shares) >= 2 and max(shares) < 0.035 / 2
 
 
+@needs_jail
 def test_the_burn_in_state_decides_whether_a_real_run_starts(project, monkeypatch):
     from alpaca.research import controls
     root = kit.make_project(project, rounds=1)
@@ -1582,6 +1584,7 @@ def _repair_run(project, monkeypatch, n=2):
     return root, got, r
 
 
+@needs_jail
 def test_a_resume_takes_the_repair_task_in_progress_again(project, monkeypatch):
     # section 10.3 step 5: the repair task in progress (the first not done or blocked, which its
     # plan claimed) is taken again after the sweep; a later repair task nobody claimed is not
@@ -1600,6 +1603,7 @@ def test_a_resume_takes_the_repair_task_in_progress_again(project, monkeypatch):
     r.conn.close()
 
 
+@needs_jail
 def test_a_stop_blocks_the_open_repair_tasks_of_a_repair_run(project, monkeypatch):
     # section 4.8: on a stop every planned task never finished moves to blocked; a repair run's
     # repair tasks are planned tasks, the report task is close_report's
@@ -1626,6 +1630,7 @@ def test_a_stop_blocks_the_open_repair_tasks_of_a_repair_run(project, monkeypatc
     r.conn.close()
 
 
+@needs_jail
 def test_a_repair_task_names_itself_as_its_line(project, monkeypatch):
     from alpaca.research import contract as contract_mod
     from alpaca.research.types import FailToPassSpec, RepairItem
