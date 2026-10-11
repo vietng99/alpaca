@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+import sys
 
 from alpaca import db, paths, pool, transcripts
 
@@ -26,6 +27,36 @@ MAX_CHILDREN = 40
 MAX_DIRECTORY_ENTRIES = 2000
 MAX_PAGE = 200
 _IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,159}\Z")
+# The plain-phrasing patterns below match runs of spaces and words possessively (`X*+`, `X++`), which
+# keeps the screen linear. Python 3.10, the oldest Python Alpaca runs on, has no possessive
+# quantifier (it came in 3.11), so there each one is written as the atomic group it means: a
+# lookahead that takes the whole run and a reference that consumes it, `(?=(?P<_atomN>X*))(?P=_atomN)`.
+# The lookahead never gives a character back, so the matches and the linear time are those of the
+# possessive pattern; only the added `_atomN` groups differ. On 3.11+ a pattern compiles as written.
+ATOM_GROUP_PREFIX = "_atom"
+_POSSESSIVE = re.compile(r"(\[(?:\\.|[^\]\\])+\]|\\.)([*+])\+")
+
+
+def atomic_pattern(pattern: str) -> str:
+    """The pattern with each possessive class or escape run written as a lookahead atomic group."""
+    count = iter(range(len(pattern)))
+
+    def atomic(match: re.Match[str]) -> str:
+        name = "%s%d" % (ATOM_GROUP_PREFIX, next(count))
+        return "(?=(?P<%s>%s%s))(?P=%s)" % (name, match.group(1), match.group(2), name)
+    return _POSSESSIVE.sub(atomic, pattern)
+
+
+#: Each pattern compiled by `_possessive`, mapped to the pattern as written (with its possessive runs).
+POSSESSIVE_SOURCES: dict[re.Pattern[str], str] = {}
+
+
+def _possessive(pattern: str, flags: int = 0) -> re.Pattern[str]:
+    compiled = re.compile(pattern if sys.version_info >= (3, 11) else atomic_pattern(pattern), flags)
+    POSSESSIVE_SOURCES[compiled] = pattern
+    return compiled
+
+
 _SECRET_KEY = re.compile(r"(?:password|passwd|passphrase|api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|cookie|client[_-]?secret|private[_-]?key|secret[_-]?(?:access[_-]?)?key)\Z", re.I)
 _SECRET_TEXT = re.compile(r"(?i)(\b(?:authorization\s*:\s*(?:bearer|basic)|bearer)\s+)[^\s\"']+|"
                           r"(\b(?=[A-Z0-9_]*\s*[=:])(?:[A-Z0-9_]*(?:API_KEY|ACCESS_TOKEN|SECRET|PASSWORD|PASSPHRASE|SECRET_ACCESS_KEY|SECRET_KEY))\s*[=:]\s*[\"']?)[^\s\"']+")
@@ -88,7 +119,7 @@ _FOR = r"(?:[ \t]+(?:for|of|to|on)(?:[ \t]+(?!" + _VERB + r")[^\s.!?;:=\[\]\"'`\
 _NEXT_PHRASE = (r"\b(?:pass[ \t]?phrases?|pin(?:[ \t]+(?:code|number))?|secret|pass(?:word|wd|code)|token"
                 r"|credentials?|(?:api|access|secret|private)[ \t_-]?key|(?:access|security)[ \t]+code)"
                 r"[\"']?" + _FOR + r"[ \t]*+(?:\b" + _VERB + r"|[=:])")
-_PLAIN_SECRET = re.compile(
+_PLAIN_SECRET = _possessive(
     r"(?i)(?P<head>\b(?:" + _PLAIN_NAMES + r")[\"']?" + _FOR +
     r"[ \t]*+(?:(?P<verb>\b" + _VERB + r"(?:[ \t]+(?:now|still|set[ \t]+to|changed[ \t]+to|reset[ \t]+to))?"
     r"[ \t]*+:?)|[=:])[ \t]*+(?:\n[ \t]*+)?)"
@@ -202,31 +233,31 @@ _V_NOT_VERB = r"(?!(?:is|was|are|were|has|have|had|will|would|shall|should|must)
 _V_CLAUSE = (r"(?P<clause>[ \t]*+,(?:[ \t]++" + _V_WORD + r"){1,8}[ \t]*+,"
              r"|[ \t]++(?:for|of|to|on|at|in|by|from|with)\b(?:[ \t]++" + _V_NOT_VERB + _V_WORD
              + r"){1,16})?")
-_V_PROSE = re.compile(
+_V_PROSE = _possessive(
     r"(?i)\b(?P<name>" + _V_NAME + r")" + _V_BOLD + r"?" + _V_CLAUSE
     + r"[ \t]*+(?:\b(?P<verb>" + _V_VERB + r")|(?P<owns>['\u2019]s\b))"
     r"[ \t]*+" + _V_BOLD + r"?[ \t]*+(?:\n[ \t]*+)?"
     r"(?:(?P<quote>[\"'`])(?P<quoted>[^\"'`\n]{1,200})(?P=quote)"
     r"|(?!" + _NEXT_PHRASE + r")(?P<bare>" + _V_ITEM + r"))")
-_V_LIST_NEXT = re.compile(r"(?i)(?:[ \t]*+,[ \t]*+(?:(?:and|or)[ \t]++)?|[ \t]++(?:and|or|&)[ \t]++)"
+_V_LIST_NEXT = _possessive(r"(?i)(?:[ \t]*+,[ \t]*+(?:(?:and|or)[ \t]++)?|[ \t]++(?:and|or|&)[ \t]++)"
                           r"(?P<item>" + _V_ITEM + r")")
-_V_SEP = re.compile(
+_V_SEP = _possessive(
     r"(?i)\b(?P<name>" + _V_NAME + r")(?:" + _V_BOLD + r"[ \t]*+[:=]|[:=][ \t]*+" + _V_BOLD
     + r"|\t++|[ \t]++(?:--?|\u2013|\u2014)[ \t]++)[ \t]*+(?P<bare>" + _V_ITEM + r")")
-_V_SHORT = re.compile(r"(?i)\b(?P<name>pwd|pw)[\"']?[ \t]*+[:=][ \t]*+(?P<bare>" + _V_ITEM + r")")
-_V_YAML = re.compile(r"(?i)\b(?P<name>" + _V_NAME + r")[\"']?[ \t]*+:[ \t]*+[>|][+-]?[0-9]?"
+_V_SHORT = _possessive(r"(?i)\b(?P<name>pwd|pw)[\"']?[ \t]*+[:=][ \t]*+(?P<bare>" + _V_ITEM + r")")
+_V_YAML = _possessive(r"(?i)\b(?P<name>" + _V_NAME + r")[\"']?[ \t]*+:[ \t]*+[>|][+-]?[0-9]?"
                      r"(?:[ \t]*+\n(?:[ \t]*+\n){0,3}[ \t]++|[ \t]++)(?P<bare>" + _V_ITEM + r")")
-_V_DIGITS = re.compile(
+_V_DIGITS = _possessive(
     r"(?i)\b(?P<name>" + _V_NAME + r")[\"']?" + _FOR + r"[ \t]*+(?:\b(?:" + _V_VERB + r")|[=:])"
     r"[ \t]*+(?P<digits>\d{1,4}(?:[ \t.-]\d{1,4}){1,7})(?![\w-])")
-_V_ENV = re.compile(r"\b[A-Z][A-Z0-9_]*_(?:PASS|PASSWD|PWD|PW|PIN)[ \t]*+[=:][ \t]*+[\"']?"
+_V_ENV = _possessive(r"\b[A-Z][A-Z0-9_]*_(?:PASS|PASSWD|PWD|PW|PIN)[ \t]*+[=:][ \t]*+[\"']?"
                     r"(?P<bare>[^\s\"'`<>()\[\]{}\\]{4,})")
 #: A noun after "as (the) password" makes the name a modifier ("use sha256 as password hash"), not
 #: the thing the value is used as.
 _V_MODIFIED = (r"(?:hash(?:es|ing|er)?|manager|field|prompt|polic(?:y|ies)|length|input|storage|salt"
                r"|stores?|files?|resets?|rules?|algorithms?|schemes?|validat\w*|strength|generat\w*"
                r"|checks?|encod\w*|encrypt\w*|formats?|hints?|protect\w*)\b")
-_V_REVERSE = re.compile(
+_V_REVERSE = _possessive(
     r"(?im)\b(?:use|using|set|try|enter|type)[ \t]++(?P<bare>" + _V_ITEM + r")[ \t]++as[ \t]++"
     r"(?:(?:the|a|an|my|your|our|its|their|new|admin|root|default|initial)[ \t]++){0,3}"
     r"(?:" + _V_NAME + r")\b(?![ \t]*+(?:-|" + _V_MODIFIED + r"))")

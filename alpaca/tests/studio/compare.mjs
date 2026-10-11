@@ -29,7 +29,7 @@ const inside = (masks, x, y) => masks.some(([mx, my, mw, mh]) => x >= mx && x < 
 
 const rows = [];
 for (const [name, meta] of Object.entries(base.images)) {
-  const file = name + '.png', row = {name, status: 'same', differing: 0, compared: 0, masked: 0};
+  const file = name + '.png', row = {name, status: 'same', differing: 0, compared: 0, masked: 0, max_delta: 0};
   rows.push(row);
   if (!cap.images[name] || !existsSync(join(capDir, file))) { row.status = 'missing'; continue; }
   const a = decode(readFileSync(join(baseDir, file))), b = decode(readFileSync(join(capDir, file)));
@@ -44,6 +44,7 @@ for (const [name, meta] of Object.entries(base.images)) {
     row.compared++;
     let d = 0;
     for (let c = 0; c < 4; c++) d = Math.max(d, Math.abs(a.data[o + c] - b.data[o + c]));
+    row.max_delta = Math.max(row.max_delta, d);
     if (d > tolerance) {
       row.differing++; out[o] = 230; out[o + 1] = 20; out[o + 2] = 30; out[o + 3] = 255;
       minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
@@ -63,7 +64,7 @@ const summary = {baseline: baseDir, capture: capDir, threshold: {max_differing_p
   extra_in_capture: extra, baseline_capture: base.capture || null, this_capture: cap.capture || null, rows};
 writeFileSync(join(outDir, 'summary.json'), JSON.stringify(summary, null, 1) + '\n');
 const text = [`Studio compare: ${rows.length} images, ${failed.length} over the threshold (max ${maxPixels} differing pixels per image, channel tolerance ${tolerance}), ${summary.differing_pixels_total} differing pixels in all.`,
-  ...rows.map(r => `${r.status.padEnd(16)} ${r.name.padEnd(34)} differing ${String(r.differing).padStart(7)} of ${r.compared}${r.masked ? ` (masked ${r.masked})` : ''}${r.box ? ' box ' + r.box.join(',') : ''}${r.detail ? ' ' + r.detail : ''}`),
+  ...rows.map(r => `${r.status.padEnd(16)} ${r.name.padEnd(34)} differing ${String(r.differing).padStart(7)} of ${r.compared}${r.masked ? ` (masked ${r.masked})` : ''}${r.box ? ' box ' + r.box.join(',') + ' max delta ' + r.max_delta : ''}${r.detail ? ' ' + r.detail : ''}`),
   ...(extra.length ? ['extra in capture (not in baseline): ' + extra.join(', ')] : [])].join('\n') + '\n';
 writeFileSync(join(outDir, 'summary.txt'), text);
 process.stdout.write(text);

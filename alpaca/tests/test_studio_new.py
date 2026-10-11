@@ -47,9 +47,11 @@ EMPTY = {
     "activity": "Timeline",
     "messages": "Agent reports and handoffs appear here when they are recorded",
     "library": "README.md",
+    "records": "The official record of this project",
     "sessions": "No model response measurements are available",
     "vcs": "No commits in this window",
     "roadmap-mission": "Starter map",
+    "roadmap-finished": "Closed operations, newest first",     # a new project has closed op-0 (adopt)
 }
 
 
@@ -150,11 +152,12 @@ def _visit(base, views, work):
 
 def _generic_views(root):
     """Every page of the project's own registry that needs no profile, in nav order, plus the
-    roadmap's mission view."""
+    roadmap's mission and finished-operations views."""
     with open(os.path.join(root, "alpaca", "web", "pages.json"), encoding="utf-8") as fh:
         pages = json.load(fh)["pages"]
     ids = [p["id"] for p in sorted(pages, key=lambda p: p["nav"]) if p.get("gate") != "profile"]
-    return ids, [[pid, "/hub/#" + pid] for pid in ids] + [["roadmap-mission", "/hub/#roadmap?view=mission"]]
+    return ids, [[pid, "/hub/#" + pid] for pid in ids] + [["roadmap-mission", "/hub/#roadmap?view=mission"],
+                                                          ["roadmap-finished", "/hub/#roadmap?view=finished"]]
 
 
 def _clean(row):
@@ -177,13 +180,13 @@ def fresh(tmp_path_factory):
 def test_a_new_project_opens_every_generic_page_on_its_empty_record(fresh):
     work, root = fresh
     ids, views = _generic_views(root)
-    assert set(EMPTY) == set(ids) | {"roadmap-mission"}, "a page joined the registry: name its empty state here"
+    assert set(EMPTY) == set(ids) | {"roadmap-mission", "roadmap-finished"}, "a page joined the registry: name its empty state here"
     views.append(["hub", "/", "document.querySelectorAll('.tile').length>0 && !document.querySelector('.tile .skeleton, .tile-live.checking')"])
     with _serve(root, work) as base:
         overview = json.loads(urllib.request.urlopen(base + "/hub/overview.json", timeout=30).read())
         seen = _visit(base, views, work)
     assert overview["project"]["name"] == NAME
-    for pid in ids + ["roadmap-mission"]:
+    for pid in ids + ["roadmap-mission", "roadmap-finished"]:
         row = seen[pid]
         _clean(row)
         assert EMPTY[pid] in row["main"], (pid, row["main"])

@@ -1,5 +1,5 @@
 /* Workspace base styles. Every color, size, radius, space and shadow comes from the tokens in
-   theme.css (loaded after this sheet); see design/web-redesign/design-system.md. */
+   theme.css (loaded after this sheet); docs/studio.md describes the look. */
 @font-face { font-family:"IBM Plex Sans"; src:url('/hub/assets/vendor/plex-sans.woff2') format('woff2'); font-weight:400; font-display:swap }
 @font-face { font-family:"IBM Plex Sans"; src:url('/hub/assets/vendor/plex-sans-medium.woff2') format('woff2'); font-weight:500 800; font-display:swap }
 @font-face { font-family:"IBM Plex Mono"; src:url('/hub/assets/vendor/plex-mono.woff2') format('woff2'); font-display:swap }

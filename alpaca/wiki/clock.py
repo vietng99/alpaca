@@ -38,8 +38,11 @@ def to_clock_format(value) -> str | None:
     when the value is not a readable time: an unknown time stays null (architecture.md 5.1)."""
     if not isinstance(value, str) or not value.strip():
         return None
+    text = value.strip()
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"      # fromisoformat reads a Z only from Python 3.11 on (op-008 t-571)
     try:
-        moment = datetime.fromisoformat(value.strip())
+        moment = datetime.fromisoformat(text)
     except ValueError:
         return None
     if moment.tzinfo is None:

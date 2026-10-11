@@ -381,7 +381,7 @@ def _live(task, now):
     if task["status"] != "doing" or not task.get("claimant"):
         return False
     try:
-        return datetime.fromisoformat(task.get("lease_until") or "").timestamp() > now
+        return datetime.fromisoformat((task.get("lease_until") or "").replace("Z", "+00:00")).timestamp() > now
     except (TypeError, ValueError):
         return False
 

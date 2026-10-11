@@ -769,6 +769,7 @@ def test_a_failed_prepare_or_a_thin_base_set_blocks_the_task(project, monkeypatc
 
 
 # ================================================================== hints
+@needs_jail
 def test_hints_name_the_suspects_the_chain_and_the_coupled_groups(project, monkeypatch):
     from alpaca.research.types import Proposal
     root, _base, _later = make_project(project)

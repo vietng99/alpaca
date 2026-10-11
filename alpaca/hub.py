@@ -116,14 +116,19 @@ def _phases(row):
 
 
 def _op_states(conn):
-    """Pin choice, short title and phase events per op, read from the record in event order. The
-    newest pin or unpin wins, and the newest title (op-open's, then op-title renames) wins; nothing
-    is inferred from activity."""
-    pins, titles, phase_events = {}, {}, {}
+    """Pin choice, short title, phase events and close per op, read from the record in event order.
+    The newest pin or unpin wins, the newest title (op-open's, then op-title renames) wins, and the
+    newest op-close gives the close time and basis; nothing is inferred from activity."""
+    pins, titles, phase_events, closes = {}, {}, {}, {}
     for row in _rows(conn, "SELECT op,kind,ts,data FROM events WHERE kind IN "
                            "('op-pin','op-unpin','op-open','op-title','phase-enter','phase-advance',"
-                           "'phase-door-closed') ORDER BY id"):
-        if row["kind"] in ("op-pin", "op-unpin"):
+                           "'phase-door-closed','op-close') ORDER BY id"):
+        if row["kind"] == "op-close":
+            # the newest close of the op, with the basis its closer recorded (op close --basis)
+            data = _json(row["data"])
+            basis = data.get("basis") if isinstance(data, dict) else None
+            closes[row["op"]] = {"at": row["ts"], "basis": basis if isinstance(basis, str) else None}
+        elif row["kind"] in ("op-pin", "op-unpin"):
             pins[row["op"]] = row["kind"] == "op-pin"
         elif row["kind"] in ("op-open", "op-title"):
             data = _json(row["data"])
@@ -131,7 +136,7 @@ def _op_states(conn):
                 titles[row["op"]] = data["title"].strip()
         else:
             phase_events.setdefault(row["op"], []).append({"kind": row["kind"], "at": row["ts"], "data": _json(row["data"])})
-    return pins, titles, phase_events
+    return pins, titles, phase_events, closes
 
 
 def _phase_state(phases, events):
@@ -901,7 +906,7 @@ def overview(root):
         tasks = _tasks(root, conn)
         from alpaca import taskplan
         roadmap = taskplan.project(conn, tasks, root=root, stages=checked)
-        pins, titles, phase_events = _op_states(conn)
+        pins, titles, phase_events, closes = _op_states(conn)
         from alpaca.posture import level as posture_level
         # the autodrive level of every session that holds or worked a task, for the map and cards
         held = {t.get("assigned_session") for t in tasks} | {
@@ -919,7 +924,9 @@ def overview(root):
                 "tasks_total": sum(t["op"] == row["id"] for t in tasks),
                 "tasks_done": sum(t["op"] == row["id"] and t["status"] == "done" for t in tasks),
                 "pinned": pins.get(row["id"], False), "short_title": titles.get(row["id"]), "phases": _phases(row),
-                "phase_state": _phase_state(_phases(row), phase_events.get(row["id"], []))}
+                "phase_state": _phase_state(_phases(row), phase_events.get(row["id"], [])),
+                "opened": row["opened"], "closed": row["closed"],
+                "close_basis": (closes.get(row["id"]) or {}).get("basis") if row["status"] == "closed" else None}
                for row in _rows(conn, "SELECT * FROM ops ORDER BY opened DESC,id")]
         messages = [{**{k: row[k] for k in ("id", "ts", "session", "sender", "kind", "body", "ref")}, "to": row["to_"]}
                     for row in _rows(conn, "SELECT * FROM messages ORDER BY id DESC")]
@@ -1012,3 +1019,121 @@ def overview(root):
             "counts": {"tasks": len(tasks), "items": len(items), "items_pass": sum(i.get("status") == "PASS" for i in items),
                        "items_blocked": sum(i.get("status") == "BLOCKED" for i in items),
                        "items_fail": sum(i.get("status") == "FAIL" for i in items), "active_jobs": len(active)}}
+
+
+# ------------------------------------------------------------------ the Records page
+RECORD_SECTIONS = ("ops", "decisions", "proofs")
+_TASK_ID = re.compile(r"t-\d+[a-z]?")
+_OP_ID = re.compile(r"op-\d+")
+
+
+def _proof_path(pointer):
+    """The project path of a task's `local:` proof report under .alpaca/proofs, or None."""
+    text = str(pointer or "").strip()
+    if not text.startswith("local:"):
+        return None
+    rel = text[len("local:"):].strip()
+    parts = Path(rel).parts
+    if not rel.endswith(".md") or len(parts) < 3 or parts[:2] != (".alpaca", "proofs") or ".." in parts:
+        return None
+    return rel
+
+
+def _decision(row):
+    """A decision row with its body's recorded parts (context, options, choice, consequence,
+    pointer) lifted out; a body that is not that JSON object stays as its text."""
+    body = _json(row.get("body"))
+    parts = body if isinstance(body, dict) else {}
+    options = parts.get("options")
+    return {"id": row["id"], "ts": row["ts"], "session": row["session"], "actor": row["actor"],
+            "kind": row["kind"], "ref": row["ref"],
+            "context": parts.get("context") if isinstance(parts.get("context"), str) else None,
+            "options": [str(o) for o in options] if isinstance(options, list) else [],
+            "choice": parts.get("choice") if isinstance(parts.get("choice"), str) else None,
+            "consequence": parts.get("consequence") if isinstance(parts.get("consequence"), str) else None,
+            "pointer": parts.get("pointer") if isinstance(parts.get("pointer"), str) else None,
+            "text": None if parts else str(row.get("body") or "")}
+
+
+def records(root, section="ops", query=None, limit=200, offset=0):
+    """The official records, read-only from the record (connect_readonly): every operation with its
+    open and close, the recorded decisions, and the sealed proofs of done tasks. `query` keeps the
+    rows whose text holds it (case-insensitive); `limit` and `offset` page them. The counts name the
+    size of every section, so the page shows them on its tabs."""
+    section = section if section in RECORD_SECTIONS else "ops"
+    limit = _page_size(limit, 200, 500)
+    try:
+        offset = max(0, int(offset or 0))
+    except (TypeError, ValueError):
+        offset = 0
+    needle = str(query or "").strip().lower()
+    with _record(root) as conn:
+        pins, titles, _phases_events, closes = _op_states(conn)
+        tasks = _rows(conn, "SELECT id,op,title,statement,status,proof,updated FROM tasks")
+        ops = []
+        for row in _rows(conn, "SELECT * FROM ops ORDER BY opened DESC,id"):
+            mine = [t for t in tasks if t["op"] == row["id"]]
+            ops.append({"id": row["id"], "title": row["intent"], "short_title": titles.get(row["id"]),
+                        "status": row["status"], "done_when": row["done_when"], "opened": row["opened"],
+                        "closed": row["closed"], "pinned": pins.get(row["id"], False),
+                        "close_basis": (closes.get(row["id"]) or {}).get("basis") if row["status"] == "closed" else None,
+                        "tasks_total": len(mine), "tasks_done": sum(t["status"] == "done" for t in mine)})
+        decisions = [_decision(row) for row in
+                     _rows(conn, "SELECT id,ts,session,actor,kind,body,ref FROM decisions ORDER BY ts DESC,rowid DESC")]
+        proofs = sorted(({"task": t["id"], "op": t["op"], "title": t["title"] or t["statement"],
+                          "completed": t["updated"], "pointer": t["proof"], "path": _proof_path(t["proof"])}
+                         for t in tasks if t["status"] == "done" and t["proof"]),
+                        key=lambda p: (str(p["completed"] or ""), p["task"]), reverse=True)
+    rows = {"ops": ops, "decisions": decisions, "proofs": proofs}
+    counts = {name: len(items) for name, items in rows.items()}
+    items = rows[section]
+    if needle:
+        items = [item for item in items
+                 if needle in " ".join(str(v) for v in item.values() if v is not None).lower()]
+    page = items[offset:offset + limit]
+    return {"section": section, "query": needle or None, "total": len(items), "counts": counts,
+            "items": page, "next_offset": offset + limit if offset + limit < len(items) else None}
+
+
+_WIKI_STATUS_CACHE: dict = {}
+WIKI_STATUS_TTL_S = 60
+
+
+def wiki_status(root, *, now=None):
+    """What the project wiki holds and whether it serves, from alpaca.wiki.service.status (read-only:
+    it creates no store). Only the summary the Records page shows leaves here: no provider settings,
+    switches or paths. The status reads the whole store (10 s on a 60 GB vault, 2026-10-11), so one
+    reading serves every request for WIKI_STATUS_TTL_S seconds."""
+    import time
+    from alpaca.wiki import service
+    key, clock = str(Path(root).resolve()), time.monotonic() if now is None else now
+    cached = _WIKI_STATUS_CACHE.get(key)
+    if cached and clock - cached[0] < WIKI_STATUS_TTL_S:
+        return cached[1]
+    try:
+        full = service.status(root)
+    except Exception as exc:                                # a broken store is shown, not raised
+        value = {"available": False, "error": "%s: %s" % (type(exc).__name__, exc)}
+    else:
+        capture = full.get("capture") if isinstance(full.get("capture"), dict) else {}
+        value = {"available": True, "serving": full.get("serving"), "corpus": full.get("corpus") or {},
+                 "knowledge_time": full.get("knowledge_time"), "schema_version": full.get("schema_version"),
+                 "quarantined_captures": len(full.get("quarantined_captures") or []),
+                 "unmatched_proofs": len(full.get("unmatched_proofs") or []),
+                 "capture": {k: capture.get(k) for k in ("state", "status", "captured", "expected", "missing")
+                             if k in capture}}
+    _WIKI_STATUS_CACHE[key] = (clock, value)
+    return value
+
+
+def wiki_briefing(root, *, op=None, task=None, max_chars=6000):
+    """The wiki's cited briefing of one op or task (alpaca.wiki.service.briefing): built on demand
+    from servable sources only, never stored, nothing written and no model called. The subject must
+    be one op id or one task id."""
+    from alpaca.wiki import service
+    op, task = (str(op).strip() if op else None), (str(task).strip() if task else None)
+    if bool(op) == bool(task) or (op and not _OP_ID.fullmatch(op)) or (task and not _TASK_ID.fullmatch(task)):
+        raise ValueError("name one op (op-12) or one task (t-345)")
+    brief = service.briefing(root, op=op, task=task, max_chars=max_chars)
+    return {"subject": op or task, "text": brief.text, "gaps": list(brief.gaps or []),
+            "truncated": bool(brief.truncated), "items": len(brief.items or [])}

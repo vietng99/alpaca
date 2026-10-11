@@ -52,6 +52,7 @@ from alpaca import barrier
 from alpaca.gates import git_containment, leak_audit
 from alpaca.gates import verdict as vc
 from alpaca.research import paths
+from alpaca import _nofollow
 from alpaca.research.errors import IsolationError
 from alpaca.research.types import (CloneInfo, Contract, DiffCapture, PurgeResult, WorktreeInfo)
 
@@ -255,8 +256,9 @@ def _sha256_file(path: str) -> tuple:
 
 def _rmtree(path: str) -> bool:
     """Remove path without following a symlink: a link or a file is unlinked, a folder removed
-    with shutil.rmtree (which never descends into a link), after making each folder writable
-    again when an agent took the write bit away. True when something was there."""
+    by _nofollow.remove_tree (which never descends into a link and does not recurse), after it makes
+    each folder writable again where an agent took the write bit away. True when something was
+    there."""
     try:
         st = os.lstat(path)
     except FileNotFoundError:
@@ -264,22 +266,7 @@ def _rmtree(path: str) -> bool:
     if not stat.S_ISDIR(st.st_mode):
         os.unlink(path)
         return True
-
-    # an agent may have taken the read or write bit off a folder it made: give every real folder
-    # back to its owner first (top down, links never followed), then remove the tree
-    try:
-        os.chmod(path, 0o700)
-    except OSError:
-        pass
-    for folder, dirs, _files in os.walk(path, topdown=True, followlinks=False):
-        for name in dirs:
-            full = os.path.join(folder, name)
-            try:
-                if stat.S_ISDIR(os.lstat(full).st_mode):
-                    os.chmod(full, 0o700)
-            except OSError:
-                pass
-    shutil.rmtree(path)
+    _nofollow.remove_tree(path)
     return True
 
 

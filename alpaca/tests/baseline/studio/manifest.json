@@ -1,6 +1,7 @@
 {
  "capture": {
   "at": "2026-03-18T14:20:00Z",
+  "chrome": "Chrome/151.0.7922.108",
   "base_clock": "fixed",
   "reduced_motion": true,
   "timezone": "UTC",
@@ -15,8 +16,8 @@
    "/hub/vcs.json": "vcs.json",
    "/health.json": "health.json"
   },
-  "images": 60,
-  "bytes": 9351489
+  "images": 84,
+  "bytes": 11399847
  },
  "images": {
   "login-1440-light": {
@@ -28,7 +29,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 1020870,
+   "bytes": 1058437,
    "errors": []
   },
   "login-1440-dark": {
@@ -121,17 +122,10 @@
    "width": 1440,
    "height": 900,
    "theme": "light",
-   "masks": [
-    [
-     24,
-     875,
-     183,
-     17
-    ]
-   ],
+   "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 135333,
+   "bytes": 135288,
    "errors": []
   },
   "cockpit-1440-dark": {
@@ -140,17 +134,10 @@
    "width": 1440,
    "height": 900,
    "theme": "dark",
-   "masks": [
-    [
-     24,
-     875,
-     183,
-     17
-    ]
-   ],
+   "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 135616,
+   "bytes": 135568,
    "errors": []
   },
   "cockpit-390-light": {
@@ -183,17 +170,10 @@
    "width": 1440,
    "height": 900,
    "theme": "light",
-   "masks": [
-    [
-     24,
-     875,
-     183,
-     17
-    ]
-   ],
+   "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 147561,
+   "bytes": 147568,
    "errors": []
   },
   "overview-1440-dark": {
@@ -202,17 +182,10 @@
    "width": 1440,
    "height": 900,
    "theme": "dark",
-   "masks": [
-    [
-     24,
-     875,
-     183,
-     17
-    ]
-   ],
+   "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 148195,
+   "bytes": 148034,
    "errors": []
   },
   "overview-390-light": {
@@ -248,14 +221,14 @@
    "masks": [
     [
      24,
-     864,
+     895,
      183,
-     16
+     5
     ]
    ],
    "ready": true,
    "stable": true,
-   "bytes": 161829,
+   "bytes": 163672,
    "errors": []
   },
   "roadmap-1440-dark": {
@@ -267,14 +240,14 @@
    "masks": [
     [
      24,
-     864,
+     895,
      183,
-     16
+     5
     ]
    ],
    "ready": true,
    "stable": true,
-   "bytes": 162499,
+   "bytes": 164251,
    "errors": []
   },
   "roadmap-390-light": {
@@ -286,7 +259,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 59053,
+   "bytes": 60595,
    "errors": []
   },
   "roadmap-390-dark": {
@@ -298,7 +271,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 59176,
+   "bytes": 60800,
    "errors": []
   },
   "roadmap-mission-1440-light": {
@@ -310,14 +283,14 @@
    "masks": [
     [
      24,
-     864,
+     895,
      183,
-     16
+     5
     ]
    ],
    "ready": true,
    "stable": true,
-   "bytes": 139304,
+   "bytes": 140634,
    "errors": []
   },
   "roadmap-mission-1440-dark": {
@@ -329,14 +302,14 @@
    "masks": [
     [
      24,
-     864,
+     895,
      183,
-     16
+     5
     ]
    ],
    "ready": true,
    "stable": true,
-   "bytes": 140333,
+   "bytes": 141727,
    "errors": []
   },
   "roadmap-mission-390-light": {
@@ -348,7 +321,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 52913,
+   "bytes": 54047,
    "errors": []
   },
   "roadmap-mission-390-dark": {
@@ -360,7 +333,131 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 53322,
+   "bytes": 54498,
+   "errors": []
+  },
+  "roadmap-finished-1440-light": {
+   "view": "roadmap-finished",
+   "path": "/hub/#roadmap?view=finished",
+   "width": 1440,
+   "height": 900,
+   "theme": "light",
+   "masks": [
+    [
+     24,
+     895,
+     183,
+     5
+    ]
+   ],
+   "ready": true,
+   "stable": true,
+   "bytes": 94284,
+   "errors": []
+  },
+  "roadmap-finished-1440-dark": {
+   "view": "roadmap-finished",
+   "path": "/hub/#roadmap?view=finished",
+   "width": 1440,
+   "height": 900,
+   "theme": "dark",
+   "masks": [
+    [
+     24,
+     895,
+     183,
+     5
+    ]
+   ],
+   "ready": true,
+   "stable": true,
+   "bytes": 93974,
+   "errors": []
+  },
+  "roadmap-finished-390-light": {
+   "view": "roadmap-finished",
+   "path": "/hub/#roadmap?view=finished",
+   "width": 390,
+   "height": 844,
+   "theme": "light",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 35521,
+   "errors": []
+  },
+  "roadmap-finished-390-dark": {
+   "view": "roadmap-finished",
+   "path": "/hub/#roadmap?view=finished",
+   "width": 390,
+   "height": 844,
+   "theme": "dark",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 35513,
+   "errors": []
+  },
+  "roadmap-finished-op-1440-light": {
+   "view": "roadmap-finished-op",
+   "path": "/hub/#roadmap?view=finished&op=op-001",
+   "width": 1440,
+   "height": 900,
+   "theme": "light",
+   "masks": [
+    [
+     24,
+     895,
+     183,
+     5
+    ]
+   ],
+   "ready": true,
+   "stable": true,
+   "bytes": 129266,
+   "errors": []
+  },
+  "roadmap-finished-op-1440-dark": {
+   "view": "roadmap-finished-op",
+   "path": "/hub/#roadmap?view=finished&op=op-001",
+   "width": 1440,
+   "height": 900,
+   "theme": "dark",
+   "masks": [
+    [
+     24,
+     895,
+     183,
+     5
+    ]
+   ],
+   "ready": true,
+   "stable": true,
+   "bytes": 129265,
+   "errors": []
+  },
+  "roadmap-finished-op-390-light": {
+   "view": "roadmap-finished-op",
+   "path": "/hub/#roadmap?view=finished&op=op-001",
+   "width": 390,
+   "height": 844,
+   "theme": "light",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 61809,
+   "errors": []
+  },
+  "roadmap-finished-op-390-dark": {
+   "view": "roadmap-finished-op",
+   "path": "/hub/#roadmap?view=finished&op=op-001",
+   "width": 390,
+   "height": 844,
+   "theme": "dark",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 62641,
    "errors": []
   },
   "inflight-1440-light": {
@@ -369,17 +466,10 @@
    "width": 1440,
    "height": 900,
    "theme": "light",
-   "masks": [
-    [
-     24,
-     875,
-     183,
-     17
-    ]
-   ],
+   "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 168217,
+   "bytes": 168282,
    "errors": []
   },
   "inflight-1440-dark": {
@@ -388,17 +478,10 @@
    "width": 1440,
    "height": 900,
    "theme": "dark",
-   "masks": [
-    [
-     24,
-     875,
-     183,
-     17
-    ]
-   ],
+   "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 168427,
+   "bytes": 168479,
    "errors": []
   },
   "inflight-390-light": {
@@ -431,17 +514,10 @@
    "width": 1440,
    "height": 900,
    "theme": "light",
-   "masks": [
-    [
-     24,
-     875,
-     183,
-     17
-    ]
-   ],
+   "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 100678,
+   "bytes": 96838,
    "errors": []
   },
   "research-1440-dark": {
@@ -450,17 +526,10 @@
    "width": 1440,
    "height": 900,
    "theme": "dark",
-   "masks": [
-    [
-     24,
-     875,
-     183,
-     17
-    ]
-   ],
+   "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 100156,
+   "bytes": 100288,
    "errors": []
   },
   "research-390-light": {
@@ -493,17 +562,10 @@
    "width": 1440,
    "height": 900,
    "theme": "light",
-   "masks": [
-    [
-     24,
-     875,
-     183,
-     17
-    ]
-   ],
+   "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 140920,
+   "bytes": 140913,
    "errors": []
   },
   "work-1440-dark": {
@@ -512,17 +574,10 @@
    "width": 1440,
    "height": 900,
    "theme": "dark",
-   "masks": [
-    [
-     24,
-     875,
-     183,
-     17
-    ]
-   ],
+   "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 142050,
+   "bytes": 130084,
    "errors": []
   },
   "work-390-light": {
@@ -555,17 +610,10 @@
    "width": 1440,
    "height": 900,
    "theme": "light",
-   "masks": [
-    [
-     24,
-     875,
-     183,
-     17
-    ]
-   ],
+   "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 129952,
+   "bytes": 129898,
    "errors": []
   },
   "activity-1440-dark": {
@@ -574,17 +622,10 @@
    "width": 1440,
    "height": 900,
    "theme": "dark",
-   "masks": [
-    [
-     24,
-     875,
-     183,
-     17
-    ]
-   ],
+   "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 130470,
+   "bytes": 130425,
    "errors": []
   },
   "activity-390-light": {
@@ -617,17 +658,10 @@
    "width": 1440,
    "height": 900,
    "theme": "light",
-   "masks": [
-    [
-     24,
-     875,
-     183,
-     17
-    ]
-   ],
+   "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 127208,
+   "bytes": 127259,
    "errors": []
   },
   "messages-1440-dark": {
@@ -636,17 +670,10 @@
    "width": 1440,
    "height": 900,
    "theme": "dark",
-   "masks": [
-    [
-     24,
-     875,
-     183,
-     17
-    ]
-   ],
+   "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 127420,
+   "bytes": 127485,
    "errors": []
   },
   "messages-390-light": {
@@ -679,17 +706,10 @@
    "width": 1440,
    "height": 900,
    "theme": "light",
-   "masks": [
-    [
-     24,
-     875,
-     183,
-     17
-    ]
-   ],
+   "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 152483,
+   "bytes": 152518,
    "errors": []
   },
   "library-1440-dark": {
@@ -698,17 +718,10 @@
    "width": 1440,
    "height": 900,
    "theme": "dark",
-   "masks": [
-    [
-     24,
-     875,
-     183,
-     17
-    ]
-   ],
+   "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 152852,
+   "bytes": 152881,
    "errors": []
   },
   "library-390-light": {
@@ -735,23 +748,208 @@
    "bytes": 67440,
    "errors": []
   },
+  "records-1440-light": {
+   "view": "records",
+   "path": "/hub/#records",
+   "width": 1440,
+   "height": 900,
+   "theme": "light",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 122579,
+   "errors": []
+  },
+  "records-1440-dark": {
+   "view": "records",
+   "path": "/hub/#records",
+   "width": 1440,
+   "height": 900,
+   "theme": "dark",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 122344,
+   "errors": []
+  },
+  "records-390-light": {
+   "view": "records",
+   "path": "/hub/#records",
+   "width": 390,
+   "height": 844,
+   "theme": "light",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 49550,
+   "errors": []
+  },
+  "records-390-dark": {
+   "view": "records",
+   "path": "/hub/#records",
+   "width": 390,
+   "height": 844,
+   "theme": "dark",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 49876,
+   "errors": []
+  },
+  "records-decisions-1440-light": {
+   "view": "records-decisions",
+   "path": "/hub/#records?section=decisions",
+   "width": 1440,
+   "height": 900,
+   "theme": "light",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 113388,
+   "errors": []
+  },
+  "records-decisions-1440-dark": {
+   "view": "records-decisions",
+   "path": "/hub/#records?section=decisions",
+   "width": 1440,
+   "height": 900,
+   "theme": "dark",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 113134,
+   "errors": []
+  },
+  "records-decisions-390-light": {
+   "view": "records-decisions",
+   "path": "/hub/#records?section=decisions",
+   "width": 390,
+   "height": 844,
+   "theme": "light",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 53552,
+   "errors": []
+  },
+  "records-decisions-390-dark": {
+   "view": "records-decisions",
+   "path": "/hub/#records?section=decisions",
+   "width": 390,
+   "height": 844,
+   "theme": "dark",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 54411,
+   "errors": []
+  },
+  "records-proofs-1440-light": {
+   "view": "records-proofs",
+   "path": "/hub/#records?section=proofs",
+   "width": 1440,
+   "height": 900,
+   "theme": "light",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 129050,
+   "errors": []
+  },
+  "records-proofs-1440-dark": {
+   "view": "records-proofs",
+   "path": "/hub/#records?section=proofs",
+   "width": 1440,
+   "height": 900,
+   "theme": "dark",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 128640,
+   "errors": []
+  },
+  "records-proofs-390-light": {
+   "view": "records-proofs",
+   "path": "/hub/#records?section=proofs",
+   "width": 390,
+   "height": 844,
+   "theme": "light",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 53884,
+   "errors": []
+  },
+  "records-proofs-390-dark": {
+   "view": "records-proofs",
+   "path": "/hub/#records?section=proofs",
+   "width": 390,
+   "height": 844,
+   "theme": "dark",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 54066,
+   "errors": []
+  },
+  "records-wiki-1440-light": {
+   "view": "records-wiki",
+   "path": "/hub/#records?section=wiki&op=op-001",
+   "width": 1440,
+   "height": 900,
+   "theme": "light",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 116747,
+   "errors": []
+  },
+  "records-wiki-1440-dark": {
+   "view": "records-wiki",
+   "path": "/hub/#records?section=wiki&op=op-001",
+   "width": 1440,
+   "height": 900,
+   "theme": "dark",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 116473,
+   "errors": []
+  },
+  "records-wiki-390-light": {
+   "view": "records-wiki",
+   "path": "/hub/#records?section=wiki&op=op-001",
+   "width": 390,
+   "height": 844,
+   "theme": "light",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 47189,
+   "errors": []
+  },
+  "records-wiki-390-dark": {
+   "view": "records-wiki",
+   "path": "/hub/#records?section=wiki&op=op-001",
+   "width": 390,
+   "height": 844,
+   "theme": "dark",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 47415,
+   "errors": []
+  },
   "sessions-1440-light": {
    "view": "sessions",
    "path": "/hub/#sessions",
    "width": 1440,
    "height": 900,
    "theme": "light",
-   "masks": [
-    [
-     24,
-     875,
-     183,
-     17
-    ]
-   ],
+   "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 188674,
+   "bytes": 188799,
    "errors": []
   },
   "sessions-1440-dark": {
@@ -760,17 +958,10 @@
    "width": 1440,
    "height": 900,
    "theme": "dark",
-   "masks": [
-    [
-     24,
-     875,
-     183,
-     17
-    ]
-   ],
+   "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 189676,
+   "bytes": 189811,
    "errors": []
   },
   "sessions-390-light": {
@@ -803,17 +994,10 @@
    "width": 1440,
    "height": 900,
    "theme": "light",
-   "masks": [
-    [
-     24,
-     875,
-     183,
-     17
-    ]
-   ],
+   "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 187116,
+   "bytes": 187080,
    "errors": []
   },
   "sessions-range-1440-dark": {
@@ -822,17 +1006,10 @@
    "width": 1440,
    "height": 900,
    "theme": "dark",
-   "masks": [
-    [
-     24,
-     875,
-     183,
-     17
-    ]
-   ],
+   "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 188452,
+   "bytes": 188272,
    "errors": []
   },
   "sessions-range-390-light": {
@@ -865,17 +1042,10 @@
    "width": 1440,
    "height": 900,
    "theme": "light",
-   "masks": [
-    [
-     24,
-     875,
-     183,
-     17
-    ]
-   ],
+   "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 164905,
+   "bytes": 164945,
    "errors": []
   },
   "vcs-1440-dark": {
@@ -884,17 +1054,10 @@
    "width": 1440,
    "height": 900,
    "theme": "dark",
-   "masks": [
-    [
-     24,
-     875,
-     183,
-     17
-    ]
-   ],
+   "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 165545,
+   "bytes": 165616,
    "errors": []
   },
   "vcs-390-light": {

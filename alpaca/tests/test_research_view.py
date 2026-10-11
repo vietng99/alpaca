@@ -311,6 +311,15 @@ def _sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest() if Path(path).exists() else None
 
 
+def _wal_sha(dbfile):
+    """The -wal file's content, None when it is absent or empty. A read-only connection may leave an
+    empty -wal file beside the record (db.connect_readonly documents it), or find none, depending on
+    the SQLite build and on when the earlier connection was closed: the 3.10 runner of 2026-10-03 read
+    None before the view and the empty file after it (op-008 t-571). A write leaves content."""
+    path = Path(str(dbfile) + "-wal")
+    return _sha(path) if path.exists() and path.stat().st_size else None
+
+
 def fetch(url, path, auth=None):
     req = urllib.request.Request(url + path)
     if auth:
@@ -341,8 +350,10 @@ def test_the_view_never_opens_a_writer_and_writes_nothing(project, monkeypatch, 
     improve_run(conn)
     conn.close()
     dbfile = Path(project) / ".alpaca" / "alpaca.db"
-    rows_before = db.connect_readonly(project).execute("SELECT COUNT(*), MAX(id) FROM events").fetchone()
-    before = (_sha(dbfile), _sha(str(dbfile) + "-wal"))       # after the first read: it makes the wal file
+    reader = db.connect_readonly(project)
+    rows_before = reader.execute("SELECT COUNT(*), MAX(id) FROM events").fetchone()
+    reader.close()
+    before = (_sha(dbfile), _wal_sha(dbfile))
 
     def refuse(*a, **k):
         raise AssertionError("the view opened a writer connection")
@@ -351,7 +362,7 @@ def test_the_view_never_opens_a_writer_and_writes_nothing(project, monkeypatch, 
     one = view.run(project, RUN)
     assert [r["run"] for r in listing["runs"]] == [RUN] and one["run"]["run"] == RUN
     monkeypatch.undo()
-    after = (_sha(dbfile), _sha(str(dbfile) + "-wal"))
+    after = (_sha(dbfile), _wal_sha(dbfile))
     rows_after = db.connect_readonly(project).execute("SELECT COUNT(*), MAX(id) FROM events").fetchone()
     assert tuple(rows_before) == tuple(rows_after) and before == after
     # a project with no record yet: an empty list, and no record file is created

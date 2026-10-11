@@ -122,7 +122,7 @@ The example gates cover full pytest, full boot checks, manifest integrity, a fre
 
 ## Version numbers
 
-`bin/alpaca --version` prints `Alpaca 1.2.0`, and the hub header shows the same. The number lives in one place, `VERSION` in `alpaca/__init__.py`, and names the release the development tree is heading to.
+`bin/alpaca --version` prints `Alpaca 1.2.2`, and the hub header shows the same. The number lives in one place, `VERSION` in `alpaca/__init__.py`, and names the release the development tree is heading to.
 
 Whether a tree is a development checkout or a release is kept beside the number: the hub tooltip says "Development build at commit ..." or "Release build", and `alpaca status --json` carries `channel` (`dev` or `release`). For a bug report, `alpaca.version.info()["build"]` gives one SemVer string such as `1.2.0-dev+g03ae15d0f9fc.dirty` (dirty means uncommitted changes under `alpaca/` or `bin/`); a release build's is the bare number. The channel lives in `alpaca/_channel.py` (`CHANNEL = "dev"`); the release overlay `alpaca/_channel.py: templates/release/channel.py` in `project.yaml` swaps in `CHANNEL = "release"` at build time, so no one edits the channel by hand.
 

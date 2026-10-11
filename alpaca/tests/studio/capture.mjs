@@ -46,12 +46,18 @@ export const VIEWS = [
   ['overview', '/hub/#overview', HUB_READY],
   ['roadmap', '/hub/#roadmap', HUB_READY + ` && !!document.querySelector('.rm-panel, [data-rm-node]')`],
   ['roadmap-mission', '/hub/#roadmap?view=mission', HUB_READY + ` && !!document.querySelector('#main svg')`],
+  ['roadmap-finished', '/hub/#roadmap?view=finished', HUB_READY + ` && !!document.querySelector('.fin-op, #main .empty')`],
+  ['roadmap-finished-op', '/hub/#roadmap?view=finished&op=op-001', HUB_READY + ` && !!document.querySelector('.fin-op-open') && !!document.querySelector('.rm-panel, [data-rm-node]')`],
   ['inflight', '/hub/#inflight', HUB_READY],
   ['research', '/hub/#research', HUB_READY],
   ['work', '/hub/#work', HUB_READY],
   ['activity', '/hub/#activity', HUB_READY],
   ['messages', '/hub/#messages', HUB_READY],
   ['library', '/hub/#library', HUB_READY],
+  ['records', '/hub/#records', HUB_READY + ` && !!document.querySelector('.rec-table, #main .empty')`],
+  ['records-decisions', '/hub/#records?section=decisions', HUB_READY + ` && !!document.querySelector('.rec-decision, #main .empty')`],
+  ['records-proofs', '/hub/#records?section=proofs', HUB_READY + ` && !!document.querySelector('.rec-table, #main .empty')`],
+  ['records-wiki', '/hub/#records?section=wiki&op=op-001', HUB_READY + ` && !!document.querySelector('.rec-panel, #main .notice')`],
   ['sessions', '/hub/#sessions', HUB_READY + ` && !!document.querySelector('#analytics-index tbody tr')`],
   ['sessions-range', '/hub/#sessions?from=2026-03-16&to=2026-03-17', HUB_READY + ` && !!document.querySelector('#analytics-index')`],
   ['vcs', '/hub/#vcs', HUB_READY],
@@ -83,6 +89,8 @@ const settle = `(async()=>{
   await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));return true;})()`;
 
 const b = await launch({profile: join(out, '.chrome-profile')});
+// The browser build: two builds can rasterize the same page a few pixels apart (op-008 t-571).
+const chrome = (await b.send('Browser.getVersion')).result?.product || 'unknown';
 const errors = [];
 const images = {};
 let failed = 0;
@@ -150,7 +158,7 @@ try {
   await b.close();
 }
 const total = Object.values(images).reduce((n, i) => n + i.bytes, 0);
-writeFileSync(join(out, 'manifest.json'), JSON.stringify({capture: {at, base_clock: 'fixed', reduced_motion: true, timezone: 'UTC', locale: 'en-US',
+writeFileSync(join(out, 'manifest.json'), JSON.stringify({capture: {at, chrome, base_clock: 'fixed', reduced_motion: true, timezone: 'UTC', locale: 'en-US',
   device_scale_factor: 1, chrome_flags: 'alpaca/tests/studio/cdp.mjs BASE_FLAGS', masks: MASKS, stubs: STUBS, images: Object.keys(images).length, bytes: total},
   images}, null, 1) + '\n');
 console.log(`${Object.keys(images).length} images, ${total} bytes, ${failed} failed`);

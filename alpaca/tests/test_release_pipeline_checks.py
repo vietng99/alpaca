@@ -162,7 +162,9 @@ def test_publication_credentials_are_not_available_to_gates(project, monkeypatch
 
 
 def test_python_gates_use_the_current_alpaca_environment(project):
-    configure(project, ['python', '-c', 'import sys; assert sys.executable == ' + repr(sys.executable)])
+    # The environment, not the interpreter's name: CI starts the suite as `.venv/bin/python3`, and the
+    # gate's `python` is `.venv/bin/python` of the same environment (op-008 t-571).
+    configure(project, ['python', '-c', 'import sys; assert sys.prefix == ' + repr(sys.prefix)])
     assert check(project).status == 'PASS'
 
 
@@ -224,3 +226,20 @@ def test_a_global_git_ignore_on_the_release_host_does_not_fail_a_clean_candidate
     assert gates['fresh-clone']['status'] == 'PASS', gates['fresh-clone']
     assert gates['leak-scan']['status'] == 'PASS', gates['leak-scan']
     assert receipt.status == 'PASS'
+
+
+@pytest.mark.parametrize('handles_interrupt', (True, False))
+def test_a_timed_out_command_is_interrupted_before_it_is_killed(tmp_path, monkeypatch, handles_interrupt):
+    """A timed-out gate or CI test run gets SIGINT first, so pytest still prints the names of the
+    tests that failed; one that ignores SIGINT is killed after the grace (op-008 t-571)."""
+    checks = api('checks')
+    monkeypatch.setattr(checks, 'INTERRUPT_GRACE_S', 3)
+    body = ('import signal, time\n'
+            + ('' if handles_interrupt else 'signal.signal(signal.SIGINT, signal.SIG_IGN)\n')
+            + 'try:\n    time.sleep(60)\nexcept KeyboardInterrupt:\n'
+              '    print("FAILED t.py::test_x", flush=True)\n    raise SystemExit(2)\n')
+    log = tmp_path / 'gate.log'
+    started = time.monotonic()
+    code, timed_out = checks.run_command([sys.executable, '-c', body], tmp_path, 1, log)
+    assert (code, timed_out) == (124, True) and time.monotonic() - started < 30
+    assert ('FAILED t.py::test_x' in log.read_text()) is handles_interrupt

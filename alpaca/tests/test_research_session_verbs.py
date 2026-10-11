@@ -15,11 +15,15 @@ import pytest
 from alpaca import cli, db
 from alpaca.gates import verdict as vc
 from alpaca.posture import level as level_mod
-from alpaca.research import errors, events, session_runtime, verifier
+from alpaca.research import errors, events, jail, session_runtime, verifier
 from alpaca.tests import research_loopkit as kit
 from alpaca.tests import research_session_kit as rk
 from alpaca.tests.test_research_verifier import (Scripted, events_of, seal, stand_in_binary,
                                                  setup_project, write_report)
+
+#: The stand-in runs the gates in the jail; with no bubblewrap its proof is never verified.
+needs_jail = pytest.mark.skipif(not jail.available()[0],
+                                reason="bubblewrap is not available on this host")
 
 START_KINDS = (events.RUN_START, events.DRIVER, events.JOB)
 
@@ -245,6 +249,7 @@ def test_a_seal_with_no_tree_registers_no_driver(vworld, monkeypatch):
     assert events_of(root, "research-verify-open") == [] and _kinds(root) == []
 
 
+@needs_jail
 def test_with_the_verb_hook_set_the_stand_in_runs_with_no_job_and_no_driver(vworld, monkeypatch):
     root = vworld["root"]
     write_report(root)

@@ -154,3 +154,64 @@ def write_below(root, parts, name, data, mode=0o600, *, runtime=".alpaca"):
             raise
     finally:
         os.close(dir_fd)
+
+
+# ---------------------------------------------------------------- removing a tree an agent made
+# A folder tree an agent may have made, opened up and removed without recursion on every Python.
+#
+# os.fwalk, os.walk and shutil.rmtree walk with an explicit stack from Python 3.12 or 3.13 on. On
+# Python 3.10, the oldest Python Alpaca runs on, each recurses once per folder level, so a chain of a
+# few thousand folders an agent left behind raised RecursionError instead of being removed (op-008
+# t-571: test_research_gates and test_research_isolation on the hosted 3.10 runner). `remove_tree`
+# walks from descriptors with its own stack: neither the depth nor the path length limit stops it,
+# one descriptor is held per level, and a link is never followed (a folder is opened with
+# O_NOFOLLOW, a link is unlinked where it lies). A folder an agent made unreadable or unwritable is
+# given mode 0700 before it is read, so the tree is removed or the call raises OSError.
+
+
+def _open_tree_dir(name, dir_fd):
+    """The folder `name` (under dir_fd) opened after it is given mode 0700. The chmod goes by name,
+    so it is made only when lstat says the name is a real folder; the open never follows a link."""
+    try:
+        if stat.S_ISDIR(os.stat(name, dir_fd=dir_fd, follow_symlinks=False).st_mode):
+            os.chmod(name, 0o700, dir_fd=dir_fd)
+    except OSError:
+        pass
+    return os.open(name, _DIR_FLAGS, dir_fd=dir_fd)
+
+
+def _clear_dir(fd):
+    """Unlink every entry of the folder fd but its folders (a link to a folder is unlinked);
+    returns the names of the folders."""
+    folders = []
+    with os.scandir(fd) as entries:
+        for entry in entries:
+            if entry.is_dir(follow_symlinks=False):
+                folders.append(entry.name)
+            else:
+                os.unlink(entry.name, dir_fd=fd)
+    return folders
+
+
+def remove_tree(path):
+    """Remove the folder path and everything under it, bottom up and without recursion."""
+    top = _open_tree_dir(path, None)
+    stack = [(top, None, None)]                 # (descriptor, folders still to remove, name)
+    try:
+        stack[0] = (top, _clear_dir(top), None)
+        while stack:
+            fd, pending, name = stack[-1]
+            if pending:
+                child_name = pending.pop()
+                child = _open_tree_dir(child_name, fd)
+                stack.append((child, None, child_name))
+                stack[-1] = (child, _clear_dir(child), child_name)
+                continue
+            stack.pop()
+            os.close(fd)
+            if stack:
+                os.rmdir(name, dir_fd=stack[-1][0])
+    finally:
+        for fd, _pending, _name in stack:
+            os.close(fd)
+    os.rmdir(path)

@@ -168,7 +168,9 @@ def _lease_expired(task):
     if not lease:
         return True
     try:
-        return datetime.fromisoformat(lease) <= datetime.fromisoformat(util.now_iso())
+        # a lease may end in Z, which fromisoformat reads only from Python 3.11 on; work_record reads
+        # the same field this way (op-008 t-571)
+        return datetime.fromisoformat(str(lease).replace('Z', '+00:00')) <= datetime.fromisoformat(util.now_iso())
     except (ValueError, TypeError):
         return True
 

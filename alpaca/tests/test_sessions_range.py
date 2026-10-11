@@ -158,3 +158,19 @@ console.log(JSON.stringify({start:new Date(r.start).toISOString(),end:new Date(r
     hub = (WEB / "hub.js").read_text(encoding="utf-8")
     assert "dayInput('from','From'" in hub and "data-clear=\"from,to\"" in hub
     assert "{start:days.start/1000,end:days.end/1000}" in hub
+
+
+def test_cost_per_outcome_keeps_the_tasks_done_in_the_chosen_days():
+    """Brief 2b: with chosen days the burn board shows only them; the Cost per outcome card keeps the
+    tasks done inside the range and recounts each operation (op-045 design->build check 40)."""
+    got = node("""
+globalThis.document={addEventListener(){}};globalThis.addEventListener=()=>{};      // burn.js binds its tooltip at load
+const {outcomesFor}=await import('./burn.js');
+const t=(task,done,cost,captured=true)=>({task,title:task,done,cost,tokens:1,captured});
+const outcomes=[{op:'op-1',done:3,captured:3,cost:6,median:2,tasks:[t('t-1',100,1),t('t-2',200,2),t('t-3',300,3)]},
+                {op:'op-2',done:1,captured:1,cost:9,median:9,tasks:[t('t-9',900,9)]}];
+const range=outcomesFor({window:{key:'range',start:150,end:350},outcomes});
+const week=outcomesFor({window:{key:'7d',start:150,end:350},outcomes});
+console.log(JSON.stringify({ops:range.map(o=>o.op),tasks:range[0].tasks.map(x=>x.task),done:range[0].done,
+ cost:range[0].cost,median:range[0].median,week:week.length}));""")
+    assert got == {"ops": ["op-1"], "tasks": ["t-2", "t-3"], "done": 2, "cost": 5, "median": 2, "week": 2}

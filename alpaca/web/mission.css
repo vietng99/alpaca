@@ -1,5 +1,5 @@
 /* Mission map. Every color, type size, radius, space and shadow is a token from theme.css;
- * see design/web-redesign/design-system.md. State is a thin left rule and a colored label, never a
+ * docs/studio.md describes the look. State is a thin left rule and a colored label, never a
  * tinted card. Stable grouped positions and native controls; no decorative motion. */
 .mm-root,.mm-root *{box-sizing:border-box}.mm-root{min-width:0}
 .mm-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--sp-6);margin-bottom:var(--sp-6)}.mm-heading h1{font-size:var(--fs-2xl);line-height:var(--lh-2xl);font-weight:500;font-style:normal}.mm-heading p{color:var(--muted);margin-top:var(--sp-2);max-width:660px}.mm-scope{font:var(--fs-xs) var(--font-mono);color:var(--muted);max-width:190px;text-align:right;padding-top:var(--sp-2)}

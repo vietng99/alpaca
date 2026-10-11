@@ -12,6 +12,7 @@ Fixtures are synthetic and built in tmp_path (alpaca/tests/research_doctorkit.py
 bubblewrap: the autouse fixture answers the jail probe, and the jail tests set their own answer."""
 from __future__ import annotations
 
+import gc
 import inspect
 import os
 import sys
@@ -674,6 +675,11 @@ def test_the_research_doctor_on_this_repo_has_no_error_and_is_quick():
 
 
 def _snapshot(root):
+    """Mode, size and mtime of every entry but .git. Left out: the -shm file and an empty -wal file
+    SQLite keeps beside the WAL record while a read-only connection (db.connect_readonly, which
+    documents them) reads it, and the size and mtime of the folder they appear in. A record write
+    still shows: it changes the record file or leaves the -wal file with content (op-008 t-571)."""
+    gc.collect()    # setup's leaked connections close (and checkpoint) now, not inside the doctor
     out = {}
     for dirpath, dirnames, filenames in os.walk(root):
         if ".git" in dirnames:
@@ -681,7 +687,10 @@ def _snapshot(root):
         for name in dirnames + filenames:
             p = os.path.join(dirpath, name)
             st = os.lstat(p)
+            if name.endswith("-shm") or (name.endswith("-wal") and st.st_size == 0):
+                continue
             out[os.path.relpath(p, root)] = (st.st_mode, st.st_size, st.st_mtime_ns)
+    out[".alpaca"] = out.get(".alpaca", (None,))[:1]          # its mode; a tmpfs folder size counts entries
     return out
 
 

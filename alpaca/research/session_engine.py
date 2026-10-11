@@ -925,6 +925,14 @@ def preload(root: str | None = None, *, block: bool | None = None) -> dict:
     return {"loaded": loaded, "absent": sorted(absent)}
 
 
+def safe_path() -> bool:
+    """True when no script or working folder is put first on the path: the -P flag, which -I sets.
+    Python 3.10, the oldest Python Alpaca runs on, has no -P and no `sys.flags.safe_path` (both came
+    in 3.11), and there -I itself leaves the script's folder and the working folder off the path, so
+    -I is what the flag reads (op-008 t-571)."""
+    return bool(getattr(sys.flags, "safe_path", sys.flags.isolated))
+
+
 def isolation_ok() -> bool:
     """True when this process is an isolated interpreter whose import path holds no folder an agent
     can write ahead of the package (12.5, mechanism 1): -I and -P are set, `alpaca/boot.py` of the
@@ -932,7 +940,7 @@ def isolation_ok() -> bool:
     package file is the install root's), and the install root is not on the path at all (t-428).
     A process that found `alpaca` through the install root on its path (the legacy
     `alpaca-root.pth` layout), or loaded it some other way, is refused."""
-    if not (sys.flags.isolated and sys.flags.safe_path):
+    if not (sys.flags.isolated and safe_path()):
         return False
     import alpaca
     from alpaca import boot

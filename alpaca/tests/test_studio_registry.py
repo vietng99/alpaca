@@ -19,7 +19,7 @@ WEB = Path(__file__).resolve().parents[1] / "web"
 REGISTRY = json.loads((WEB / "pages.json").read_text(encoding="utf-8"))
 # hub.html:8-21 before the registry: the cascade order a stylesheet must keep
 LINKS_BEFORE = ["hub.css", "analytics.css", "burn.css", "inflight.css", "vcs.css", "cockpit.css", "roadmap.css",
-                "mission.css", "runlog.css", "live.css", "research.css", "beam.css",
+                "mission.css", "runlog.css", "live.css", "research.css", "records.css", "beam.css",
                 "vendor/arthur/arthur-avatar.css", "theme.css"]
 # license and provenance notes kept next to the vendored files, never served
 NOTES = {"vendor/README.md", "vendor/OFL.txt", "vendor/world-atlas-LICENSE.txt"}
@@ -83,8 +83,8 @@ def test_the_pages_and_their_order_are_todays():
     assert [(p["id"], p["label"]) for p in pages] == [
         ("overview", "Overview"), ("roadmap", "Roadmap"), ("cockpit", "Cockpit"), ("inflight", "In-flight"),
         ("research", "Research"), ("work", "Work & evidence"), ("runs", "Runs & logs"), ("live", "Live logs"),
-        ("activity", "Activity"), ("messages", "Messages"), ("library", "Library"), ("sessions", "Sessions"),
-        ("vcs", "Version control")]
+        ("activity", "Activity"), ("messages", "Messages"), ("library", "Library"), ("records", "Records"),
+        ("sessions", "Sessions"), ("vcs", "Version control")]
     assert sorted(p["nav"] for p in pages) == list(range(1, len(pages) + 1))
     assert [p["id"] for p in pages if p.get("gate") == "profile"] == ["runs", "live"]
     assert [p["id"] for p in pages if p.get("divider")] == ["messages"]

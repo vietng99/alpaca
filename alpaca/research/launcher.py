@@ -57,6 +57,7 @@ from alpaca.gates import verdict as vc
 from alpaca.research import agent_transcript as at
 from alpaca.research import contract as contract_mod
 from alpaca.research import egress, events, jail, paths, procs, spend
+from alpaca import _nofollow
 from alpaca.research import types as rtypes
 from alpaca.research.errors import LaunchError
 from alpaca.research.types import JailSpec, LaunchHome, LaunchResult, LaunchSpec
@@ -395,7 +396,10 @@ def _rmtree(path: str) -> None:
     except FileNotFoundError:
         return
     if stat.S_ISDIR(st.st_mode):
-        shutil.rmtree(path, ignore_errors=True)
+        try:
+            _nofollow.remove_tree(path)      # no recursion, on Python 3.10 too (op-008 t-571)
+        except OSError:
+            pass
     else:
         try:
             os.unlink(path)

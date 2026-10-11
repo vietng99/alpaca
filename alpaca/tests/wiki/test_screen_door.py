@@ -209,7 +209,11 @@ def test_one_secret_settles_in_two_passes(monkeypatch):
 
 def test_unmatched_begin_lines_take_linear_time():
     """A-5: 1,000 BEGIN lines with no END line in 2 MB took 3.5 s a pass (95 s for 1.54 MB of them):
-    each BEGIN scanned to the end of the text for its END line. Bounded now, under 1 s of CPU."""
+    each BEGIN scanned to the end of the text for its END line. Bounded now: the text takes under
+    eight times the CPU of the same size of prose with no secret (3.4 times on the dev host, where
+    it is screened twice, the pass that masks and the pass that confirms; 3.5 s a pass of the old
+    scan is 19 times). A fixed bound of 1 s read the host's speed instead: 0.6 s on the dev host,
+    1.2 s on the hosted runner (op-008 t-571)."""
     filler = "ordinary transcript prose line with words and numbers 12345 and paths a/b/c.py\n"
     chunk = 2_000_000 // 1000
     text = "".join("-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA\n" + filler * (chunk // len(filler))
@@ -217,7 +221,9 @@ def test_unmatched_begin_lines_take_linear_time():
     assert len(text) > 1_900_000
     out = drain.screen(text)
     assert "MIIEowIBAAKCAQEA" not in out and "BEGIN RSA PRIVATE KEY" not in out
-    assert _cpu(drain.screen, text) < 1.0
+    prose = filler * (len(text) // len(filler))
+    took, plain = _cpu(drain.screen, text), _cpu(drain.screen, prose)
+    assert took < 8 * plain, (took, plain)
 
 
 @pytest.mark.parametrize("unit", [
@@ -717,6 +723,13 @@ def _fixture_texts():
             yield from text.splitlines()
 
 
+def _regs(match):
+    """`match.regs` without the `_atomN` groups the Python 3.10 form of a pattern adds (t-571)."""
+    atoms = {index for name, index in match.re.groupindex.items()
+             if name.startswith(detail.ATOM_GROUP_PREFIX)}
+    return tuple(span for index, span in enumerate(match.regs) if index not in atoms)
+
+
 def _call_with(patterns, text):
     """The screen with `patterns` as its registry (`detail.SCREEN_PATTERNS`), restored after."""
     real = detail.SCREEN_PATTERNS
@@ -765,7 +778,7 @@ def test_the_screen_changes_only_where_a_declared_variant_applies(corpus):
         for text in _exhaustive(alphabet, longest, prefixes):
             if new(text) != old(text):
                 differ.append(text)
-            elif name == "plain-phrasing" and ([m.regs for m in detail._PLAIN_SECRET.finditer(text)]
+            elif name == "plain-phrasing" and ([_regs(m) for m in detail._PLAIN_SECRET.finditer(text)]
                                                != [m.regs for m in frozen._PLAIN_SECRET.finditer(text)]):
                 differ.append(text)
             if len(differ) > 5:

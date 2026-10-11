@@ -49,6 +49,7 @@ from alpaca import claims as leases
 from alpaca import db
 from alpaca.gates import verdict as vc
 from alpaca.research import events, paths
+from alpaca import _nofollow
 from alpaca.research.errors import IsolationError
 from alpaca.research.types import Proposal, RunContext
 
@@ -176,7 +177,7 @@ def _remove(path: str) -> None:
     if os.path.islink(path) or os.path.isfile(path):
         os.unlink(path)
     elif os.path.isdir(path):
-        shutil.rmtree(path)
+        _nofollow.remove_tree(path)          # no recursion, on Python 3.10 too (op-008 t-571)
 
 
 def _fresh_dir(path: str) -> None:
