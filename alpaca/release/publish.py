@@ -118,16 +118,21 @@ def same_outgoing(reviewed, current):
     return bool(reviewed) and all(reviewed.get(k) == current.get(k) for k in keys - {'commit'})
 
 
-def publish_release(root, config, checks, *, dry_run=True, remote=None, api=None, before_push=None, expect=None):
+def publish_release(root, config, checks, *, dry_run=True, remote=None, api=None, before_push=None, expect=None,
+                    source=None):
+    """Publish checked release files. Source reads (the commit, its clean state, its history and its
+    barrier block) use source, a checkout of the checked commit (release/source.py), or the project
+    root when None; the record, term list and scratch stay in root."""
     root = Path(root).resolve()
+    source = Path(source or root).resolve()
     receipt = PublishReceipt(asdict(checks), 'BLOCKED')
     work = contained(root, '.alpaca/releases/' + receipt.attempt + '/publish')
     work.mkdir(parents=True)
     repo = work / 'public'
     try:
-        validate_checks(root, config, checks)
+        validate_checks(root, config, checks, source)
         if not dry_run:
-            clean_source(root, config)
+            clean_source(source, config)
             if remote is None and not os.environ.get('PUBLIC_REPO_TOKEN'):
                 raise ValueError('PUBLIC_REPO_TOKEN is required for publication')
         remote_git(work, 'clone', '-q', '--no-local', '--no-checkout', remote or ('https://github.com/' + config.repository + '.git'), str(repo))
@@ -140,7 +145,7 @@ def publish_release(root, config, checks, *, dry_run=True, remote=None, api=None
         old = refs[0] if refs else ''
         metadata = trailers(repo, old) if old else None
         if old:
-            if not ancestor(root, metadata['source'], checks.build['source_sha']):
+            if not ancestor(source, metadata['source'], checks.build['source_sha']):
                 raise ValueError('checked development source is older, unrelated, or missing prior history')
             normal_merge = ancestor(repo, old, base) and git(repo, 'rev-parse', base + '^{tree}') == git(repo, 'rev-parse', old + '^{tree}')
             if base != metadata['base'] and not normal_merge:
@@ -152,14 +157,14 @@ def publish_release(root, config, checks, *, dry_run=True, remote=None, api=None
         elif metadata['source'] == checks.build['source_sha']:
             receipt.covered_sources = metadata['covered']
         else:
-            receipt.covered_sources = git(root, 'rev-list', '--reverse', metadata['source'] + '..' + checks.build['source_sha']).decode().splitlines()
+            receipt.covered_sources = git(source, 'rev-list', '--reverse', metadata['source'] + '..' + checks.build['source_sha']).decode().splitlines()
         git(repo, 'read-tree', base)
         git(repo, 'rm', '-r', '--cached', '--ignore-unmatch', '.')
         for rel in checks.build['inventory']:
             dest = repo / rel
             dest.parent.mkdir(parents=True, exist_ok=True)
-            source = Path(checks.build['tree']) / rel
-            dest.write_bytes(source.read_bytes())
+            member = Path(checks.build['tree']) / rel
+            dest.write_bytes(member.read_bytes())
             dest.chmod(checks.build['inventory'][rel]['mode'])
         git(repo, 'add', '--all', '--force')
         tree = git(repo, 'write-tree').decode().strip()
@@ -168,7 +173,7 @@ def publish_release(root, config, checks, *, dry_run=True, remote=None, api=None
         body = report(repo, base, checks.build['source_sha'], checks.build['inventory'], receipt.covered_sources)
         receipt.report = str(work / 'report.md')
         Path(receipt.report).write_text(body)
-        cfg, terms, _ = policy(root)
+        cfg, terms, _ = policy(root, source)
         outgoing_text = TITLE + '\n' + body
         hits, _ = leak_audit.scan_text(terms, outgoing_text, 'release-report.md', shape_on=True)
         if hits or barrier._meta_hits(terms, outgoing_text):
@@ -199,7 +204,7 @@ def publish_release(root, config, checks, *, dry_run=True, remote=None, api=None
         if scanned.verdict != 0:
             raise ValueError('outgoing Git objects or metadata failed the leak policy')
         receipt.outgoing = outgoing_record(repo, config, base, commit, body, approval_id)
-        validate_checks(root, config, checks)
+        validate_checks(root, config, checks, source)
         if dry_run:
             receipt.status = 'DRY_RUN'
             return receipt
@@ -212,7 +217,7 @@ def publish_release(root, config, checks, *, dry_run=True, remote=None, api=None
         current = {line.split()[1]: line.split()[0] for line in lines}
         if current.get('refs/heads/' + config.target_branch) != base or current.get('refs/heads/' + config.sync_branch, '') != old:
             raise ValueError('public refs changed concurrently; rebuild publication')
-        approval.require(root, config, checks.build['source_sha'], checks.approval)
+        approval.require(root, config, checks.build['source_sha'], checks.approval, source=source)
         if commit != old:
             remote_git(repo, 'push', '--force-with-lease=refs/heads/' + config.sync_branch + ':' + old,
                        'origin', commit + ':refs/heads/' + config.sync_branch)
@@ -222,7 +227,7 @@ def publish_release(root, config, checks, *, dry_run=True, remote=None, api=None
         if current.get('refs/heads/' + config.target_branch) != base or current.get('refs/heads/' + config.sync_branch) != commit:
             raise ValueError('public refs changed after push; PR creation stopped for owner review')
         # The PR carries exactly the title and body scanned above.
-        approval.require(root, config, checks.build['source_sha'], checks.approval)
+        approval.require(root, config, checks.build['source_sha'], checks.approval, source=source)
         receipt.pr_url = (api or github_pr)(config, TITLE, body)
         receipt.status = 'PASS'
     except (ValueError, OSError, subprocess.SubprocessError, RuntimeError) as exc:

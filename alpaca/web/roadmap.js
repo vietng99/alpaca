@@ -16,9 +16,34 @@ function selectionClasses(op,p){
  return id=>selected.has(id)?' rm-selected':selected.size?(related.has(id)?' rm-related':' rm-dimmed'):'';
 }
 function keep(key){try{sessionStorage.setItem('alpaca.roadmap.'+key,JSON.stringify(prefs(key)));}catch{}}
+// The statuses listed under Not now (alpaca/ops.py NOT_NOW): never the focus, never current, never terminal.
+export const NOT_NOW=['deferred'];
+export const TRIGGER_MET='trigger met: reconsider';
+// The phrases ops.not_now_words prints, from the task row's deferral. "Met" is read from the row, never decided here.
+export function notNowWords(d){
+ if(d?.error)return ['The deferral could not be read ('+d.error+')'];
+ const fold=v=>String(v).split(/\s+/).filter(Boolean).join(' '),q=v=>v?'"'+fold(v)+'"':'(not recorded)';
+ return ['Why not now: '+q(d?.reason),'Comes back when: '+q(d?.reactivate_when),...(d?.trigger_met?[TRIGGER_MET+(d.met_by?' ('+d.met_by+')':'')]:[])];
+}
+// The Not now panel of one operation, built from its task rows so a filter or a missing plan cannot empty it.
+export function notNowPanel(o,opId){
+ const parked=(o.tasks||[]).filter(t=>t.op===opId&&NOT_NOW.includes(String(t.status).toLowerCase())).sort((a,b)=>String(a.id).localeCompare(String(b.id),undefined,{numeric:true}));
+ if(!parked.length)return '';
+ return `<section class="rm-not-now" data-key="not-now:${esc(opId)}" aria-label="Not now"><h3>Not now <span class="rm-not-now-count">${parked.length}</span></h3><p>Parked on purpose. Not counted as open work; each comes back when its trigger is met.</p><ul>${parked.map(t=>{const d=t.deferral,words=notNowWords(d),met=!d?.error&&d?.trigger_met;
+  return `<li class="rm-not-now-item${met?' rm-not-now-met':''}" data-key="not-now:${esc(t.id)}"><button type="button" data-task="${esc(t.id)}">${esc(t.title||t.id)} <small>${esc(t.id)}</small></button><ul class="rm-reasons">${words.map((w,k)=>`<li>${met&&k===words.length-1?`<strong>${esc(w)}</strong>`:esc(w)}</li>`).join('')}</ul>${d?.op_closed?`<p class="rm-not-now-closed">${esc(opId)} is closed.</p>`:''}</li>`;}).join('')}</ul></section>`;
+}
+// The AAR state of one operation as alpaca/aarview.py words it; no state, no panel.
+const AAR_TONE={owed:'owed',changed:'changed',sealed:'sealed',draft:'draft'};
+export function aarPanel(o,opId){
+ const a=(o.ops||[]).find(x=>x.id===opId)?.aar;
+ if(!a)return '';
+ const n=a.overdue||0;
+ return `<section class="rm-aar rm-aar-${AAR_TONE[a.badge]||'neutral'}${a.blocks_close?' rm-aar-blocking':''}" data-key="aar:${esc(opId)}" aria-label="After-action report"><h3>After-action report${a.label?` <span class="rm-aar-badge">${esc(a.label)}</span>`:''}</h3>${a.error?`<p class="rm-aar-error">${esc(a.error)}</p>`:''}${a.overdue_error?`<p class="rm-aar-error">${esc(a.overdue_error)}</p>`:''}${(a.lines||[]).length?`<ul class="rm-aar-lines">${a.lines.map(l=>`<li>${esc(l)}</li>`).join('')}</ul>`:''}${(a.triggers||[]).length?`<ul class="rm-aar-triggers">${a.triggers.map(t=>`<li data-key="trigger:${esc(t.id)}">${esc(t.text)}</li>`).join('')}</ul>`:''}${a.report?`<p><a class="rm-aar-link" href="#library?path=${encodeURIComponent(a.report)}">Open the report</a></p>`:''}${n?`<p>${n} action item${n===1?'':'s'} overdue, marked on the roadmap.</p>`:''}</section>`;
+}
+const overdueChip=t=>t?.aar_overdue?`<span class="rm-overdue" data-rm-overdue="${esc(t.id)}">${esc(t.aar_overdue.label)}</span>`:'';
 const taskMap=o=>new Map((o.tasks||[]).map(t=>[t.id,t]));
 const nodesOf=op=>(op.groups||[]).flatMap(g=>g.nodes||[]);
-function plans(o){if(o.roadmap?.operations)return o.roadmap.operations;return [...new Set((o.tasks||[]).map(t=>t.op))].map(op=>({op,revision:0,edges:[],groups:[{id:'__unplanned__',title:'Needs organization',category:'Needs organization',nodes:o.tasks.filter(t=>t.op===op).map(t=>({id:t.id,state:'unplanned',label:'Needs organization',depth:0,after:[],reasons:['Task relationships have not been recorded.'],session:t.assigned_session}))}]}));}
+function plans(o){if(o.roadmap?.operations)return o.roadmap.operations;return [...new Set((o.tasks||[]).map(t=>t.op))].map(op=>({op,revision:0,edges:[],groups:[{id:'__unplanned__',title:'Needs organization',category:'Needs organization',nodes:o.tasks.filter(t=>t.op===op).map(t=>NOT_NOW.includes(String(t.status).toLowerCase())?{id:t.id,state:'deferred',label:'Not now',depth:0,after:[],reasons:notNowWords(t.deferral),session:null}:{id:t.id,state:'unplanned',label:'Needs organization',depth:0,after:[],reasons:['Task relationships have not been recorded.'],session:t.assigned_session})}]}));}
 const operatorName=node=>({codex:'Codex',claude:'Claude','claude-code':'Claude Code',cli:'CLI'}[node.operator]||node.operator||'Chat');
 const titleOf=(o,op)=>op.title||(o.ops||[]).find(x=>x.id===op.op)?.title||op.op;
 // A short name for a pinned map: the op's recorded short title (op new --title, op title), else the
@@ -50,7 +75,8 @@ const RUN_STATE={running:['working','Running'],starting:['working','Starting'],s
  held:['approval','Waiting on the owner'],halted:['approval','Halted: owner decision'],paused:['approval','Paused: budget decision'],
  interrupted:['waiting','Interrupted, can resume'],resumable:['waiting','Resumable'],finished:['done','Finished'],stopped:['done','Stopped']};
 function runNode(op,tasks,o){
- const nodes=nodesOf(op),open=nodes.filter(n=>!terminal(n,tasks)),lead=RUN_RANK.map(st=>open.find(n=>n.state===st)).find(Boolean)||open[0];
+ const nodes=nodesOf(op),open=nodes.filter(n=>!terminal(n,tasks)),active=open.filter(n=>n.state!=='deferred'),
+  lead=RUN_RANK.map(st=>active.find(n=>n.state===st)).find(Boolean)||active[0]||open[0];
  const rec=o.research_runs?.[op.op],run=rec?.run||(String(op.groups[0].title).match(/rr-\d+/)||[op.op])[0],[state,label]=RUN_STATE[rec?.state]||[lead?lead.state:'done',lead?lead.label:'Complete'];
  const done=rec&&RUN_STATE[rec.state]?state==='done':!open.length;
  return {id:'run:'+op.op,run,op:op.op,state,label,done,open:open.length,total:nodes.length,session:done?null:lead?.session,lead:done?null:lead?.id,after:[],reasons:[]};
@@ -86,7 +112,7 @@ function nodeCard(node,tasks,o,compact=false,expanded=false,mark=''){
  const task=tasks.get(node.id)||{id:node.id,title:node.id},needs=node.after||[],reasons=node.reasons||[],op=plans(o).find(p=>p.op===task.op);
  if(compact){
   return `<article class="rm-node rm-compact rm-${esc(node.state)}${beamOf(node,tasks)}${mark}" data-rm-node="${esc(node.id)}" data-key="n:${esc(node.id)}">
-   <div class="rm-node-top"><span class="mono">${esc(node.id)}</span><span class="rm-state" title="${esc(node.label)}">${stateOrb(node,tasks)}${esc(node.label||'Needs organization')}</span></div>${claimChip(node,tasks,true,nodeLevel(o,node,tasks))}
+   <div class="rm-node-top"><span class="mono">${esc(node.id)}</span><span class="rm-state" title="${esc(node.label)}">${stateOrb(node,tasks)}${esc(node.label||'Needs organization')}</span></div>${overdueChip(task)}${claimChip(node,tasks,true,nodeLevel(o,node,tasks))}
    <button type="button" class="rm-title" data-task="${esc(node.id)}" title="${esc(task.title)}"><span class="rm-title-text">${esc(task.title)}</span></button>
    <button type="button" class="rm-more" data-rm-details="${esc(node.id)}" aria-controls="rm-info-${esc(node.id)}" aria-expanded="${expanded}" aria-label="Details and actions for ${esc(node.id)}" title="Details and actions">&#8943;</button>
    <div id="rm-info-${esc(node.id)}" class="rm-node-info" ${expanded?'':'hidden'}><div class="rm-context">${esc(op?titleOf(o,op):task.op)}${task.phase?' / '+esc(task.phase):''}</div>
@@ -96,7 +122,7 @@ function nodeCard(node,tasks,o,compact=false,expanded=false,mark=''){
   ${ringOf(node,tasks)}</article>`;
  }
  return `<article class="rm-node rm-${esc(node.state)}${beamOf(node,tasks)}${mark}" data-rm-node="${esc(node.id)}" data-key="n:${esc(node.id)}">
- <div class="rm-node-top"><span class="mono">${esc(node.id)}</span><span class="rm-state" title="${esc(node.label)}">${stateOrb(node,tasks)}${esc(node.label||'Needs organization')}</span></div>
+ <div class="rm-node-top"><span class="mono">${esc(node.id)}</span><span class="rm-state" title="${esc(node.label)}">${stateOrb(node,tasks)}${esc(node.label||'Needs organization')}</span></div>${overdueChip(task)}
  <button type="button" class="rm-title" data-task="${esc(node.id)}" title="${esc(task.title)}">${esc(task.title)}</button>${claimChip(node,tasks)}${nodeLevel(o,node,tasks)}
  <div class="rm-context">${esc(op?titleOf(o,op):task.op)}${task.phase?' / '+esc(task.phase):''}</div>
  ${node.state==='unplanned'?`<small class="rm-recorded">Recorded: ${esc(task.status||'unknown')}</small>`:''}
@@ -107,8 +133,8 @@ function nodeCard(node,tasks,o,compact=false,expanded=false,mark=''){
 }
 function operationPicker(o,selected){
  const tasks=taskMap(o),available=plans(o),row=(id,title,nodes)=>{
-  const done=nodes.filter(n=>tasks.get(n.id)?.status==='done').length,working=nodes.filter(n=>['working','assignment_expired'].includes(n.state)).length;
-  return `<button type="button" class="rm-choice" data-rm-operation="${esc(id)}" aria-pressed="${selected===id}" data-rm-search-text="${esc((title+' '+id).toLowerCase())}"><span><strong>${esc(title)}</strong><small>${esc(id||'Workspace')} / ${done} of ${nodes.length} done${working?' / '+working+' in progress':''}</small></span><span aria-hidden="true">${selected===id?'&#10003;':'&rarr;'}</span></button>`;
+  const done=nodes.filter(n=>tasks.get(n.id)?.status==='done').length,working=nodes.filter(n=>['working','assignment_expired'].includes(n.state)).length,parked=nodes.filter(n=>n.state==='deferred').length;
+  return `<button type="button" class="rm-choice" data-rm-operation="${esc(id)}" aria-pressed="${selected===id}" data-rm-search-text="${esc((title+' '+id).toLowerCase())}"><span><strong>${esc(title)}</strong><small>${esc(id||'Workspace')} / ${done} of ${nodes.length} done${working?' / '+working+' in progress':''}${parked?' / '+parked+' not now':''}</small></span><span aria-hidden="true">${selected===id?'&#10003;':'&rarr;'}</span></button>`;
  };
  return `<details class="rm-picker" data-rm-picker="operation"><summary aria-label="Choose operation">${esc(selected?titleOf(o,available.find(p=>p.op===selected)||{op:selected}):'All operations')} <span aria-hidden="true">&#9662;</span></summary><div class="rm-picker-menu"><label class="rm-search-label">Find an operation<input type="search" data-rm-search placeholder="Search name or ID" autocomplete="off"></label>${row('','All operations',available.flatMap(nodesOf))}${available.filter(op=>!isResearch(op)).map(op=>row(op.op,titleOf(o,op),nodesOf(op))).join('')}${available.some(isResearch)?`<p class="rm-picker-hint">Research runs</p>${available.filter(isResearch).map(op=>row(op.op,titleOf(o,op),nodesOf(op))).join('')}`:''}<p data-rm-no-results hidden>No matching operations.</p></div></details>`;
 }
@@ -138,24 +164,25 @@ function renderOne(o,op,options={}){
  const model={o,op,mode,key,options,visibleIds,selector,renderedGroups:groups},prior=models.get(viewKey);
  if(prior)Object.assign(prior,model);else models.set(viewKey,model);
  const mark=selectionClasses(op,p);
- const done=all.filter(n=>n.run?n.done:tasks.get(n.id)?.status==='done').length,working=scoped.filter(n=>n.state==='working'||n.state==='assignment_expired').length,ready=scoped.filter(n=>n.state==='ready').length;
+ const done=all.filter(n=>n.run?n.done:tasks.get(n.id)?.status==='done').length,working=scoped.filter(n=>n.state==='working'||n.state==='assignment_expired').length,ready=scoped.filter(n=>n.state==='ready').length,parked=all.filter(n=>n.state==='deferred').length;
  const holder=layout?p:global,folded=mode==='map'&&Boolean(holder.panelCollapsed),bodyId='rm-body-'+encodeURIComponent(viewKey);
  const title=op.op==='all'?'Work by area':titleOf(o,op),summary=op.summary||(op.op==='all'?'Follow each feature from its current task to what comes next.':'Follow the recorded prerequisites within this operation.');
  return `<section class="panel rm-panel rm-${mode==='map'?'map':'list'} ${layout?'rm-'+esc(layout):''} ${folded?'rm-folded':''}" data-rm-key="${esc(viewKey)}" data-key="rm:${esc(viewKey)}">
- ${mode==='map'?`<div class="rm-shell-heading"><button type="button" data-rm-toggle aria-expanded="${!folded}" aria-controls="${esc(bodyId)}"><span class="rm-chevron" aria-hidden="true">&gt;</span><strong>${esc(heading||'Task roadmap')}</strong><span class="rm-shell-count">${working} in progress / ${ready} ready / ${done} of ${all.length} done</span><span class="rm-toggle-label">${folded?'Expand':'Collapse'}</span></button></div>`:''}
+ ${mode==='map'?`<div class="rm-shell-heading"><button type="button" data-rm-toggle aria-expanded="${!folded}" aria-controls="${esc(bodyId)}"><span class="rm-chevron" aria-hidden="true">&gt;</span><strong>${esc(heading||'Task roadmap')}</strong><span class="rm-shell-count">${working} in progress / ${ready} ready / ${done} of ${all.length} done${parked?' / '+parked+' not now':''}</span><span class="rm-toggle-label">${folded?'Expand':'Collapse'}</span></button></div>`:''}
  <div class="rm-body" id="${esc(bodyId)}" ${folded?'hidden':''}>
- <div class="rm-heading"><div><span class="eyebrow">${esc(eyebrow||(mode==='map'?'TASK ROADMAP':'GROUPED CHECKLIST'))}</span><h2>${esc(title)}</h2><p>${esc(summary)}</p><p class="rm-progress-line">${working} in progress <span aria-hidden="true">/</span> ${ready} ready <span aria-hidden="true">/</span> ${done} of ${all.length} done</p></div><div class="rm-controls">${selector?operationPicker(o,op.op==='all'?'':op.op):''}${chatPicker(shown,tasks,p)}<button type="button" class="button rm-clear" data-rm-clear ${!p.chat&&!p.focus?'hidden':''}>Clear focus</button></div></div>
+ <div class="rm-heading"><div><span class="eyebrow">${esc(eyebrow||(mode==='map'?'TASK ROADMAP':'GROUPED CHECKLIST'))}</span><h2>${esc(title)}</h2><p>${esc(summary)}</p><p class="rm-progress-line">${working} in progress <span aria-hidden="true">/</span> ${ready} ready <span aria-hidden="true">/</span> ${done} of ${all.length} done${parked?` <span aria-hidden="true">/</span> ${parked} not now`:''}</p></div><div class="rm-controls">${selector?operationPicker(o,op.op==='all'?'':op.op):''}${chatPicker(shown,tasks,p)}<button type="button" class="button rm-clear" data-rm-clear ${!p.chat&&!p.focus?'hidden':''}>Clear focus</button></div></div>
  ${preface}
+ ${op.op==='all'?'':aarPanel(o,op.op)+notNowPanel(o,op.op)}
  <div class="rm-viewbar">${layout?'':`<div class="rm-categories" role="group" aria-label="Work area">${['',...categories].map(c=>`<button type="button" data-rm-category="${esc(c)}" aria-pressed="${c===category}">${esc(c||'All areas')}</button>`).join('')}</div>`}<div class="rm-fold-all" role="group" aria-label="Open or close cards"><button type="button" data-rm-expand="true">Open all</button><button type="button" data-rm-expand="summary">Summary</button><button type="button" data-rm-expand="false">Close all</button></div>${layout?'':`<div class="rm-visibility" role="group" aria-label="Plan scope"><button type="button" data-rm-completed="false" aria-pressed="${!showDone}" ${completeOnly?'disabled':''}>Active work</button><button type="button" data-rm-completed="true" aria-pressed="${showDone}">Full plan</button></div>`}</div>
  ${claimsStrip(shown,tasks,p)}
  ${op.error?`<p class="inline-warning rm-note">Plan unavailable: ${esc(op.error)}</p>`:''}
- <div class="rm-legend"><span><i class="rm-dot rm-dot-working"></i>In progress</span><span><i class="rm-dot rm-dot-ready"></i>Ready</span><span><i class="rm-dot rm-dot-waiting"></i>Waiting</span><span><i class="rm-dot rm-dot-blocked"></i>Blocked or failed</span><span><i class="rm-dot rm-dot-done"></i>Done</span><span><i class="rm-dot rm-dot-unplanned"></i>Needs organization</span><span class="rm-legend-help">Arrows show prerequisites. Tasks sharing a resource wait their turn.</span></div>
+ <div class="rm-legend"><span><i class="rm-dot rm-dot-working"></i>In progress</span><span><i class="rm-dot rm-dot-ready"></i>Ready</span><span><i class="rm-dot rm-dot-waiting"></i>Waiting</span><span><i class="rm-dot rm-dot-blocked"></i>Blocked or failed</span><span><i class="rm-dot rm-dot-done"></i>Done</span>${all.some(n=>n.state==='deferred')?'<span><i class="rm-dot rm-dot-deferred"></i>Not now</span>':''}${all.some(n=>tasks.get(n.id)?.aar_overdue)?'<span><i class="rm-dot rm-dot-overdue"></i>Overdue action item</span>':''}<span><i class="rm-dot rm-dot-unplanned"></i>Needs organization</span><span class="rm-legend-help">Arrows show prerequisites. Tasks sharing a resource wait their turn.</span></div>
  ${!groups.length?`<p class="rm-note">${all.length?'No tasks match these filters.':'No tasks have been recorded yet.'}</p>`:''}
  <div class="rm-scroll" data-key="scroll"><div class="rm-canvas"${canvasStyle?` style="${esc(canvasStyle)}"`:''}><svg class="rm-connectors" aria-hidden="true" data-key="rm-connectors" data-morph-keep></svg>${groups.map(group=>{
   const count=group.nodes.filter(n=>terminal(n,tasks)).length,complete=count===group.nodes.length,groupNodes=group.nodes.filter(n=>shownIds.has(n.id));
   const expanded=!Object.hasOwn(p.collapsed,group.id)?!complete:!p.collapsed[group.id];
-  const current=group.nodes.find(n=>['working','assignment_expired'].includes(n.state))||group.nodes.find(n=>n.state==='ready')||group.nodes.find(n=>!terminal(n,tasks));
-  return `<details class="rm-group ${group.id.includes('__unplanned__')?'rm-unplanned-group':''}" data-rm-group="${esc(group.id)}" data-key="g:${esc(group.id)}" ${expanded?'open':''}><summary><span class="rm-group-port" aria-hidden="true"></span><span class="rm-chevron" aria-hidden="true">&gt;</span><span class="rm-group-name"><small>${esc(group.category||'Other work')}</small><strong>${esc(group.title)}</strong></span><span class="rm-group-count">${count}/${group.nodes.length}${mode==='map'?'':' complete'}</span><span class="rm-group-current">${current&&['working','assignment_expired'].includes(current.state)?orb('working',20):current&&ALERT.includes(current.state)?orb('breathing',20):''}${current?esc((tasks.get(current.id)?.title||current.id)+' / '+current.label):'Complete'}</span></summary>${groupNodes.length?(group.subgroups?group.subgroups.map(s=>{const inSub=s.nodes.filter(n=>shownIds.has(n.id));return inSub.length?`<div class="rm-sub" data-rm-sub="${esc(s.id)}" data-key="s:${esc(s.id)}"><div class="rm-sub-title">${esc(s.title)}${s.note?`<small>${esc(s.note)}</small>`:''}</div><div class="rm-track">${inSub.map(n=>nodeCard(n,tasks,o,mode==='map',Boolean(p.details[n.id]),mark(n.id))).join('')}</div></div>`:'';}).join(''):`<div class="rm-track">${groupNodes.map(n=>nodeCard(n,tasks,o,mode==='map',Boolean(p.details[n.id]),mark(n.id))).join('')}</div>`):`<p class="rm-note">${count} completed tasks. <button type="button" class="button" data-rm-completed="true">View full plan</button></p>`}</details>`;
+  const current=group.nodes.find(n=>['working','assignment_expired'].includes(n.state))||group.nodes.find(n=>n.state==='ready')||group.nodes.find(n=>!terminal(n,tasks)&&n.state!=='deferred')||group.nodes.find(n=>n.state==='deferred');
+  return `<details class="rm-group ${group.id.includes('__unplanned__')?'rm-unplanned-group':''}" data-rm-group="${esc(group.id)}" data-key="g:${esc(group.id)}" ${expanded?'open':''}><summary><span class="rm-group-port" aria-hidden="true"></span><span class="rm-chevron" aria-hidden="true">&gt;</span><span class="rm-group-name"><small>${esc(group.category||'Other work')}</small><strong>${esc(group.title)}</strong></span><span class="rm-group-count">${count}/${group.nodes.length}${mode==='map'?'':' complete'}</span>${(late=>late?`<span class="rm-group-overdue">${late} overdue</span>`:'')(group.nodes.filter(n=>tasks.get(n.id)?.aar_overdue).length)}<span class="rm-group-current">${current&&['working','assignment_expired'].includes(current.state)?orb('working',20):current&&ALERT.includes(current.state)?orb('breathing',20):''}${current?esc((tasks.get(current.id)?.title||current.id)+' / '+current.label):'Complete'}</span></summary>${groupNodes.length?(group.subgroups?group.subgroups.map(s=>{const inSub=s.nodes.filter(n=>shownIds.has(n.id));return inSub.length?`<div class="rm-sub" data-rm-sub="${esc(s.id)}" data-key="s:${esc(s.id)}"><div class="rm-sub-title">${esc(s.title)}${s.note?`<small>${esc(s.note)}</small>`:''}</div><div class="rm-track">${inSub.map(n=>nodeCard(n,tasks,o,mode==='map',Boolean(p.details[n.id]),mark(n.id))).join('')}</div></div>`:'';}).join(''):`<div class="rm-track">${groupNodes.map(n=>nodeCard(n,tasks,o,mode==='map',Boolean(p.details[n.id]),mark(n.id))).join('')}</div>`):`<p class="rm-note">${count} completed tasks. <button type="button" class="button" data-rm-completed="true">View full plan</button></p>`}</details>`;
  }).join('')}</div></div>
  <p class="rm-footnote">${layout==='phases'?'Phases run in order; each lists its tasks by workstream. Finished tasks stay on the map as done.':showDone?'Full plan includes completed work.':'Completed work is folded away. Choose Full plan to see every step.'} A chat assignment does not confirm a running process.</p></div></section>`;
 }
@@ -203,6 +230,9 @@ export function renderRoadmap(o,options={}){
  const available=plans(o);
 
  const chosen=options.op||(options.all?'':prefs(scope(o)).op),op=available.find(p=>p.op===chosen)||workspace(available,taskMap(o),o);
+ // An op named on purpose that has no task has no plan, but its AAR and Not now facts belong to it.
+ const bare=options.op&&!available.some(p=>p.op===options.op)&&(o.ops||[]).find(x=>x.id===options.op);
+ if(bare)return `<section class="panel rm-panel rm-list"><div class="rm-body"><div class="rm-heading"><div><span class="eyebrow">OPERATION</span><h2>${esc(opLabel(bare.id))}</h2></div></div>${aarPanel(o,bare.id)+notNowPanel(o,bare.id)}<p class="rm-note">No tasks have been recorded yet.</p></div></section>`;
  return renderOne(o,op,options);
 }
 
@@ -210,7 +240,7 @@ export function renderRoadmap(o,options={}){
 // card details are open. A live patch routes the arrows again only when this changed.
 function layoutShape(panel,model){
  return JSON.stringify([model.mode,model.renderedGroups.map(g=>[g.id,g.nodes.map(n=>n.id)]),(model.op.edges||[]).map(e=>[e.from,e.to]),
-  [...panel.querySelectorAll('[data-rm-group]')].map(g=>g.open),[...panel.querySelectorAll('[data-rm-details]')].map(b=>b.getAttribute('aria-expanded')),panel.querySelector('.rm-body')?.hidden]);
+  [...panel.querySelectorAll('[data-rm-group]')].map(g=>g.open),[...panel.querySelectorAll('[data-rm-details]')].map(b=>b.getAttribute('aria-expanded')),[...panel.querySelectorAll('[data-rm-overdue]')].map(e=>e.dataset.rmOverdue),panel.querySelector('.rm-body')?.hidden]);
 }
 let markerSerial=0;
 function draw(panel,model){

@@ -20,6 +20,8 @@ is taken, before any current-state row is mutated:
 The `claim` and `claim-release` event kinds are the board's own (M2.3), reused verbatim so the
 board keeps deriving `doing` and `todo` whether a claim came from the board or from here; the
 lease is stamped through `util.now_iso`, so a FixedClock (M2.2) drives every instant under test.
+A tracker task in deferred is never mirrored; its claim events still land, its row does not move
+(op-057 t-616).
 """
 from __future__ import annotations
 
@@ -100,7 +102,10 @@ def _lease_from(now, minutes):
 
 # --------------------------------------------------------------------- current-state sync
 def _has_task(conn, row_id):
-    return conn.execute("SELECT 1 FROM tasks WHERE id=?", (row_id,)).fetchone() is not None
+    """True when `row_id` is a tracker task whose row a claim may mirror onto. A deferred task is
+    left as it is (op-057 t-616): only `alpaca task move <id> open` takes a task out of deferred."""
+    return conn.execute("SELECT 1 FROM tasks WHERE id=? AND status != 'deferred'",
+                        (row_id,)).fetchone() is not None
 
 
 def _sync_task_doing(conn, row_id, worker, lease_until, now):

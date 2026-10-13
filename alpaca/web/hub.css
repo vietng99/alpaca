@@ -130,6 +130,7 @@ main { padding:var(--sp-8) var(--sp-8) var(--sp-12); max-width:none; width:100%;
 .badge { display:inline-flex; align-items:center; gap:var(--sp-1); border-radius:var(--r-sm); background:var(--surface-muted); color:var(--muted); font-size:var(--fs-xs); line-height:var(--lh-xs); padding:2px var(--sp-2); white-space:nowrap; font-weight:500; vertical-align:middle }
 .badge.pass,.badge.done,.badge.complete { color:var(--green); background:var(--green-bg) }
 .badge.blocked,.badge.stale,.badge.open { color:var(--amber); background:var(--amber-bg) }
+.badge.deferred { color:var(--st-deferred); background:var(--st-deferred-bg) }
 .badge.fail,.badge.error { color:var(--red); background:var(--red-bg) }
 .badge.running,.badge.active,.badge.doing,.badge.in_progress { color:var(--accent); background:var(--accent-soft) }
 .badge-dot { width:6px; height:6px; border-radius:50%; background:currentColor }
@@ -587,6 +588,19 @@ a.hm-cell:hover, a.hm-cell:focus-visible { outline:2px solid var(--accent); outl
 .health-meter[data-band="bad"] .health-fill { background:var(--red) }
 .health-label { font-size:var(--fs-xs); line-height:var(--lh-xs); color:var(--sidebar-text); font-variant-numeric:tabular-nums; white-space:nowrap }
 @media (prefers-reduced-motion:reduce) { .health-fill { transition:none } }
+/* Release bar (op-056 t-614): under the health meter only while a release step runs, from the
+   /hub/vitals.json poll (liveflags.js releaseMeter). It reuses the health track; the fill takes
+   --accent, --red after a failed gate and --faint for a step that ended without a result. */
+.release-meter { display:grid; gap:2px; width:176px; max-width:100%; margin-top:var(--sp-1); font-size:var(--fs-xs); line-height:var(--lh-xs); color:var(--sidebar-text) }
+.release-meter[hidden] { display:none }
+.release-head { display:flex; justify-content:space-between; gap:var(--sp-2); font-weight:600 }
+.release-pct { font-variant-numeric:tabular-nums }
+.release-meter .health-track { flex:none; width:100% }
+.release-fill { display:block; width:0; height:100%; border-radius:inherit; background:var(--accent) }
+.release-meter[data-band="fail"] .release-fill { background:var(--red) }
+.release-meter[data-band="ended"] .release-fill { background:var(--faint) }
+.release-step { overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.release-eta { color:var(--sidebar-muted) }
 /* Topbar pulse orb: the full orb stage scaled into a 56px box at the right end of the topbar,
    in place of the old initials avatar. It sits 26px low and hangs below the topbar, so its rings clear
    the page top even at full load. The caption stays for screen readers; the tooltip states it. */

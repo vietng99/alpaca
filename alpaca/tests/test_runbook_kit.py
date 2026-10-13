@@ -534,7 +534,7 @@ def test_checker_matches_the_product_on_the_extra_fixtures(alone, tmp_path, capt
 SCHEMA_ALWAYS = {"FIELD-MISSING", "FIELD-UNKNOWN", "FIELD-EMPTY", "FIELD-TYPE", "FIELD-NOT-LIST",
                  "VERSION-UNSUPPORTED", "ID-INVALID", "RUN-MISSING", "CHECKS-EMPTY",
                  "CHECKS-WITHOUT-RUN", "CHECK-TYPE-UNKNOWN", "OP-UNKNOWN", "PLUGIN-SCRIPT-VARIABLE", "KNOB-TYPE-UNKNOWN",
-                 "THEN-MISSING", "THEN-UNKNOWN"}
+                 "THEN-MISSING", "THEN-UNKNOWN", "KIND-UNKNOWN", "WATCH-AFTER-INVALID"}
 #: codes a JSON Schema states in some cases only (a number that must lie between two other
 #: fields, a path that climbs out after normalising, a threshold that names a text knob)
 SCHEMA_SOME = {"RANGE", "PATH-ESCAPES", "VALUE-NOT-NUMBER", "KNOB-DEFAULT-TYPE", "KNOB-DEFAULT-RANGE",
@@ -546,7 +546,11 @@ SCHEMA_NEVER = {"ID-DUPLICATE", "NEEDS-UNKNOWN", "VAR-UNKNOWN", "RETRY-CHECK-UNK
                 "PLUGIN-MISSING", "PLUGIN-NOT-EXECUTABLE", "SPEC-MISSING", "SPEC-EMPTY", "SPEC-MIXED",
                 "SPEC-UNCOVERED", "COVERS-UNKNOWN", "COVERS-AMBIGUOUS", "SPEC-DELTA", "EC-UNNUMBERED",
                 "RECOVERY-UNKNOWN", "RECOVERY-NOT-MARKED", "RECOVERY-NEEDED", "RECOVERY-SELF",
-                "RECOVERY-CHAIN", "RECOVERY-NO-ATTEMPT", "COVERS-NO-DETECT"}
+                "RECOVERY-CHAIN", "RECOVERY-NO-ATTEMPT", "COVERS-NO-DETECT",
+                # the ship rules of a `kind: ship` runbook and the lists that name checks
+                "SHIP-NO-ROLLBACK", "SHIP-NO-EXTERNAL", "SHIP-NO-RECOVERY", "SHIP-NO-WATCH",
+                "WATCH-CHECK-UNKNOWN", "WATCH-BEFORE-CHANGE", "ROLLBACK-CHECK-UNKNOWN",
+                "ROLLBACK-DEPUTY-SAME"}
 NOT_A_MAPPING = {"FILE-UNREADABLE", "YAML-SYNTAX", "NOT-MAPPING", "KEY-DUPLICATE"}
 
 
@@ -765,7 +769,8 @@ def test_format_names_every_code_and_every_field(built):
     for code in runbook.ERROR_CODES + runbook.WARNING_CODES:
         assert "`%s`" % code in text, code
     tables = [runbook.TOP_KEYS, runbook.KNOB_KEYS, runbook.STAGE_KEYS, runbook.CHECK_KEYS, runbook.RETRY_KEYS,
-              runbook.MOVE_KEYS, runbook.GATE_KEYS, runbook.OUTPUT_KEYS, runbook.FAIL_KEYS]
+              runbook.MOVE_KEYS, runbook.GATE_KEYS, runbook.OUTPUT_KEYS, runbook.FAIL_KEYS,
+              runbook.ROLLBACK_KEYS, runbook.WATCH_KEYS]
     tables += list(runbook.TYPE_KEYS.values())
     for table in tables:
         for key in table:

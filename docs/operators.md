@@ -155,6 +155,32 @@ A `bin/alpaca` verb run without `--session` takes its session from `ALPACA_SESSI
 
 Both operators assign a named feature/workstream, work area, prerequisites and resources when they add a task. Reuse an existing group where it fits. Keep the map current when work splits or its prerequisites change. Follow the commands in [Maintaining a useful checklist](operations-hub.md#maintaining-a-useful-checklist); this also covers the project-local required-planning policy.
 
+## Deferred tasks and after-action reports
+
+Both operators use the same verbs, and the hub shows the result (see [Reading the work](operations-hub.md#reading-the-work)).
+
+- Deferred. `task move <id> deferred` parks a task that should wait. It needs `--reason` and `--reactivate-when`; the trigger may name `after:t-NNN`, `op:op-NNN closed` or `date:YYYY-MM-DD`, and free text alone never fires. A claim held on the task is released with the move. A deferred task moves out only to open. Moving a done task to deferred counts as moving it back from done, so its op then owes an after-action report. The example and the trigger rules are in [Maintaining a useful checklist](operations-hub.md#maintaining-a-useful-checklist).
+- The after-action report. `aar new <op>` writes `.alpaca/aar/<op>.md` with the op's timeline filled from the record. `aar check <op>` names every missing or empty part and every claim with no pointer. `aar review <op> --reviewer <id>` writes a packet a fresh subagent reviews (the checks are in `.claude/skills/alpaca-aar/SKILL.md`), and `aar accept <op> --review <file>` or `aar rework <op> --reason <why>` records the main session's decision. `aar seal <op>` needs an accepted review of the report as it is now; it checks the report, records its hash, and files each row of its Action items table as a task, in the standing After-action items op unless `--into <op>` names another open op. There is one standing After-action items op: a seal never opens a second one; when its plan is full the seal refuses and names `--into`, and its own report files its items into itself. While an action item filed by another op's report is not done (deferred and blocked count as not done), the report must keep its row under Carried over: `aar check`, `aar review` and `aar seal` refuse a report that leaves the section out or drops a row, and name the row to add. With nothing open the section is left out. The check of a sealed report that has not changed does not apply this rule.
+
+```sh
+bin/alpaca --session SESSION_ID aar new op-012
+bin/alpaca --session SESSION_ID aar check op-012
+bin/alpaca --session SESSION_ID aar review op-012 --reviewer rev-1
+bin/alpaca --session SESSION_ID aar accept op-012 --review .alpaca/aar/op-012.review/review.json
+bin/alpaca --session SESSION_ID aar seal op-012 --into op-013
+```
+
+- What makes an op owe a report. `aar owed <op>` lists the triggers recorded for that op after its last sealed report or owner waiver, with their event ids. A task of the op moved back from done (to open, doing, blocked or deferred) and an `aar owe <op>` always count for the op. A NO-GO counts for the op in its event's op column, else for the one op of the tasks the deciding session held in doing at that time. A release check FAIL counts for the one op of the tasks the recording session held then; the shared `cli` and `alpaca` sessions hold none. A trigger is tied only to an op that was open when it was recorded and is not a standing op: tasks of a closed op or of a standing op are not counted, and a session left with no op or with two ops leaves it unattributed. A NO-GO or FAIL no op can be tied to is unattributed, and it blocks the close of every op that was open when it was recorded (an op opened later is not blocked) until that op's report is sealed or the owner waives it for that op (one message `<op>: waive` per op); a seal answers every trigger counted for the op up to the seal, so one recorded after it needs a new seal. `aar owe <op> --event <id>` instead moves the trigger to one of them (or to an op closed since that was open when it was recorded, which then owes the report), which makes that op owe the report and clears the trigger for the others. Plain `aar owed` lists every op's triggers, then the unattributed ones with the open ops each blocks. One recorded while no op was open is listed and blocks nothing. The two standing ops (After-action items, Release watch) are open ops and are blocked too, but `aar owe` refuses to tie a trigger to one, since it never closes. A change to the profile's `review_flow_kinds` can add or remove NO-GOs. `aar owe <op> --reason "..."` records a trigger of its own for an op. An action item's due in a report is a date `YYYY-MM-DD`; `aar check` refuses any other form:
+
+```sh
+bin/alpaca aar owed
+bin/alpaca --session SESSION_ID aar owe op-012 --reason "The deploy was rolled back twice"
+bin/alpaca --session SESSION_ID aar owe op-012 --event 190629
+bin/alpaca aar owed op-012
+```
+
+- The close gate. `op close` refuses while `aar owed <op>` lists a trigger, and also when it cannot read the review flow named in the profile, for example `GATE alpaca-op-close: BLOCKED (AAR owed for 1 trigger(s): reopen event:412 (t-031 moved from done to open); seal the report with alpaca aar seal op-012, or the owner waives it with alpaca aar waive op-012 --by owner --quote ...)`. It also blocks on a deferred task with no trigger on the record ("deferred with no trigger on the record: t-005"), and lists the other deferred tasks with their triggers in the op-close event. Seal the report to close the op. An edit to the report after the seal undoes it: the triggers it answered are owed again, unless an owner waiver covers them, and `aar check <op>` names the change until you run `aar seal <op>` again. A waiver is the owner's decision: the owner sends a message in this session that is exactly `op-012: waive`, and only then does `aar waive op-012 --by owner --quote "op-012: waive"` record it. An agent never writes that message for the owner and never waives on its own judgement; one owner message waives the triggers recorded before it, once, and a later trigger needs a new owner message.
+
 ## Shared boundaries
 
 The CLI shim pins its own root. Python callers can select an explicit root;

@@ -2,7 +2,17 @@
 import datetime, json, os, re, time
 from alpaca import cli, db, util
 
-STATUSES = ("open", "doing", "done", "blocked")
+STATUSES = ("open", "doing", "done", "blocked", "deferred")
+# op-057 t-623: the After-action items op is found by this marker event, never by its title. It holds
+# the filed action items, so it is not the op the work happens in (current_op, the default intake op).
+STANDING_KIND = "aar-items-op"
+# op-057 t-629: the Release watch op holds the watch tasks of a publish that names no op and runs
+# in none; it is found by its own marker and skipped the same way.
+RELEASE_WATCH_KIND = "release-watch-op"
+STANDING_KINDS = (STANDING_KIND, RELEASE_WATCH_KIND)
+_STANDING_OPS = "SELECT op FROM events WHERE kind IN (%s) AND op IS NOT NULL" % ",".join(
+    "'%s'" % k for k in STANDING_KINDS)
+NOT_STANDING = "id NOT IN (%s)" % _STANDING_OPS
 
 # M4.16: the M4 milestone op cannot close on the mechanical manual clauses alone. Before it
 # closes, the owner opens docs/manual.html on a phone over a file link and records
@@ -18,12 +28,151 @@ def _is_m4_milestone_op(op_row) -> bool:
     text = " ".join(str(op_row.get(k) or "") for k in ("intent", "done_when"))
     return bool(_M4_MILESTONE.search(text))
 
+# op-057 t-616: a deferred task names what brings it back. --reactivate-when is free text that may
+# carry structured forms; parse_trigger finds them so t-617 can tell when a trigger is met.
+_TRIGGER_PREFIX = re.compile(r"(?<![\w-])(after|op|date):", re.I | re.A)
+_TRIGGER_FORMS = {
+    "after": (re.compile(r"after:(t-\d+)(?![\w-])", re.I | re.A), "after",
+              "after: needs a task id, like after:t-012"),
+    "op": (re.compile(r"op:(op-\d+)\s+closed(?![\w-])", re.I | re.A), "op-closed",
+           "op: needs an op id and the word closed, like op:op-012 closed"),
+    "date": (re.compile(r"date:(\d{4}-\d{2}-\d{2})(?![\w-])", re.I | re.A), "date",
+             "date: needs a real date, like date:2026-12-01"),
+}
+
+def _is_date(s):
+    try:
+        datetime.date.fromisoformat(s); return True
+    except ValueError:
+        return False
+
+def parse_trigger(text):
+    """--reactivate-when text -> {"text", "forms", "errors"}. text is the stripped input, the
+    source of truth. forms lists {"kind", "target"} in order of appearance, duplicates dropped:
+    kind after (target t-NNN, met when that task is done), op-closed (target op-NNN, met when that
+    op is closed) or date (target YYYY-MM-DD, met on or after that local date). The trigger is met
+    when any form is met; free text alone never is. errors holds one sentence for each after:, op:
+    or date: that does not parse. Never raises and never reads the record."""
+    raw = str(text or "").strip()
+    forms, errors = [], []
+    for hit in _TRIGGER_PREFIX.finditer(raw):
+        pattern, kind, hint = _TRIGGER_FORMS[hit.group(1).lower()]
+        m = pattern.match(raw, hit.start())
+        target = m.group(1).lower() if m else None
+        if target and kind == "date" and not _is_date(target):
+            target = None
+        if target is None:
+            errors.append("%s is not a trigger; %s" % ((raw[hit.start():].split() or [""])[0], hint))
+        elif {"kind": kind, "target": target} not in forms:
+            forms.append({"kind": kind, "target": target})
+    return {"text": raw, "forms": forms, "errors": errors}
+
+def deferral(conn, task_id):
+    """The deferral in force on a task: {"reason", "reactivate_when", "event", "ts"} from its NEWEST
+    task-move, when that move went to deferred with a non-blank trigger; None otherwise (a row set
+    to deferred some other way, or a task moved on since). t-617 reads the Not now list from here
+    and re-parses reactivate_when with parse_trigger."""
+    r = conn.execute("SELECT id, ts, data FROM events WHERE kind='task-move' AND ref=? "
+                     "ORDER BY id DESC LIMIT 1", (task_id,)).fetchone()
+    d = json.loads(r["data"]) if r and r["data"] else {}
+    when = str(d.get("reactivate_when") or "").strip()
+    if d.get("to") != "deferred" or not when:
+        return None
+    return {"reason": d.get("reason"), "reactivate_when": when, "event": r["id"], "ts": r["ts"]}
+
+#: the task statuses listed under Not now (op-057 t-617). A reader that leaves parked work out
+#: of a list, or lists it, names this tuple, so the decision is easy to find.
+NOT_NOW = ("deferred",)
+#: the words every projection prints on an entry whose structured trigger has come true.
+TRIGGER_MET = "trigger met: reconsider"
+
+def trigger_met_by(conn, forms, today):
+    """The first of parse_trigger's `forms` that has come true, in words, or None. after: that
+    task row is done; op-closed: that op row is closed; date: `today` (YYYY-MM-DD, the record's
+    own date, None on an empty record) is on or after it. Read live on every call and never
+    recursive, so a done task moved back makes it unmet again and two tasks waiting on each
+    other stay unmet. Free text has no forms, so it is never met."""
+    for f in forms:
+        kind, target = f.get("kind"), f.get("target")
+        if kind == "after":
+            r = conn.execute("SELECT status FROM tasks WHERE id=?", (target,)).fetchone()
+            if r and r[0] == "done":
+                return "%s is done" % target
+        elif kind == "op-closed":
+            r = conn.execute("SELECT status FROM ops WHERE id=?", (target,)).fetchone()
+            if r and r[0] == "closed":
+                return "%s is closed" % target
+        elif kind == "date" and today and today >= target:
+            return "%s has come" % target
+    return None
+
+def not_now(conn, today=None):
+    """The Not now list, by id: one dict per task whose ROW is deferred, {"id", "op", "op_closed",
+    "title", "reason", "reactivate_when", "forms", "trigger_met", "met_by", "since", "error"}.
+    The list follows tasks.status; reason and trigger come from deferral() only, and are None for
+    a row deferred some other way (listed, never met). today defaults to the record's own date
+    (the newest event's stamp, in the offset it was written in), never the wall clock, so two
+    renders of one record agree and the freshness gate stays green across midnight. A failure
+    reading one deferral is named on that entry (error) instead of dropping it."""
+    if today is None:
+        from alpaca import sessions_view
+        today = (sessions_view.record_now(conn) or "")[:10] or None
+    closed = {r[0] for r in conn.execute("SELECT id FROM ops WHERE status='closed'")}
+    out = []
+    for t in db.rows(conn, "tasks", "status IN (%s) ORDER BY id" % ",".join("'%s'" % s for s in NOT_NOW)):
+        row = {"id": t["id"], "op": t["op"], "op_closed": t["op"] in closed,
+               "title": t["title"] or t["statement"], "reason": None, "reactivate_when": None,
+               "forms": [], "trigger_met": False, "met_by": None, "since": None, "error": None}
+        try:
+            d = deferral(conn, t["id"])
+            if d:
+                forms = parse_trigger(d["reactivate_when"])["forms"]
+                met_by = trigger_met_by(conn, forms, today)
+                row.update(reason=d["reason"], reactivate_when=d["reactivate_when"], since=d["ts"],
+                           forms=forms, trigger_met=met_by is not None, met_by=met_by)
+        except Exception as exc:
+            row["error"] = type(exc).__name__
+        out.append(row)
+    return out
+
+def not_now_words(row, clean=None):
+    """The phrases a Not now entry prints after its id and title: why it waits, what brings it
+    back, and TRIGGER_MET with what met it. Free text sits in straight double quotes after a
+    fixed label, so a reason such as 'open question' never reads as a '<word>: open' status
+    claim to gates/record_check.py. clean prepares each free-text value for its surface; the
+    default folds whitespace onto one line. row may be None (a row copied without its deferral)."""
+    clean = clean or (lambda v: " ".join(str(v).split()))
+    row = row or {}
+    if row.get("error"):
+        return ["The deferral could not be read (%s)" % row["error"]]
+    quoted = lambda v: '"%s"' % clean(v) if v else "(not recorded)"
+    words = ["Why not now: " + quoted(row.get("reason")),
+             "Comes back when: " + quoted(row.get("reactivate_when"))]
+    if row.get("trigger_met"):
+        words.append("%s (%s)" % (TRIGGER_MET, row.get("met_by")))
+    return words
+
+def _trigger_problem(conn, task_id, parsed):
+    """Why a --reactivate-when value can never fire, or None. Free text always passes."""
+    if parsed["errors"]:
+        return parsed["errors"][0]
+    for f in parsed["forms"]:
+        if f["kind"] == "after" and f["target"] == task_id:
+            return "after:%s names the task itself; it would never fire" % task_id
+        if f["kind"] == "after" and not db.rows(conn, "tasks", "id=?", (f["target"],)):
+            return "after:%s names no task on the record" % f["target"]
+        if f["kind"] == "op-closed" and not db.rows(conn, "ops", "id=?", (f["target"],)):
+            return "op:%s closed names no op on the record" % f["target"]
+    return None
+
 def current_op(conn):
-    r = conn.execute("SELECT * FROM ops WHERE status='open' ORDER BY opened DESC LIMIT 1").fetchone()
+    r = conn.execute("SELECT * FROM ops WHERE status='open' AND " + NOT_STANDING
+                     + " ORDER BY opened DESC LIMIT 1").fetchone()
     return dict(r) if r else None
 
 def first_open_task(conn, op=None):
-    q = "SELECT * FROM tasks WHERE status IN ('open','doing')" + (" AND op=?" if op else "") + " ORDER BY id LIMIT 1"
+    q = ("SELECT * FROM tasks WHERE status IN ('open','doing')" + (" AND op=?" if op else "")
+         + " ORDER BY (op IN (%s)), id LIMIT 1" % _STANDING_OPS)
     r = conn.execute(q, (op,) if op else ()).fetchone()
     return dict(r) if r else None
 
@@ -102,6 +251,22 @@ def open_op(conn, intent, done_when, *, phases=None, session, actor, from_intent
     return oid
 
 
+def standing_op(conn, kind):
+    """The id of the newest open op marked with `kind` (one of STANDING_KINDS), or None. Found by the
+    marker event, never by title."""
+    r = conn.execute("SELECT e.op FROM events e JOIN ops o ON o.id = e.op WHERE e.kind=? "
+                     "AND o.status='open' ORDER BY e.id DESC LIMIT 1", (kind,)).fetchone()
+    return r[0] if r else None
+
+
+def open_standing(conn, kind, intent, done_when, title, *, session, actor):
+    """Open a standing op and mark it with `kind`. Joins the caller's transaction."""
+    oid = open_op(conn, intent, done_when, session=session, actor=actor, title=title)
+    db.append_event(conn, session=session, actor=actor, kind=kind, op=oid, ref=oid,
+                    data={"title": title}, conn_in_txn=True)
+    return oid
+
+
 @cli.command("op")
 def cmd_op(args):
     conn = db.connect(cli._root()); sid = args.session or "cli"; now = util.now_iso()
@@ -162,9 +327,19 @@ def cmd_op(args):
         if not ops_rows: print("GATE alpaca-op-close: FAIL (no op %s)" % args.id); return cli.FAIL
         if ops_rows[0]["status"] == "closed":
             print("GATE alpaca-op-close: FAIL (%s already closed)" % args.id); return cli.FAIL
-        left = db.rows(conn, "tasks", "op=? AND status != 'done'", (args.id,))
+        # op-057 t-616: a deferred task whose newest move carries a trigger is settled for the close;
+        # the op-close event lists each with its trigger. A deferred row with no trigger blocks.
+        left, deferred, untriggered = [], [], []
+        for row in db.rows(conn, "tasks", "op=? AND status != 'done'", (args.id,)):
+            got = deferral(conn, row["id"]) if row["status"] == "deferred" else None
+            if got:
+                deferred.append({"id": row["id"], "reason": got["reason"], "reactivate_when": got["reactivate_when"]})
+                continue
+            left.append(row["id"])
+            if row["status"] == "deferred": untriggered.append(row["id"])
         if left:
-            print("GATE alpaca-op-close: BLOCKED (%d tasks not done: %s)" % (len(left), ", ".join(t["id"] for t in left)))
+            tail = ("; deferred with no trigger on the record: %s" % ", ".join(untriggered)) if untriggered else ""
+            print("GATE alpaca-op-close: BLOCKED (%d tasks not done: %s%s)" % (len(left), ", ".join(left), tail))
             return cli.BLOCKED
         # M4.16: the M4 milestone op refuses to close without the owner's manual-phone-read
         # countersign. Read ONLY that ref through decisions.resolve; a missing row is a paused
@@ -180,9 +355,29 @@ def cmd_op(args):
                       "the M4 op cannot close until the owner records the phone read)"
                       % MANUAL_PHONE_READ_REF)
                 return _vc.PAUSED
+        # op-057 t-622: an op owes an after-action report when a NO-GO, a task moved back from done,
+        # a failed release check or `alpaca aar owe` is on the record after its last sealed report
+        # (aar.owed), or a NO-GO or release check FAIL no op is tied to was recorded while this op
+        # was open. It closes once the report is sealed or the owner waives it; a seal answers every
+        # trigger counted for the op, a NO-GO or release check FAIL no op is tied to included, and
+        # `aar owe --event` moves such a trigger to the op it belongs to.
+        # Read here, right before the write; not atomic with it (the t-616 r3 N3 window).
+        from alpaca import aar
+        from alpaca import profile
+        try:
+            due = aar.owed(conn, cli._root(), args.id)[0].get(args.id)
+        except profile.ProfileError as exc:
+            print("GATE alpaca-op-close: BLOCKED (the review-flow NO-GOs cannot be read, so an owed AAR "
+                  "cannot be ruled out: %s)" % exc)
+            return cli.BLOCKED
+        if due:
+            print("GATE alpaca-op-close: BLOCKED (%s)" % aar.gate_text(conn, cli._root(), args.id, due))
+            return cli.BLOCKED
         with db.transaction(conn):
+            data = {"basis": args.basis}
+            if deferred: data["deferred"] = sorted(deferred, key=lambda d: d["id"])
             db.append_event(conn, session=sid, actor="human", kind="op-close", op=args.id,
-                            data={"basis": args.basis}, conn_in_txn=True)
+                            data=data, conn_in_txn=True)
             db.patch(conn, "ops", "id", args.id, {"status": "closed", "closed": now})
         # M3.6: record who judged the bar met and on what basis (the close basis). Additive; the
         # basis is already required at the CLI boundary, so this records the judgment on the chain.
@@ -463,6 +658,25 @@ def cmd_task(args):
             return _move_checklist_row(conn, sid, crow[0], args)
         t = db.rows(conn, "tasks", "id=?", (args.id,))
         if not t: print("GATE alpaca-task: FAIL (no task %s)" % args.id); return cli.FAIL
+        # op-057 t-616: deferred means "not now". A move into it names a reason and a trigger; a
+        # deferred task moves out to open only. Checked before the intent and proof gates, so a
+        # refused move writes nothing.
+        when = (args.reactivate_when or "").strip()
+        if t[0]["status"] == "deferred" and args.status != "open":
+            print("GATE alpaca-task-move: FAIL (%s is deferred; move it to open first)" % args.id)
+            return cli.FAIL
+        if args.reactivate_when is not None and args.status != "deferred":
+            print("GATE alpaca-task-move: FAIL (--reactivate-when goes only with deferred)")
+            return cli.FAIL
+        if args.status == "deferred":
+            missing = [f for f, v in (("--reason", args.reason), ("--reactivate-when", when))
+                       if not (v or "").strip()]
+            if missing:
+                print("GATE alpaca-task-move: FAIL (deferred needs %s)" % " and ".join(missing))
+                return cli.FAIL
+            problem = _trigger_problem(conn, args.id, parse_trigger(when))
+            if problem:
+                print("GATE alpaca-task-move: FAIL (%s)" % problem); return cli.FAIL
         if _intent_refused(conn, t[0], args.status, sid, "alpaca-task-move"): return cli.FAIL
         # E4: done is closed by a SEALED PROOF REPORT, never by a bare string. `--proof` must be
         # local:<report>, the pointer must resolve, and the latest proof-report event for this
@@ -474,9 +688,26 @@ def cmd_task(args):
                 proof.refuse_done("alpaca-task-move", args.id, problems)
                 return cli.FAIL
         with db.transaction(conn):
+            # op-057 t-616: the guard above read the row before this transaction. Re-read it under the
+            # write lock, so a deferral another session wrote in between is not overwritten.
+            cur = conn.execute("SELECT status FROM tasks WHERE id=?", (args.id,)).fetchone()
+            was = cur["status"] if cur else t[0]["status"]
+            if was == "deferred" and args.status != "open":
+                print("GATE alpaca-task-move: FAIL (%s is deferred; move it to open first)" % args.id)
+                return cli.FAIL
+            if args.status == "deferred":
+                # End a claim still held on the task, so the claim fold and the cockpit stop naming a
+                # holder and no sweep or heartbeat acts on a parked task. The release comes BEFORE the
+                # task-move event: the research state fold reads the newest status event, and a
+                # claim-release after the deferral would read as open.
+                from alpaca import board, claims
+                held = board.fold_leases(conn, [args.id]).get(args.id)
+                if held: claims.release(conn, args.id, held["worker"], session=sid, now=now)
+            data = {"from": was, "to": args.status, "proof": args.proof, "reason": args.reason}
+            if args.status == "deferred":
+                data["reason"] = args.reason.strip(); data["reactivate_when"] = when
             db.append_event(conn, session=sid, actor=args.by or "human", kind="task-move", op=t[0]["op"], ref=args.id,
-                            data={"from": t[0]["status"], "to": args.status, "proof": args.proof, "reason": args.reason},
-                            conn_in_txn=True)
+                            data=data, conn_in_txn=True)
             updates = {"status": args.status, "updated": now}
             if args.proof: updates["proof"] = args.proof
             if args.status != "doing": updates["claimant"] = None; updates["lease_until"] = None
@@ -688,7 +919,9 @@ def _parser(sub):
     ti.add_argument("--quote", help="with --by owner|human: the owner's whole message answering the task id")
     cl = tv.add_parser("claim"); cl.add_argument("id"); cl.add_argument("--by", required=True); cl.add_argument("--minutes", type=int, default=60)
     mv = tv.add_parser("move"); mv.add_argument("id"); mv.add_argument("status", choices=STATUSES)
-    mv.add_argument("--proof"); mv.add_argument("--reason"); mv.add_argument("--by")
+    mv.add_argument("--proof"); mv.add_argument("--reason", help="why; required with deferred"); mv.add_argument("--by")
+    mv.add_argument("--reactivate-when", help="with deferred: what brings the task back; free text that may "
+                    "name after:t-NNN, op:op-NNN closed or date:YYYY-MM-DD")
     mv.add_argument("--level")   # M1.13: the level a checklist-row discharge is authored at
     ls = tv.add_parser("list"); ls.add_argument("--op")
     ms = sub.add_parser("msg"); mvb = ms.add_subparsers(dest="msg_verb")

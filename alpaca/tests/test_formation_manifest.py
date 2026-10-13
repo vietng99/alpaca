@@ -195,3 +195,53 @@ def test_payload_for_unknown_role_is_refused(tmp_path):
     m = manifest.load(path)
     with pytest.raises(manifest.ManifestError):
         manifest.payload_for(m, "ghost", _payload())
+
+
+# ------------------------------------------------ closed top-level key set (op-013 t-245)
+def _with_extra(extra):
+    """GOOD with extra top-level front matter lines before the closing delimiter."""
+    head, fm, tail = GOOD.split("---\n", 2)
+    return "---\n" + fm + extra + "---\n" + tail
+
+
+@pytest.mark.parametrize("extra,key", [
+    ("escalations:\n  round_cap: 4\n", "escalations"),
+    ("Escalation:\n  round_cap: 4\n", "Escalation"),
+    ("outputs: x\n", "outputs"),
+])
+def test_load_refuses_an_unknown_top_level_key(tmp_path, extra, key):
+    path = _write(str(tmp_path), "typo.md", _with_extra(extra))
+    with pytest.raises(manifest.ManifestError) as exc:
+        manifest.load(path)
+    assert key in str(exc.value) and "known:" in str(exc.value)
+
+
+def test_registry_refuses_a_candidate_with_an_unknown_key(tmp_path):
+    forms = tmp_path / "formations"
+    forms.mkdir()
+    _write(str(forms), "typo.md", _with_extra("escalations:\n  round_cap: 4\n"))
+    with pytest.raises(manifest.ManifestError, match="unknown top-level keys"):
+        manifest.registry(str(tmp_path))
+
+
+def test_unknown_key_message_survives_non_string_keys(tmp_path):
+    path = _write(str(tmp_path), "odd.md",
+                  _with_extra("2: x\ntrue: y\n~: z\nescalations: 4\n"))
+    with pytest.raises(manifest.ManifestError) as exc:
+        manifest.load(path)
+    for name in ("2", "True", "None", "escalations"):
+        assert name in str(exc.value)
+
+
+def test_load_accepts_every_optional_key(tmp_path):
+    extra = "escalation:\n  round_cap: 4\ndefault_for: [verify]\nskill: x\ncutover: owner-decision\n"
+    m = manifest.load(_write(str(tmp_path), "ok.md", _with_extra(extra)))
+    for key in manifest.OPTIONAL:
+        assert key in m.raw
+
+
+def test_a_misspelt_required_key_is_named(tmp_path):
+    text = GOOD.replace("\nroles:\n", "\nRoles:\n", 1)
+    with pytest.raises(manifest.ManifestError) as exc:
+        manifest.load(_write(str(tmp_path), "caps.md", text))
+    assert "Roles" in str(exc.value)

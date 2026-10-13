@@ -27,6 +27,7 @@ import json
 import os
 
 from alpaca import board, db, profile, sessions_view, util
+from alpaca import ops as _ops
 from alpaca import render as _render                # aliased: this module defines its own `render`
 
 #: how many entries the `now` fold keeps of each unbounded list, so a long run cannot grow
@@ -89,9 +90,9 @@ def _now(conn, cards, root) -> dict:
     work = sessions_view.of_class(view, sessions_view.WORK)
     sealed = {r[0] for r in conn.execute(
         "SELECT DISTINCT ref FROM events WHERE kind='proof-report' AND ref IS NOT NULL")}
-    order = {"doing": 0, "open": 1, "blocked": 2, "done": 3}
+    order = {"doing": 0, "open": 1, "blocked": 2, "deferred": 3, "done": 4}
     tasks = sorted(db.rows(conn, "tasks", "1=1 ORDER BY id"),
-                   key=lambda t: (order.get(t["status"], 4), str(t["id"])))
+                   key=lambda t: (order.get(t["status"], 5), str(t["id"])))
     recent = sessions_view.recent_events(conn, view, limit=NOW_RECENT)
     sessions = []
     for sid in work[:NOW_SESSIONS]:
@@ -170,10 +171,12 @@ def _pulse(conn, cards=None, root=None) -> dict:
                                     (PULSE_RECENT,))]
     open_tasks = [{"id": t["id"], "op": t["op"], "phase": t["phase"], "status": t["status"],
                    "statement": _render.for_json(t["statement"]), "claimant": _render.for_json(t["claimant"])}
-                  for t in db.rows(conn, "tasks", "status != 'done' ORDER BY id")]
+                  for t in db.rows(conn, "tasks", "status NOT IN ('done','deferred') ORDER BY id")]
+    not_now = [{k: _render.for_json(v) for k, v in r.items()} for r in _ops.not_now(conn)]
     return {
         "recent": recent,
         "open_tasks": open_tasks,
+        "not_now": not_now,
         "events": conn.execute("SELECT COUNT(*) FROM events").fetchone()[0],
         "sessions": conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0],
         "ops": ops,

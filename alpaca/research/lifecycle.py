@@ -114,6 +114,12 @@ def _research(conn, task: str) -> dict:
     return got if isinstance(got, dict) else {}
 
 
+#: Task statuses the runner treats as settled: it neither claims nor works such a task. op-057 t-616:
+#: a deferred task is parked by the owner, so a resumed run leaves it alone. Not types.TERMINAL_STATES,
+#: which stays done/blocked (a deferred task is not an end state of a run).
+_SETTLED = ("done", "blocked", "deferred")
+
+
 def _status(conn, task: str) -> str | None:
     row = conn.execute("SELECT status FROM tasks WHERE id=?", (task,)).fetchone()
     return row["status"] if row else None
@@ -1525,13 +1531,13 @@ class _Attempt:
 
     # ---------------------------------------------------------------- the close plan
     def verify(self, conn) -> int:
-        if _status(conn, self.task) in ("done", "blocked"):
+        if _status(conn, self.task) in _SETTLED:
             return vc.PASS
         return verify_task(conn, self.ctx, self.task)
 
     def close(self, conn) -> int:
         from alpaca.research import proofs, verify_gate
-        if _status(conn, self.task) in ("done", "blocked"):
+        if _status(conn, self.task) in _SETTLED:
             return vc.PASS
         st = verify_gate.state(conn, self.root, self.task)
         outcome = st.get("outcome") or st.get("state")
@@ -1847,7 +1853,7 @@ class _Round:
 
     def candidates(self, conn) -> int:
         for task in self.accepted(conn):
-            if _status(conn, task) in ("done", "blocked"):
+            if _status(conn, task) in _SETTLED:
                 continue
             code = verify_task(conn, self.ctx, task)
             if code != vc.PASS:
@@ -1947,7 +1953,7 @@ class _Round:
             isolation.destroy_worktree(self.ctx.clone, wt)
         pool = _POOLS.get(self.run)
         for task in self.tasks(conn):
-            if _status(conn, task) in ("done", "blocked"):
+            if _status(conn, task) in _SETTLED:
                 continue
             if pool is not None:
                 pool.put(task)

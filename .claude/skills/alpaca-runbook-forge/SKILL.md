@@ -117,13 +117,19 @@ For each row, take every answer you can find before asking anyone:
 ## Step 3: ask only for the gaps
 
 Collect the cells still empty after step 2 and ask them in ONE message, numbered, each with the
-default you will use if the person does not care. Ask only about these five kinds of thing:
+default you will use if the person does not care. Ask only about these six kinds of thing:
 
 1. **Commands** the repo does not show (how to start the service, how to load-test it).
 2. **Thresholds** the spec states in words but not in numbers ("fast", "most of the time").
 3. **Knobs**: which setting may move when a check fails, and its allowed range.
 4. **Retry limits**: how many attempts, and which failures should stop at once.
 5. **Owner gates**: who approves, and what they look at, when the spec does not say.
+6. **Ship runbooks** (a release or a deploy: something outside the project folder changes): which
+   stage makes that change, which checks force a rollback, who calls a rollback (`authority`) and
+   who calls it when they cannot (`deputy`, another person), and what to check 1h and 24h after
+   the change. Defaults: the deploy stage is the only external one, and each watch stage runs its
+   own health check and looks at that check (a watch cannot look at the deploy stage's check).
+   The authority and the deputy have no default; ask.
 
 Do not ask what the spec or the repo already answers, do not ask about YAML fields, and do not
 ask one question per message. If the person answers "use the defaults", use them and say so in
@@ -173,6 +179,12 @@ Write `runbook.yaml` next to the spec (or in the domain folder), following the f
   ref>`, or `default` for a default you chose (any other text is a `SOURCE-SHAPE` warning);
 - `owner_gate` on every irreversible step, with `approve` in plain words and the `evidence` the
   owner reads;
+- for a ship runbook, `kind: ship` at the top, `external: true` on each stage that changes
+  something outside the project folder, a recovery stage for each of those (a fail case with
+  `detect` and `then: {run: <recovery stage id>}`), a `rollback` block with `automatic`,
+  `discretionary`, `authority` and `deputy`, and two watch stages after the change, one with
+  `watch: {after: 1h, looks_at: [<a check id of that watch stage>]}` and one with `after: 24h`,
+  each reaching the external stage through `needs` (see "Ship runbooks" in `docs/runbook-format.md`);
 - a comment on every value you choose that neither the spec nor the person gave, only for a
   setting that is not a pass bar (a timeout, a port, an attempt count, a knob range):
   `# default chosen by the agent: <why>`.
@@ -460,6 +472,8 @@ Tell the person, in a few lines:
 - in a research runbook, each target with the criterion that states it, and each bar value a
   signed slot gave;
 - the questions you asked, their answers, and the defaults you used;
+- in a ship runbook, the rollback authority and deputy, the checks that force a rollback, and the
+  checks each watch looks at;
 - the warnings left (`FR-UNCOVERED`, `SPEC-CLARIFY`, `SOURCE-SHAPE`, `SOURCE-MISSING`) and what
   would clear them.
 

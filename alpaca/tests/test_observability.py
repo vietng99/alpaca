@@ -718,4 +718,8 @@ def test_snapshot_job_for_a_gone_transcript_closes_without_new_events(tmp_path):
     gone.write_text('{"type":"user"}\n')
     consumers.queue_snapshot(conn,'gone',event_id=2)
     assert consumers.run_snapshot_jobs(str(tmp_path),conn) == {'completed':1,'failed':0}
+    # the snapshot taken again closes the transcript-gone gap (t-606)
+    job, = rows(tmp_path,'obs_projection_job')
+    assert job['status'] == 'done' and job['failures'] == 0 and job['error'] is None
+    assert [i['code'] for i in rows(tmp_path,'obs_issue') if i['resolved_at'] is None] == []
     conn.close()

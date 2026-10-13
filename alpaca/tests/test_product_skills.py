@@ -23,7 +23,7 @@ from alpaca.tests.devfiles import names_as_data
 names_as_data("docs/alpaca-bootstrap")           # a prefix the stale-path scan passes over
 
 SKILLS = ("alpaca-first-chat", "alpaca-onboard", "alpaca-op", "alpaca-runbook-forge",
-          "alpaca-from-notes", "alpaca-interview", "alpaca-log-review", "shield")
+          "alpaca-from-notes", "alpaca-interview", "alpaca-log-review", "alpaca-aar", "shield")
 CLAUDE_SKILLS = os.path.join(REPO, ".claude", "skills")
 
 

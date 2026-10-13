@@ -20,7 +20,9 @@ The schema (M3.7 Step 3): a manifest declares
 A manifest missing any of these is REFUSED (`ManifestError`); absence blocks, never guesses
 (the same non-vacuity ethos the doctrine boot gate holds). Two optional fields belong to the
 shield policy (`formations/shield.yaml`, read by `alpaca.formation.shield`): a role's `tier:`
-and a formation's `escalation:` block.
+and a formation's `escalation:` block. The other optional top-level keys are `default_for`,
+`skill` and `cutover`. Any other top-level key is refused (`ManifestError`), so a typo never
+reads as absent.
 
 The blind-pair rule (KEEP row 12): independence engineered against shared bias -- the verifier
 role never receives the builder's narrative. `payload_for` strips the narrative fields from
@@ -45,6 +47,16 @@ from alpaca import paths
 
 #: the five fields M3.7's Done-when names, plus the name a registry keys on.
 REQUIRED = ("name", "roles", "phases", "gate_map", "budget_class", "output")
+
+#: the shield's optional block; `alpaca.formation.shield.round_cap` reads it.
+ESCALATION = "escalation"
+#: the only key an escalation block holds.
+ESCALATION_KEYS = ("round_cap",)
+#: optional top-level keys: `escalation` (above), `default_for` (the phases a formation is the
+#: default for), `skill` and `cutover` (what napalm and nuclear document). Nothing else.
+OPTIONAL = (ESCALATION, "default_for", "skill", "cutover")
+#: every top-level key a manifest may carry; any other key is refused.
+KNOWN = REQUIRED + OPTIONAL
 
 #: fields a blind pair strips before a payload reaches a blind role: the author's framing.
 #: A blind verifier sees the bare claim and its pointer, never the narrative that produced them.
@@ -97,6 +109,10 @@ def _front_matter(text: str) -> dict:
 
 
 def _validate(data: dict, source: str) -> Manifest:
+    unknown = sorted({str(k) for k in data if k not in KNOWN})
+    if unknown:
+        raise ManifestError("manifest %s is refused: unknown top-level keys %s (known: %s)"
+                            % (source, ", ".join(unknown), ", ".join(KNOWN)))
     missing = [k for k in REQUIRED if k not in data or data[k] in (None, "", [], {})]
     if missing:
         raise ManifestError(

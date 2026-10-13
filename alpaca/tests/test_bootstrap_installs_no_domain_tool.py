@@ -161,7 +161,7 @@ def test_an_offline_bootstrap_reads_only_the_wheelhouse(tmp_path):
                    "-r requirements.txt" % wheels], calls
 
 
-IMPORT_NAME = {"pyyaml": "yaml"}
+IMPORT_NAME = {"pyyaml": "yaml", "pytest-xdist": "xdist"}
 
 
 def _unused_pins(requirements_text):

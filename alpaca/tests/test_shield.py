@@ -510,3 +510,39 @@ def test_a_formation_escalation_block_holds_only_its_cap(tmp_path, block):   # r
     root = _tree(tmp_path, roles, block)
     with pytest.raises(shield.ShieldError, match="may hold only round_cap"):
         shield.round_cap(manifest.registry(root).get("probe"), root)
+
+
+# ------------------------------------------------ strict escalation block (op-013 t-245)
+_ROLES = "  - id: b\n    archetype: eng"
+
+
+@pytest.mark.parametrize("block", ["escalation:\n  round_cap: null\n",
+                                   "escalation:\n  round_cap:\n",
+                                   "escalation:\n  round_cap: ~\n"])
+def test_a_null_round_cap_is_refused(tmp_path, block):
+    root = _tree(tmp_path, _ROLES, block)
+    with pytest.raises(shield.ShieldError, match=r"positive integer \(got None\)"):
+        shield.round_cap(manifest.registry(root).get("probe"), root)
+
+
+@pytest.mark.parametrize("block", ["escalation:\n", "escalation: null\n", "escalation: {}\n"])
+def test_an_empty_escalation_block_is_refused(tmp_path, block):
+    root = _tree(tmp_path, _ROLES, block)
+    with pytest.raises(shield.ShieldError, match="may hold only round_cap"):
+        shield.round_cap(manifest.registry(root).get("probe"), root)
+
+
+@pytest.mark.parametrize("key", ["escalations", "Escalation"])
+def test_a_misspelt_escalation_key_is_refused_not_ignored(tmp_path, key):
+    root = _tree(tmp_path, _ROLES, "%s:\n  round_cap: 4\n" % key)
+    with pytest.raises(manifest.ManifestError, match="unknown top-level keys"):
+        manifest.registry(root)
+    with pytest.raises(manifest.ManifestError, match="unknown top-level keys"):
+        shield.resolve_all("claude", root)
+
+
+def test_an_absent_escalation_keeps_the_policy_cap(tmp_path):
+    root = _tree(tmp_path, _ROLES, "")
+    m = manifest.registry(root).get("probe")
+    assert shield.round_cap(m, root) == 5
+    assert shield.next_step(5, False, m=m, root=root) == shield.STOP_AT_CAP

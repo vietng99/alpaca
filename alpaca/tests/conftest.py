@@ -150,7 +150,79 @@ from alpaca.tests.devfiles import pytest_runtest_setup  # noqa: E402,F401
 
 
 def pytest_configure(config):
+    if not hasattr(config, "workerinput"):
+        # Compile the tree once before any test or pytest-xdist worker starts. In a fresh clone (a
+        # release gate) two processes importing one module at once both write its .pyc, and a
+        # research session that pinned the first one reads the second as an engine change (op-056).
+        # Test fixture folders are data, read file by file (rr004): nothing in them is compiled.
+        import compileall, re, warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")      # a test module's own SyntaxWarning shows when it runs
+            compileall.compile_dir(os.path.join(REPO, "alpaca"), quiet=2, workers=0,
+                                   rx=re.compile(r"[/\\]fixtures[/\\]"))
     config.addinivalue_line("markers", "dev_files(*paths): the test reads these development-only "
                             "files (alpaca/tests/devfiles.py)")
     config.addinivalue_line("markers", "dev_files_lost(*paths, reason): the development tree lost a "
                             "file the test reads; the test fails")
+    config.addinivalue_line("markers", "dev_tree: the test reads the development tree itself (its git "
+                            "index, its release configuration) and skips in a release tree; the "
+                            "release's dev-pytest gate selects it with dev_files (op-056)")
+
+
+# The release runs this suite on pytest-xdist workers with `--dist loadgroup` (project.yaml, op-056).
+# Each test file stays on one worker, so its module fixtures are built once, except:
+# - the files in SPREAD: slow files of independent tests, which go to any free worker test by test;
+# - the files that run research sessions against the live engine files (ENGINE_FILES): they share
+#   one worker, because some of them touch those files on purpose and a session running in another
+#   worker would read the touch as an engine change and end `interrupted`;
+# The tests in SLOW_FIRST are handed out first, so the longest ones do not start last.
+# Without loadgroup (a plain pytest run) nothing is marked or reordered.
+SPREAD = {
+    "test_research_controls.py", "test_research_runner.py", "test_research_verifier.py", "test_boot_check.py", "test_instrument_wiring.py",
+    "wiki/test_screen_door.py", "wiki/test_kill_states.py", "wiki/test_screen_floor_python.py",
+    "wiki/test_lifecycle_model.py",
+}
+ENGINE_FILES = ("research_session", "session_engine", "install_root()")
+#: node id prefixes, slowest first (about 280, 100 and 50 s on 2026-10-13). The browser tests are
+#: left in place: started together on a loaded host, the timing checks of test_studio_motion failed.
+SLOW_FIRST = (
+    "test_research_controls.py::test_an_accepted_control_attempt_still_fails_the_burn_in",
+    "wiki/test_kill_states.py", "wiki/test_lifecycle_model.py", "test_research_redteam.py",
+)
+
+
+def _source(item, cache):
+    path = str(item.path)
+    if path not in cache:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                cache[path] = fh.read()
+        except OSError:
+            cache[path] = ""
+    return cache[path]
+
+
+@pytest.hookimpl(tryfirst=True)       # before xdist's own hook, which reads the marks
+def pytest_collection_modifyitems(config, items):
+    # A module that calls require_dev_files() skips some of its tests in a release tree from inside
+    # the test or a fixture, where no mark can be read; all its tests count as dev_tree, so the
+    # release's dev-pytest gate (`-m "dev_files or dev_tree"`) runs every test a release tree skips.
+    sources = {}
+    for item in items:
+        if "require_dev_files(" in _source(item, sources):
+            item.add_marker(pytest.mark.dev_tree)
+    if not getattr(config.option, "loadgroup", False):    # xdist sets it on its workers
+        return
+    def first(item):
+        rel = os.path.relpath(str(item.path), HERE).replace(os.sep, "/") + "::" + item.name
+        return next((n for n, prefix in enumerate(SLOW_FIRST) if rel.startswith(prefix)), len(SLOW_FIRST))
+    items.sort(key=first)              # stable: every other test keeps its place
+    groups = {}
+    for item in items:
+        rel = os.path.relpath(str(item.path), HERE).replace(os.sep, "/")
+        if rel in SPREAD:
+            continue
+        if rel not in groups:
+            text = _source(item, sources)
+            groups[rel] = "research-engine" if any(n in text for n in ENGINE_FILES) else rel
+        item.add_marker(pytest.mark.xdist_group(groups[rel]))

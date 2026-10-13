@@ -14,7 +14,8 @@ drift from what the census reports.
     two-channel: exit 0 AND its `GATE <name>-selftest: PASS` line), and, under `--full`:
   * the wiki lint (M2.13) over a clean store;
   * the wiki mutation oracle (M2.13) over its checked-in mutation set;
-  * the pytest suite as ONE instrument (regression_suite, M2.13) -- the LAST row.
+  * the pytest suite as ONE instrument (regression_suite, M2.13) -- the LAST row, left out by
+    `--no-suite` when the caller runs that suite itself (the release's dev-pytest gate, op-056).
 
 RE-ENTRANCY (critical). `--full` runs the pytest suite via `regression_suite`, and a test may run
 `--full`. `regression_suite` carries the `ALPACA_REGRESSION_SUITE_ACTIVE` guard: a nested run
@@ -170,17 +171,17 @@ def regression_row(root):
     return ("regression-suite", code)
 
 
-def plan(root, full=False):
+def plan(root, full=False, suite=True):
     """The ordered ROW NAMES this preflight would compose, WITHOUT executing anything. The census
     population first, then (under --full) the wiki lint, the mutation oracle, and the regression
     suite LAST. Used to prove the row list matches the census without running the fleet."""
     names = [r["rel"] for r in selftest_instruments(root)]
     if full:
-        names += ["wiki-lint", "wiki-mutation-oracle", "regression-suite"]
+        names += ["wiki-lint", "wiki-mutation-oracle"] + (["regression-suite"] if suite else [])
     return names
 
 
-def rows(root, full=False):
+def rows(root, full=False, suite=True):
     """Execute every composed row and return the ordered [(name, verdict-code), ...] list. The
     per-instrument selftests run first, then (under --full) the wiki lint, the mutation oracle, and
     the regression suite LAST."""
@@ -188,15 +189,16 @@ def rows(root, full=False):
     if full:
         out.append(wiki_lint_row(root))
         out.append(wiki_oracle_row(root))
-        out.append(regression_row(root))            # LAST
+        if suite:
+            out.append(regression_row(root))        # LAST
     return out
 
 
-def run(root, full=False):
+def run(root, full=False, suite=True):
     """Compose every row and fold to ONE verdict-band code with the contract's worst() precedence
     (BLOCKED > FAIL > PAUSED > PASS). An empty population folds to BLOCKED (a preflight over no
     instrument is never a pass)."""
-    return contract.worst([code for _name, code in rows(root, full=full)])
+    return contract.worst([code for _name, code in rows(root, full=full, suite=suite)])
 
 
 def main(argv=None):
@@ -207,18 +209,22 @@ def main(argv=None):
     ap.add_argument("--root", default=None, help="tree to check (default: the discovered root)")
     ap.add_argument("--full", action="store_true",
                     help="also run the wiki lint, the mutation oracle and the whole pytest suite")
+    ap.add_argument("--no-suite", dest="suite", action="store_false",
+                    help="with --full, leave out the pytest suite row: for a caller that runs the "
+                         "same suite as its own step (the release's dev-pytest gate)")
     ap.add_argument("--plan", action="store_true",
                     help="print the composed row list (from the census) and exit, running nothing")
     a = ap.parse_args(argv)
     root = os.path.abspath(a.root) if a.root else _discover_root()
     if a.plan:
-        for name in plan(root, full=a.full):
+        for name in plan(root, full=a.full, suite=a.suite):
             print("  row %s" % name)
         return vc.PASS
-    scope = "FULL (instruments + wiki lint + mutation oracle + pytest suite)" if a.full \
+    scope = ("FULL (instruments + wiki lint + mutation oracle + pytest suite)" if a.suite else
+             "FULL without the pytest suite (instruments + wiki lint + mutation oracle)") if a.full \
         else "core (instrument selftests)"
     print("boot-check: composing %s from the census over %s" % (scope, root))
-    executed = rows(root, full=a.full)
+    executed = rows(root, full=a.full, suite=a.suite)
     for name, code in executed:
         mark = "OK" if code == vc.PASS else "XX"
         print("  [%s] %-40s %s" % (mark, name, vc.name_of(code)))

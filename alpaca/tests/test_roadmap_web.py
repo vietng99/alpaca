@@ -317,3 +317,135 @@ process.exit(out.some(line=>line.startsWith('FAIL'))?1:0);
         assert run.stdout.count('PASS') >= 6, run.stdout
     finally:
         server.shutdown(); server.server_close()
+
+
+DEFERRED_SCRIPT = r"""
+const checks = {};
+const assert = (name, test) => {checks[name] = Boolean(test);};
+const tick = () => new Promise(resolve => setTimeout(resolve, 80));
+try {
+  const {renderRoadmap, bindRoadmap} = await import('/roadmap.js');
+  const root = document.querySelector('#app');
+  root.innerHTML = renderRoadmap(DATA, {op:'op-001', mode:'map'}); bindRoadmap(root);
+  await tick();
+  const edge = id => getComputedStyle(root.querySelector(`[data-rm-node="${id}"]`)).borderLeftColor;
+  const parked = root.querySelector('[data-rm-node="t-009"]'), panel = root.querySelector('.rm-not-now');
+  assert('deferred_card_has_its_own_tone', parked && parked.classList.contains('rm-deferred') && edge('t-009') !== edge('t-001') && edge('t-009') !== edge('t-002'));
+  assert('panel_visible_with_reason', panel && panel.getBoundingClientRect().height > 0 && panel.textContent.includes('vendor API is not out'));
+  assert('panel_names_the_trigger', panel && panel.textContent.includes('Comes back when'));
+  assert('legend_names_not_now', root.querySelector('.rm-dot-deferred'));
+  assert('panel_inside_the_page', document.documentElement.scrollWidth <= window.innerWidth);
+  document.querySelector('#results').textContent = JSON.stringify({ok:Object.values(checks).every(Boolean), checks});
+} catch(error) {document.querySelector('#results').textContent = JSON.stringify({ok:false, checks, error:String(error)});}
+"""
+
+
+@pytest.mark.parametrize('theme', ['light', 'dark'])
+@pytest.mark.parametrize('width', [1440, 390])
+def test_deferred_card_and_panel_in_both_themes(tmp_path, width, theme):
+    chrome = shutil.which('google-chrome') or shutil.which('chromium')
+    if not chrome:
+        pytest.skip('headless Chrome not available')
+    root = tmp_path / 'fixture'; root.mkdir()
+    data = browser_fixture(root)
+    row = dict(next(t for t in data['tasks'] if t['id'] == 't-003'))
+    long_trigger = 'after the vendor ships ' + 'x' * 60 + ' and the pilot customer signs the renewal and ' + 'y' * 60
+    row.update(id='t-009', title='Parked feature', status='deferred', claimant=None, deferral={
+        'id': 't-009', 'op': 'op-001', 'op_closed': False, 'title': 'Parked feature', 'reason': 'vendor API is not out',
+        'reactivate_when': long_trigger, 'forms': [], 'trigger_met': False, 'met_by': None, 'since': '2026-10-13', 'error': None})
+    data['tasks'].append(row)
+    data['roadmap']['operations'][0]['groups'][0]['nodes'].append(
+        {'id': 't-009', 'state': 'deferred', 'label': 'Not now', 'depth': 0, 'after': [], 'reasons': [], 'session': None})
+    page = '<!doctype html><html data-theme="%s"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' \
+           '<link rel="stylesheet" href="/hub.css"><link rel="stylesheet" href="/roadmap.css"><link rel="stylesheet" href="/theme.css"></head><body>' \
+           '<main id="app" style="padding:20px;min-width:0;max-width:1100px"></main><pre id="results">pending</pre>' \
+           '<script type="module">const DATA=' % theme + json.dumps(data).replace('<', '\\u003c') + ';' + DEFERRED_SCRIPT + '</script></body></html>'
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def do_GET(self):
+            if self.path == '/fixture':
+                body = page.encode(); self.send_response(200); self.send_header('Content-Type','text/html'); self.end_headers(); self.wfile.write(body)
+            else:
+                super().do_GET()
+        def log_message(self, *args):
+            pass
+    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(Handler, directory=str(WEB)))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        result = subprocess.run([chrome, '--headless=new', '--no-sandbox', '--disable-gpu', '--no-first-run',
+            '--password-store=basic', '--no-default-browser-check', '--user-data-dir='+str(tmp_path/'chrome'),
+            '--window-size=%d,1000' % width, '--virtual-time-budget=12000', '--dump-dom',
+            'http://127.0.0.1:%d/fixture' % server.server_port], text=True, capture_output=True, timeout=45)
+        match = re.search(r'<pre id="results">(.*?)</pre>', result.stdout, re.S)
+        assert match, result.stderr[-1000:]
+        observed = html.unescape(match.group(1))
+        assert observed != 'pending', result.stderr[-1000:]
+        outcome = json.loads(observed)
+        assert outcome['ok'], json.dumps(outcome, indent=2)
+    finally:
+        server.shutdown(); server.server_close()
+
+
+AAR_SCRIPT = r"""
+const checks = {};
+const assert = (name, test) => {checks[name] = Boolean(test);};
+const tick = () => new Promise(resolve => setTimeout(resolve, 80));
+try {
+  const {renderRoadmap, bindRoadmap} = await import('/roadmap.js');
+  const root = document.querySelector('#app');
+  root.innerHTML = renderRoadmap(DATA, {op:'op-001', mode:'map'}); bindRoadmap(root);
+  await tick();
+  const panel = root.querySelector('.rm-aar'), chip = root.querySelector('[data-rm-node="t-002"] .rm-overdue');
+  assert('panel_visible_with_badge', panel && panel.getBoundingClientRect().height > 0 && panel.textContent.includes('AAR owed'));
+  assert('panel_names_the_trigger', panel && panel.textContent.includes('event:905'));
+  assert('panel_tone_differs_from_page', panel && getComputedStyle(panel).backgroundColor !== getComputedStyle(document.body).backgroundColor);
+  assert('chip_visible', chip && chip.getBoundingClientRect().height > 0 && chip.textContent.includes('Overdue'));
+  assert('legend_names_overdue', root.querySelector('.rm-dot-overdue'));
+  assert('group_says_overdue', root.querySelector('.rm-group-overdue'));
+  assert('inside_the_page', document.documentElement.scrollWidth <= window.innerWidth);
+  document.querySelector('#results').textContent = JSON.stringify({ok:Object.values(checks).every(Boolean), checks});
+} catch(error) {document.querySelector('#results').textContent = JSON.stringify({ok:false, checks, error:String(error)});}
+"""
+
+
+@pytest.mark.parametrize('theme', ['light', 'dark'])
+@pytest.mark.parametrize('width', [1440, 390])
+def test_aar_panel_and_overdue_in_both_themes(tmp_path, width, theme):
+    chrome = shutil.which('google-chrome') or shutil.which('chromium')
+    if not chrome:
+        pytest.skip('headless Chrome not available')
+    root = tmp_path / 'fixture'; root.mkdir()
+    data = browser_fixture(root)
+    token = 'a' * 64
+    data['ops'][0]['aar'] = {
+        'badge': 'owed', 'label': 'AAR owed', 'blocks_close': True,
+        'lines': ['Op close is blocked until the report is sealed (alpaca aar seal op-001) or the owner waives it.'],
+        'triggers': [{'id': 905, 'text': 'aar owe event:905 (' + token + ')'}], 'overdue': 1}
+    next(t for t in data['tasks'] if t['id'] == 't-002')['aar_overdue'] = {
+        'source': 'op-001', 'due_by': '2026-10-01', 'days_late': 12, 'label': 'Overdue 12 days, due 2026-10-01'}
+    page = '<!doctype html><html data-theme="%s"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' \
+           '<link rel="stylesheet" href="/hub.css"><link rel="stylesheet" href="/roadmap.css"><link rel="stylesheet" href="/theme.css"></head><body>' \
+           '<main id="app" style="padding:20px;min-width:0;max-width:1100px"></main><pre id="results">pending</pre>' \
+           '<script type="module">const DATA=' % theme + json.dumps(data).replace('<', '\\u003c') + ';' + AAR_SCRIPT + '</script></body></html>'
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def do_GET(self):
+            if self.path == '/fixture':
+                body = page.encode(); self.send_response(200); self.send_header('Content-Type','text/html'); self.end_headers(); self.wfile.write(body)
+            else:
+                super().do_GET()
+        def log_message(self, *args):
+            pass
+    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(Handler, directory=str(WEB)))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        result = subprocess.run([chrome, '--headless=new', '--no-sandbox', '--disable-gpu', '--no-first-run',
+            '--password-store=basic', '--no-default-browser-check', '--user-data-dir='+str(tmp_path/'chrome'),
+            '--window-size=%d,1000' % width, '--virtual-time-budget=12000', '--dump-dom',
+            'http://127.0.0.1:%d/fixture' % server.server_port], text=True, capture_output=True, timeout=45)
+        match = re.search(r'<pre id="results">(.*?)</pre>', result.stdout, re.S)
+        assert match, result.stderr[-1000:]
+        observed = html.unescape(match.group(1))
+        assert observed != 'pending', result.stderr[-1000:]
+        outcome = json.loads(observed)
+        assert outcome['ok'], json.dumps(outcome, indent=2)
+    finally:
+        server.shutdown(); server.server_close()

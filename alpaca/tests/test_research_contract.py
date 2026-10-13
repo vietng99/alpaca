@@ -1407,11 +1407,16 @@ def test_a_read_only_read_path_outside_the_forbidden_paths_passes(repo, outside)
 
 @pytest.mark.parametrize("make,finding", [
     ("socket", "socket"), ("writable", "writable"), ("world", "writable")])
-def test_a_read_path_with_a_socket_or_a_writable_folder_is_refused(repo, outside, make, finding):
+def test_a_read_path_with_a_socket_or_a_writable_folder_is_refused(repo, outside, make, finding,
+                                                                   monkeypatch):
     if make == "socket":
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.bind(os.path.join(outside, "sub", "agent.sock"))
-        sock.close()
+        # bound by a relative name from inside its folder: a deep tmp path (a release gate's own
+        # TMPDIR) would pass the Unix socket path limit
+        with monkeypatch.context() as here:
+            here.chdir(os.path.join(outside, "sub"))
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.bind("agent.sock")
+            sock.close()
     _read_only(outside)
     if make == "writable":
         os.chmod(os.path.join(outside, "sub"), 0o755)

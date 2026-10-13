@@ -1,4 +1,4 @@
-import {renderRoadmap,bindRoadmap,rememberRoadmap,patchedRoadmap} from './roadmap.js';
+import {NOT_NOW,renderRoadmap,bindRoadmap,rememberRoadmap,patchedRoadmap} from './roadmap.js';
 import {patch as patchHtml, render as renderHtml} from './morph.js';
 import {createRouter} from './roadmap-routing.js';
 // Persistent capabilities with recorded evidence, work and explanatory impact paths.
@@ -27,7 +27,7 @@ function development(data){
  const plan=data.development||{tasks:[],operations:[]},tasks=new Map((plan.tasks||[]).map(t=>[t.id,t]));
  const nodes=new Map((plan.operations||[]).flatMap(op=>op.groups.flatMap(g=>g.nodes)).map(n=>[n.id,n]));
  const linked=new Set(data.nodes.flatMap(n=>n.tasks.map(t=>t.id)));
- return {...plan,tasks,nodes,unmapped:[...tasks.values()].filter(t=>!linked.has(t.id)&&!['done','cancelled','canceled','skipped'].includes(t.status))};
+ return {...plan,tasks,nodes,unmapped:[...tasks.values()].filter(t=>!linked.has(t.id)&&!['done','cancelled','canceled','skipped',...NOT_NOW].includes(t.status))};
 }
 function workSummary(node,dev){
  const tasks=[...new Map(node.tasks.map(t=>[t.id,t])).values()],open=tasks.filter(t=>!['done','cancelled','canceled','skipped'].includes(t.status));
@@ -38,6 +38,7 @@ function workSummary(node,dev){
  else if(open.some(t=>t.status==='doing')){tone='working';label='In progress';}
  else if(open.some(t=>t.status==='blocked'||['blocked','approval','resources'].includes(dev.nodes.get(t.id)?.state))){tone='waiting';label='Blocked';}
  else if(open.some(t=>dev.nodes.get(t.id)?.state==='ready')){tone='ready';label='Ready to work';}
+ else if(open.length&&open.every(t=>NOT_NOW.includes(t.status))){tone='parked';label='Not now';}
  else if(open.length){tone='planned';label='Planned';}
  else if(node.state==='stale'||node.state==='blocked'){tone='waiting';label='Needs recheck';}
  else if(tasks.some(t=>t.status==='done')&&done!==tasks.filter(t=>t.status==='done').length){tone='waiting';label='Recheck proof';}

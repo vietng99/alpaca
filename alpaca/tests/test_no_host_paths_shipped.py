@@ -50,6 +50,7 @@ def _content(rel, path):
     return data
 
 
+@pytest.mark.dev_tree      # skips in a release tree; the release runs it in the development tree
 def test_no_shipped_file_holds_a_host_path():
     needles = _needles()
     hits = []

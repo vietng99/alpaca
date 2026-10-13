@@ -206,6 +206,7 @@ Corner radii: 4, 6 and 10 px. Standard fade time: 150 ms.
 | `--green` / `--green-bg` | #2f6f4f / #edf4ef | #86c3a2 / #1e2c25 | pass, done, ready |
 | `--amber` / `--amber-bg` | #83601f / #f7f1e5 | #d6b273 / #2f281b | waiting, blocked, notices |
 | `--red` / `--red-bg` | #a3423f / #f8edec | #e3a09c / #382423 | fail, error |
+| `--violet` / `--violet-bg` | #634a94 / #f2eff8 | #bfaee6 / #2a2638 | Not now (deferred) |
 | `--sidebar` | #f1f1ee | #191b1e | sidebar fill |
 | `--sidebar-text` | #2b3036 | #dcdfe2 | sidebar text |
 | `--sidebar-muted` | #5c636b | #a3a9b0 | sidebar secondary |
@@ -224,8 +225,8 @@ Corner radii: 4, 6 and 10 px. Standard fade time: 150 ms.
 | `--backdrop` | #1b1f2366 | #000000a6 | dialog backdrop |
 | `--toast-bg` / `--toast-text` | #2b3036 / #ffffff | #e4e6e8 / #16181b | toast |
 
-State colours (`--st-doing`, `--st-ready`, `--st-waiting`, `--st-blocked`, `--st-done` and their
-`-bg` forms) point at the accent, green, amber, red and muted tokens above, so they follow the theme.
+State colours (`--st-doing`, `--st-ready`, `--st-waiting`, `--st-blocked`, `--st-done`, `--st-deferred` and their
+`-bg` forms) point at the accent, green, amber, red, muted and violet tokens above, so they follow the theme.
 The pulse orb's ink is `hsl(hue 72% 46%)` in light and `hsl(hue 80% 66%)` in dark.
 
 ## 4. Pages
@@ -360,10 +361,16 @@ done bar, state "Complete", "Current phase", "Open" or "Not opened"), who is dri
 per session holding open work, with its autodrive level), and notes (phase door, work waiting on the
 owner, blocked work). Below it, **Work by area** for the whole workspace: groups (by work area, then
 by workstream) of **task cards** joined by arrows that show prerequisites. A card shows its id, state
-label (In progress, Ready, Waiting on prerequisites, Needs approval, Waiting for resources, Blocked, Assignment expired, Failed, Skipped, Done, Needs organization),
+label (In progress, Ready, Waiting on prerequisites, Needs approval, Waiting for resources, Blocked, Assignment expired, Failed, Skipped, Not now, Done, Needs organization),
 the title, who has claimed it and a **...** button for details (op and phase, prerequisites,
 reasons, "Open chat", "Trace path"). Research runs appear as one card each in a "Research runs"
-group.
+group. An operation view lists its parked tasks in a Not now panel with why, the trigger and
+"trigger met" when the record says so.
+An operation view also shows an After-action report panel when the op has an AAR fact: AAR owed (with
+each trigger and its event id, and a note that op close is blocked while the op is open), AAR draft,
+AAR sealed, or AAR changed since its seal, with a link to the report. A filed action item that is past
+due and not done carries an Overdue chip on its card, and its aar-<op> group says how many are overdue;
+the chip is a mark, not a state. Triggers with no op stay in `alpaca aar owed`.
 
 *Reads.* `overview.json` only (the plan comes inside it).
 

@@ -124,6 +124,10 @@ def test_research_key_in_format_2_is_unknown_as_before(tmp_path, value):
     # recorded in .alpaca/proofs/op-009/t-096.logs/)
     before = ("`research` is not a field here; allowed: description, id, knobs, owner, runbook, spec, stages, "
               "title")
+    if value == 2:
+        # t-619: a format 2 file also has the ship fields `kind` and `rollback`; format 1 has none
+        before = ("`research` is not a field here; allowed: description, id, kind, knobs, owner, rollback, "
+                  "runbook, spec, stages, title")
     data = _minimal(value, research={"mode": "improve"})
     result = runbook.check(_write(tmp_path, data), check_files=False)
     assert [e for e in result["errors"] if e["where"] == "research"] == [

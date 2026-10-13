@@ -560,7 +560,7 @@ def close(conn, root: str, task: str, *, session: str, to: str = "done",
     ["--session", session, "task", "move", task, "blocked", "--reason", reason, "--by",
     "research-runner"] instead (alpaca/ops.py:536-537). When the verb refuses the move, the
     lease is taken back (claims.take, worker <run>) and the verb's code is returned. A task
-    already done or blocked is left as it is (PASS)."""
+    already done, blocked or deferred is left as it is (PASS)."""
     from alpaca import cli, paths as alpaca_paths
     if to not in ("done", "blocked"):
         raise ValueError("a research task closes to done or blocked, not %r" % (to,))
@@ -572,7 +572,7 @@ def close(conn, root: str, task: str, *, session: str, to: str = "done",
         # the verb finds its record from the working folder; never move a task in another one
         raise RuntimeError("the working folder is in %s, not in the run's root %s" % (here, root))
     row = conn.execute("SELECT status FROM tasks WHERE id=?", (task,)).fetchone()
-    if row is not None and row["status"] in ("done", "blocked"):
+    if row is not None and row["status"] in ("done", "blocked", "deferred"):
         return vc.PASS
     research = _research(conn, task)
     worker = research.get("run")
@@ -589,7 +589,11 @@ def close(conn, root: str, task: str, *, session: str, to: str = "done",
     with _CLOSE_LOCK:
         code = cli.main(argv)
     if code != vc.PASS and worker:
-        leases.take(conn, task, worker, session=session)
+        # op-057 t-616: a deferral that landed after the check above makes the verb refuse; a lease
+        # taken now would be a claim after the task-move on a parked task.
+        now = conn.execute("SELECT status FROM tasks WHERE id=?", (task,)).fetchone()
+        if now is None or now["status"] != "deferred":
+            leases.take(conn, task, worker, session=session)
     return code
 
 

@@ -75,8 +75,8 @@ def _why(root, run, done=None):
         pass
     conn = db.connect(root)
     try:
-        for row in conn.execute("SELECT kind, data FROM events WHERE kind IN (?, ?, ?) ORDER BY id",
-                                (events.HOLD, events.JOB_REFUSED, events.INFRA)).fetchall():
+        for row in conn.execute("SELECT kind, data FROM events WHERE kind IN (?, ?, ?, ?) ORDER BY id",
+                                (events.HOLD, events.JOB_REFUSED, events.INFRA, events.FINALIZE)).fetchall():
             out.append("%s %s" % (row["kind"], row["data"][:600]))
     finally:
         conn.close()

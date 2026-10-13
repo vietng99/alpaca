@@ -63,6 +63,8 @@ if sys.version_info < (3, 10):
     raise SystemExit('Python 3.10+ required')
 import yaml
 import pytest
+import xdist
+import execnet
 import html5lib
 
 for line in Path('requirements.txt').read_text(encoding='utf-8').splitlines():

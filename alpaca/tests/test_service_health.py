@@ -367,3 +367,17 @@ def test_the_speed_ring_keeps_the_last_five_minutes(project, monkeypatch):
     for _ in range(serve.SPEED_SAMPLES + 10):
         live.note_speed(0.1)
     assert len(live.speed) == serve.SPEED_SAMPLES
+
+
+def test_vitals_carry_the_running_release_steps(project):
+    """op-056 t-614: the sidebar release bar reads the running release steps from the same 10 s poll."""
+    from alpaca.release import progress
+    with running(project) as (live, url):
+        assert json.loads(fetch(url, '/hub/vitals.json')[1])['release'] == []
+        step = progress.Progress(project, 'check', 'a' * 40, ['fresh-clone', 'suite'], parallel=2,
+                                 sequential=['fresh-clone'])
+        step.start('fresh-clone')
+        release = json.loads(fetch(url, '/hub/vitals.json')[1])['release']
+        assert release[0]['kind'] == 'check' and release[0]['step'] == 'fresh-clone' and release[0]['state'] == 'running'
+        step.close()
+        assert json.loads(fetch(url, '/hub/vitals.json')[1])['release'] == []

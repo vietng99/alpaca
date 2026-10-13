@@ -160,8 +160,11 @@ def source_state(root, cfg):
     return digest({'head': sha, 'files': inventory(files)}), sha
 
 
-def build_release(root, config, out):
+def build_release(root, config, out, source=None):
+    """Stage the release of source (a checkout of the commit, release/source.py; the project root
+    when None) into out, which stays under the project root's release state."""
     root, out = Path(root).resolve(), Path(out).absolute()
+    source = Path(source or root).resolve()
     try:
         rel = out.relative_to(root).as_posix()
     except ValueError as exc:
@@ -171,31 +174,31 @@ def build_release(root, config, out):
     out = contained(root, rel)
     if out.exists():
         raise ValueError('release output already exists')
-    before, sha = source_state(root, config)
-    files = selected(root, config)
+    before, sha = source_state(source, config)
+    files = selected(source, config)
     out.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.staging-', dir=out.parent) as tmp:
         stage = Path(tmp)
-        for rel, source in files.items():
+        for rel, member in files.items():
             target = stage / rel
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(source.read_bytes())
-            target.chmod(0o755 if source.stat().st_mode & 0o111 else 0o644)
+            target.write_bytes(member.read_bytes())
+            target.chmod(0o755 if member.stat().st_mode & 0o111 else 0o644)
         if config.generated_manifest:
             subprocess.run(config.generated_manifest, cwd=stage, env=command_environment(),
                            check=True, capture_output=True, timeout=120)
         members = tree_inventory(stage)
-        _, memory = allowlist(root, config)
+        _, memory = allowlist(source, config)
         if any(forbidden(rel) or is_memory(rel, memory) for rel in members):
             raise ValueError('generated output contains forbidden runtime state')
-        after, _ = source_state(root, config)
+        after, _ = source_state(source, config)
         if after != before:
             raise ValueError('source changed during release build')
         os.rename(stage, out)
     return BuildReceipt(before, digest(members), sha, str(out), members)
 
 
-def validate_build(root, config, build):
+def validate_build(root, config, build, source=None):
     root = Path(root).resolve()
     tree = Path(build.tree)
     try:
@@ -205,7 +208,7 @@ def validate_build(root, config, build):
     if not rel.startswith('.alpaca/releases/'):
         raise ValueError('candidate tree is outside release state')
     contained(root, rel)
-    current, sha = source_state(root, config)
+    current, sha = source_state(source or root, config)
     if current != build.source_hash or sha != build.source_sha:
         raise ValueError('source changed since release build')
     if not tree.is_dir() or digest(tree_inventory(tree)) != build.tree_hash:

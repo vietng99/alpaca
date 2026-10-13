@@ -53,7 +53,7 @@ TABLE: dict[str, dict] = {
     "session": {"keys": ("session", "operator", "context"), "group": "front"},
     # front page (FRONT above marks these front; the group label mirrors that)
     "status": {"keys": ("root", "version", "channel", "events", "last_event", "onboarded",
-                         "sessions", "ops_open", "tasks_open", "op_index"), "group": "front"},
+                         "sessions", "ops_open", "tasks_open", "not_now", "op_index"), "group": "front"},
     "op": {"keys": ("verdict", "op", "status"), "group": "front"},
     "task": {"keys": ("verdict", "task", "status"), "group": "front"},
     "board": {"keys": ("verdict", "board", "rows"), "group": "front"},
@@ -88,6 +88,7 @@ TABLE: dict[str, dict] = {
     "owner": {"keys": ("verdict", "subject", "text"), "group": "record"},
     "batch": {"keys": ("verdict", "op", "items"), "group": "record"},
     "brief": {"keys": ("verdict", "op", "file", "sha256"), "group": "record"},
+    "aar": {"keys": ("verdict", "op", "path", "sha256", "sections", "problems"), "group": "record"},
     "order": {"keys": ("verdict", "order", "op", "door"), "group": "record"},
     "selfcheck": {"keys": ("verdict", "op", "boundary", "findings"), "group": "record"},
     "choice": {"keys": ("verdict", "task", "card"), "group": "record"},
