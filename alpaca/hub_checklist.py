@@ -6,7 +6,7 @@ The outcome cards retain their separately labelled recorded observations.
 import re
 from pathlib import Path
 from urllib.parse import quote
-from alpaca import db, render as text, work_record, taskplan
+from alpaca import db, ops as _ops, render as text, work_record, taskplan
 
 
 def _cell(value):
@@ -44,7 +44,7 @@ def render(conn, cards):
     roadmap = taskplan.project(conn, tasks, root=root, stages=checked)
     by_id = {t['id']: t for t in tasks}
     nodes = [n for op in roadmap['operations'] for g in op['groups'] for n in g['nodes']]
-    active = [row for row in tasks if row['status'] not in ('done','cancelled','canceled')]
+    active = [row for row in tasks if row['status'] not in ('done','deferred','cancelled','canceled')]
     lines = ['', '## Work and next action', '',
              'This is the shared work record for people and agents. Completion is a recorded result backed by a report. '
              'The live Operations hub checks whether recorded evidence still matches current inputs.', '']
@@ -58,7 +58,9 @@ def render(conn, cards):
             lines += ['Next action: review waiting reasons or record a task plan. No ready task is identified.', '']
     else:
         lines += ['Next action: no open task is recorded. Review current evidence before accepting or extending the work.', '']
-    lines += ['%d tasks recorded complete; %d tasks remain.' % (sum(t['status']=='done' for t in tasks),len(active)), '']
+    parked = [t for t in tasks if t['status'] in _ops.NOT_NOW]
+    lines += ['%d tasks recorded complete; %d tasks remain.%s' % (sum(t['status']=='done' for t in tasks),len(active),
+                                                                  ' %d Not now.' % len(parked) if parked else ''), '']
     lines += ['## Task roadmap', '',
               'Groups and prerequisites come from the recorded plan. Readiness is an observation at render time; execution gates still apply.', '']
     for op in roadmap['operations']:
@@ -78,6 +80,17 @@ def render(conn, cards):
                 if node['session']:
                     lines.append('  - Assigned chat: ' + _cell(node['session']))
             lines.append('')
+    lines += ['## Not now', '', 'Deferred work, with why it waits and what brings it back.', '']
+    # op-057 t-617: a failure prints one line under the heading; an empty list would read as
+    # "nothing is parked".
+    try:
+        clean = lambda v: _cell(' '.join(str(v).split()))
+        lines += ['- %s (%s%s) %s - %s' % (t['id'], _cell(t['op']),
+                  ' closed' if (t.get('deferral') or {}).get('op_closed') else '', _cell(t['title']),
+                  '; '.join(_ops.not_now_words(t.get('deferral'), clean))) for t in parked] or ['(none)']
+    except Exception as exc:
+        lines.append('(the Not now list could not be read: %s)' % type(exc).__name__)
+    lines.append('')
     lines += ['## Detailed work records', '']
     for task in tasks:
         op = ops.get(task['op'], {})
@@ -89,6 +102,8 @@ def render(conn, cards):
                   '- Created / updated: %s / %s' % (_cell(task['created_at']),_cell(task['updated_at'])),
                   '- Completed at: %s' % _cell(task['completed_at']),
                   '- Completion session: %s' % _cell(task['completed_session'])]
+        if task['status'] in _ops.NOT_NOW:
+            lines += ['- ' + w for w in _ops.not_now_words(task.get('deferral'), lambda v: _cell(' '.join(str(v).split())))]
         if task['claimant']:
             lines.append('- Assigned worker: %s' % _cell(task['claimant']))
             lines.append('- Assigned session: %s' % _cell(task['assigned_session']))

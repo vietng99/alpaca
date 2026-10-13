@@ -4,14 +4,14 @@ import re
 from contextlib import nullcontext
 from datetime import datetime
 
-from alpaca import db, util
+from alpaca import db, ops, util
 
 KIND = 'task-plan'
 MAX_TASKS, MAX_GROUPS = 500, 80
 LABELS = {'unplanned': 'Needs organization', 'waiting': 'Waiting on prerequisites', 'approval': 'Needs approval',
           'resources': 'Waiting for resources', 'blocked': 'Blocked', 'ready': 'Ready',
           'working': 'In progress', 'assignment_expired': 'Assignment expired',
-          'failed': 'Failed', 'skipped': 'Skipped', 'done': 'Done'}
+          'failed': 'Failed', 'skipped': 'Skipped', 'done': 'Done', 'deferred': 'Not now'}
 
 
 def latest(conn, op):
@@ -229,13 +229,25 @@ def project(conn, tasks, *, root=None, stages=()):
                 'operator': operators.get(task.get('assigned_session')),
                 'evidence': evidence.get(ident, 'not_completed')}
         nodes[ident] = node
+        if task['status'] in ops.NOT_NOW:
+            # op-057 t-617: parked work is never Ready or Next, whatever its plan says. The state
+            # comes from the status alone (mission rows may carry no deferral); the reasons are the
+            # deferral's, never task['reason'], which is the task's why (work_record.py).
+            node['state'], node['label'] = 'deferred', LABELS['deferred']
+            node['after'] = entry['after'] if entry else []
+            node['resources'] = entry['resources'] if entry else []
+            node['reasons'] = ops.not_now_words(task.get('deferral'))
+            continue
         if entry is None:
             node['reasons'] = ['No task relationships or resource constraints are recorded.']
             continue
         node['after'], node['resources'] = entry['after'], entry['resources']
         node['blockers'] = [p for p in entry['after'] if evidence.get(p) != 'valid']
         for p in node['blockers']:
-            node['reasons'].append('Needs %s%s' % (p, ' with valid completion evidence' if by_id[p]['status'] == 'done' else ' to finish'))
+            if by_id[p]['status'] in ops.NOT_NOW:
+                node['reasons'].append('Needs %s (Not now) to finish' % p)
+            else:
+                node['reasons'].append('Needs %s%s' % (p, ' with valid completion evidence' if by_id[p]['status'] == 'done' else ' to finish'))
         for stage in entry['requires_stages']:
             if stage_status.get(stage) != 'PASS':
                 node['reasons'].append('Needs current PASS evidence for stage %s' % stage)
@@ -263,6 +275,7 @@ def project(conn, tasks, *, root=None, stages=()):
             state = 'assignment_expired' if _lease_expired(task) else 'working'
             if state == 'assignment_expired':
                 node['reasons'].append('Chat assignment expired; work may still be running')
+        # deferred took its own branch above (op-057 t-617); it never reaches this status chain.
         elif status in ('done', 'failed', 'skipped', 'cancelled', 'canceled'):
             state = status if status in LABELS else 'skipped'
             node['reasons'], node['blockers'], node['conflicts'] = [], [], []

@@ -865,7 +865,7 @@ def test_format_doc_names_every_field_and_check_type():
         doc = fh.read()
     for table in (runbook.TOP_KEYS, runbook.KNOB_KEYS, runbook.STAGE_KEYS, runbook.CHECK_KEYS,
                   runbook.RETRY_KEYS, runbook.MOVE_KEYS, runbook.GATE_KEYS, runbook.OUTPUT_KEYS,
-                  runbook.FAIL_KEYS):
+                  runbook.FAIL_KEYS, runbook.ROLLBACK_KEYS, runbook.WATCH_KEYS):
         for key in table:
             assert "`%s`" % key in doc, key
     for kind, keys in runbook.TYPE_KEYS.items():
@@ -1811,3 +1811,289 @@ def test_fr_uncovered_names_edge_cases_in_format_2(tmp_path):
     result = runbook.check(write(tmp_path, data), spec_path=spec)
     fr = [w for w in result["warnings"] if w["code"] == "FR-UNCOVERED"]
     assert len(fr) == 1 and "only success criteria must be covered" in fr[0]["message"]
+
+
+# ------------------------------------------------------------------------ ship runbooks
+FORMAT_DOC = os.path.join(REPO, "docs", "runbook-format.md")
+
+
+def ship_example():
+    """The first yaml block under "## Ship runbooks" in the format document, as a dict: the
+    document's example is the fixture of these tests, so it cannot drift from the checker."""
+    with open(FORMAT_DOC, encoding="utf-8") as fh:
+        doc = fh.read()
+    section = doc.split("\n## Ship runbooks\n", 1)[1]
+    block = section.split("```yaml\n", 1)[1].split("```", 1)[0]
+    return yaml.safe_load(block)
+
+
+def ship_stage(data, ident):
+    return next(s for s in data["stages"] if s["id"] == ident)
+
+
+def finds(result, key="errors"):
+    return [(e["code"], e["where"]) for e in result[key]]
+
+
+def test_the_ship_example_in_the_format_doc_passes(tmp_path, monkeypatch, capsys):
+    path = write(tmp_path, ship_example())
+    result = runbook.check(path)
+    assert result["errors"] == [] and result["warnings"] == [], result
+    assert result["verdict"] == "PASS"
+    rc, out = run_cli(tmp_path, monkeypatch, capsys, path)
+    assert rc == 0 and "PASS" in out.out
+
+
+def test_a_ship_runbook_without_rollback_is_refused(tmp_path, monkeypatch, capsys):
+    data = ship_example()
+    del data["rollback"]
+    path = write(tmp_path, data)
+    assert finds(runbook.check(path)) == [("SHIP-NO-ROLLBACK", "rollback")]
+    rc, out = run_cli(tmp_path, monkeypatch, capsys, path)
+    assert rc == 1 and "SHIP-NO-ROLLBACK rollback" in out.out
+
+
+def test_a_ship_runbook_without_a_1h_watch_is_refused(tmp_path):
+    data = ship_example()
+    del ship_stage(data, "watch-1h")["watch"]
+    result = runbook.check(write(tmp_path, data))
+    assert codes(result) == ["SHIP-NO-WATCH"], result["errors"]
+    message = result["errors"][0]["message"]
+    assert "1h" in message and "24h" not in message
+
+
+def test_a_ship_runbook_without_a_24h_watch_is_refused(tmp_path):
+    data = ship_example()
+    del ship_stage(data, "watch-24h")["watch"]
+    result = runbook.check(write(tmp_path, data))
+    assert codes(result) == ["SHIP-NO-WATCH"], result["errors"]
+    message = result["errors"][0]["message"]
+    assert "24h" in message and "1h" not in message
+
+
+@pytest.mark.parametrize("value, code", [("Ship", "KIND-UNKNOWN"), ("release", "KIND-UNKNOWN"),
+                                         ("' ship'", "KIND-UNKNOWN"), ("yes", "FIELD-TYPE"),
+                                         ("1", "FIELD-TYPE"), ("''", "FIELD-EMPTY"),
+                                         ("", "FIELD-TYPE")])
+def test_kind_is_plain_or_ship_exactly(tmp_path, value, code):
+    text = yaml.safe_dump(ship_example(), sort_keys=False).replace("kind: ship", "kind: %s" % value)
+    result = runbook.check(write(tmp_path, text))
+    assert finds(result) == [(code, "kind")], result["errors"]
+
+
+def test_kind_plain_is_valid_and_silent(tmp_path):
+    data = ship_example()
+    data["kind"] = "plain"
+    result = runbook.check(write(tmp_path, data))
+    assert result["errors"] == [] and result["warnings"] == []
+
+
+def test_ship_fields_are_format_2_only(tmp_path):
+    data = ship_example()
+    data["runbook"] = 1
+    for stage in data["stages"]:
+        stage.pop("recovery", None)
+    data["stages"] = [s for s in data["stages"] if s["id"] != "undo-deploy"]
+    ship_stage(data, "deploy")["fails"][0].pop("then")
+    ship_stage(data, "deploy")["fails"][0].pop("detect")
+    result = runbook.check(write(tmp_path, data), check_files=False)
+    unknown = {w for c, w in finds(result) if c == "FIELD-UNKNOWN"}
+    assert {"kind", "rollback", "stages[1].external", "stages[2].watch", "stages[3].watch"} <= unknown
+    assert not [c for c in codes(result) if c.startswith("SHIP-")]
+    sortbench = os.path.join(REPO, "alpaca", "tests", "fixtures", "research", "sortbench", "improve.yaml")
+    with open(sortbench, encoding="utf-8") as fh:
+        research = fh.read() + "kind: ship\n"
+    shutil.copytree(os.path.dirname(sortbench), str(tmp_path / "sb"))
+    path = str(tmp_path / "sb" / "improve.yaml")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(research)
+    result = runbook.check(path, check_files=False)
+    assert ("FIELD-UNKNOWN", "kind") in finds(result)
+
+
+def test_a_ship_runbook_marks_an_external_stage(tmp_path):
+    data = ship_example()
+    del ship_stage(data, "deploy")["external"]
+    assert codes(runbook.check(write(tmp_path, data))) == ["SHIP-NO-EXTERNAL"]
+
+
+@pytest.mark.parametrize("case", ["no-fails", "no-detect", "ask-owner"])
+def test_an_external_stage_needs_a_recognized_recovery_entry(tmp_path, case):
+    data = ship_example()
+    deploy = ship_stage(data, "deploy")
+    if case == "no-fails":
+        del deploy["fails"]
+    elif case == "no-detect":
+        del deploy["fails"][0]["detect"]
+    else:
+        deploy["fails"][0]["then"] = "ask-owner"
+    if case != "no-detect":
+        data["stages"] = [s for s in data["stages"] if s["id"] != "undo-deploy"]
+    result = runbook.check(write(tmp_path, data))
+    assert finds(result) == [("SHIP-NO-RECOVERY", "stages[1].fails")], result["errors"]
+    assert "`deploy`" in result["errors"][0]["message"]
+    if case == "no-detect":
+        step = runbook.respond(data, deploy, {"deploy-exit": verdict.FAIL}, 1, {}, {"deploy-broke": verdict.PASS})
+        assert step["run"] is None
+
+
+def test_a_watch_counts_only_after_the_change(tmp_path):
+    data = ship_example()
+    ship_stage(data, "watch-24h")["needs"] = ["build"]
+    result = runbook.check(write(tmp_path, data))
+    assert sorted(codes(result)) == ["SHIP-NO-WATCH", "WATCH-BEFORE-CHANGE"], result["errors"]
+    data = ship_example()
+    ship_stage(data, "deploy")["watch"] = {"after": "1h", "looks_at": ["deploy-exit"]}
+    ship_stage(data, "watch-1h").pop("watch")
+    result = runbook.check(write(tmp_path, data))
+    assert "WATCH-BEFORE-CHANGE" in codes(result)
+
+
+@pytest.mark.parametrize("after, expect", [
+    ("1:00", ["FIELD-TYPE", "SHIP-NO-WATCH"]), ("3600", ["FIELD-TYPE", "SHIP-NO-WATCH"]),
+    ("'1:00'", ["SHIP-NO-WATCH", "WATCH-AFTER-INVALID"]), ("1H", ["SHIP-NO-WATCH", "WATCH-AFTER-INVALID"]),
+    ("01h", ["SHIP-NO-WATCH", "WATCH-AFTER-INVALID"]), ("0h", ["SHIP-NO-WATCH", "WATCH-AFTER-INVALID"]),
+    ("1.5h", ["SHIP-NO-WATCH", "WATCH-AFTER-INVALID"]), ("'1 h'", ["SHIP-NO-WATCH", "WATCH-AFTER-INVALID"]),
+    ("60m", []), ("2h", ["SHIP-NO-WATCH"])])
+def test_watch_after_is_strict(tmp_path, after, expect):
+    text = yaml.safe_dump(ship_example(), sort_keys=False).replace("after: 1h", "after: %s" % after)
+    assert sorted(codes(runbook.check(write(tmp_path, text)))) == expect
+
+
+def test_one_day_counts_as_24h(tmp_path):
+    text = yaml.safe_dump(ship_example(), sort_keys=False).replace("after: 24h", "after: 1d")
+    assert codes(runbook.check(write(tmp_path, text))) == []
+
+
+def test_a_watch_names_checks_of_its_own_stage(tmp_path):
+    data = ship_example()
+    ship_stage(data, "watch-1h")["watch"]["looks_at"] = ["build-exit"]
+    result = runbook.check(write(tmp_path, data))
+    assert ("WATCH-CHECK-UNKNOWN", "stages[2].watch.looks_at[0]") in finds(result)
+    data = ship_example()
+    ship_stage(data, "watch-1h")["watch"]["looks_at"] = []
+    assert ("FIELD-EMPTY", "stages[2].watch.looks_at") in finds(runbook.check(write(tmp_path, data)))
+    data = ship_example()
+    del ship_stage(data, "watch-1h")["watch"]["looks_at"]
+    assert ("FIELD-MISSING", "stages[2].watch.looks_at") in finds(runbook.check(write(tmp_path, data)))
+
+
+def test_a_watch_is_never_on_a_recovery_or_gate_only_stage(tmp_path):
+    data = ship_example()
+    ship_stage(data, "undo-deploy")["watch"] = {"after": "1h", "looks_at": ["undo-exit"]}
+    assert ("FIELD-UNKNOWN", "stages[4].watch") in finds(runbook.check(write(tmp_path, data)))
+    data = ship_example()
+    data["stages"].insert(1, {"id": "approve", "needs": ["build"], "owner_gate": {"approve": "go"},
+                              "watch": {"after": "1h", "looks_at": ["x"]}})
+    assert ("FIELD-UNKNOWN", "stages[1].watch") in finds(runbook.check(write(tmp_path, data)))
+
+
+def test_external_needs_a_run(tmp_path):
+    data = ship_example()
+    data["stages"].insert(1, {"id": "approve", "needs": ["build"], "owner_gate": {"approve": "go"},
+                              "external": True})
+    assert ("FIELD-UNKNOWN", "stages[1].external") in finds(runbook.check(write(tmp_path, data)))
+
+
+def test_external_false_on_a_gate_only_stage_passes(tmp_path):
+    data = ship_example()
+    data["stages"].insert(1, {"id": "approve", "needs": ["build"], "owner_gate": {"approve": "go"},
+                              "external": False})
+    assert codes(runbook.check(write(tmp_path, data))) == []
+
+
+def test_watch_after_refuses_a_trailing_newline(tmp_path):
+    # validate, not check: the schema agreement test reads ECMA `$`, which also refuses it
+    data = ship_example()
+    ship_stage(data, "watch-1h")["watch"]["after"] = "1h\n"
+    errors, _ = runbook.validate(data, str(tmp_path), check_files=False)
+    assert sorted(e["code"] for e in errors) == ["SHIP-NO-WATCH", "WATCH-AFTER-INVALID"]
+
+
+def test_external_takes_true_or_false_only(tmp_path):
+    data = ship_example()
+    ship_stage(data, "deploy")["external"] = "yes please"
+    assert ("FIELD-TYPE", "stages[1].external") in finds(runbook.check(write(tmp_path, data)))
+
+
+def test_a_watch_is_one_mapping(tmp_path):
+    data = ship_example()
+    window = ship_stage(data, "watch-1h")["watch"]
+    ship_stage(data, "watch-1h")["watch"] = [window, dict(window, after="24h")]
+    assert ("FIELD-TYPE", "stages[2].watch") in finds(runbook.check(write(tmp_path, data)))
+
+
+def test_the_rollback_block(tmp_path):
+    def got(**change):
+        data = ship_example()
+        data["rollback"].update(change)
+        return finds(runbook.check(write(tmp_path, data)))
+
+    data = ship_example()
+    del data["rollback"]["deputy"]
+    assert finds(runbook.check(write(tmp_path, data))) == [("FIELD-MISSING", "rollback.deputy")]
+    assert got(deputy="Release Owner ") == [("ROLLBACK-DEPUTY-SAME", "rollback.deputy")]
+    assert got(automatic=[]) == [("FIELD-EMPTY", "rollback.automatic")]
+    assert got(automatic=["nope"]) == [("ROLLBACK-CHECK-UNKNOWN", "rollback.automatic[0]")]
+    assert got(automatic=["undo-exit"]) == [("ROLLBACK-CHECK-UNKNOWN", "rollback.automatic[0]")]
+    assert got(discretionary=[]) == []
+    data = ship_example()
+    data["rollback"] = ["x"]
+    assert finds(runbook.check(write(tmp_path, data))) == [("FIELD-TYPE", "rollback")]
+    data["rollback"] = {"automatic": ["health-1h"], "discretionary": [], "authority": "a", "deputy": "b",
+                        "approver": "c"}
+    assert [c for c, _ in finds(runbook.check(write(tmp_path, data)))] == ["FIELD-UNKNOWN"]
+
+
+def test_plain_runbooks_get_no_new_required_key(tmp_path):
+    """The fail case of t-619: a plain runbook gets a new required key."""
+    for data in (minimal(), minimal2(), minimal2(kind="plain")):
+        result = runbook.check(write(tmp_path, data))
+        assert result["errors"] == [] and warn_codes(result) == [], result
+    old_required = {"runbook", "id", "title", "stages"}
+    assert {k for k, v in runbook.TOP_KEYS.items() if v} == old_required
+    assert {k for k, v in runbook.STAGE_KEYS.items() if v} == {"id"}
+    for key in ("kind", "rollback"):
+        assert runbook.TOP_KEYS[key] is False
+    for key in ("external", "watch"):
+        assert runbook.STAGE_KEYS[key] is False
+
+
+def test_a_plain_runbook_may_carry_ship_parts(tmp_path):
+    data = ship_example()
+    del data["kind"]
+    result = runbook.check(write(tmp_path, data))
+    assert result["errors"] == [] and result["verdict"] == "PASS"
+    assert [w["code"] for w in result["warnings"]] == ["SHIP-PARTS-UNCHECKED"]
+    assert result["warnings"][0]["where"] == "kind"
+
+
+def test_a_plain_runbook_gets_its_rollback_and_watch_shapes_checked(tmp_path):
+    data = minimal2(rollback="later")
+    assert ("FIELD-TYPE", "rollback") in finds(runbook.check(write(tmp_path, data)))
+    data = minimal2()
+    data["stages"][0]["watch"] = {"after": "soon", "looks_at": ["build-exit"]}
+    assert ("WATCH-AFTER-INVALID", "stages[0].watch.after") in finds(runbook.check(write(tmp_path, data)))
+
+
+def test_a_stray_after_hints_at_watch(tmp_path):
+    data = minimal2()
+    data["stages"][1]["after"] = "1h"
+    result = runbook.check(write(tmp_path, data))
+    assert finds(result) == [("FIELD-UNKNOWN", "stages[1].after")]
+    assert "watch" in result["errors"][0]["message"]
+    data = minimal()
+    data["stages"][1]["after"] = "1h"
+    assert "watch" not in runbook.check(write(tmp_path, data))["errors"][0]["message"]
+
+
+@pytest.mark.parametrize("bad", [None, "text", ["a"], {}, 3])
+def test_a_malformed_ship_runbook_is_reported_not_raised(tmp_path, bad):
+    for key in ("stages", "rollback"):
+        data = ship_example()
+        data[key] = bad
+        assert runbook.check(write(tmp_path, data))["verdict"] == "FAIL"
+    data = ship_example()
+    ship_stage(data, "deploy")["fails"] = bad
+    ship_stage(data, "watch-1h")["watch"] = bad
+    assert runbook.check(write(tmp_path, data))["verdict"] == "FAIL"

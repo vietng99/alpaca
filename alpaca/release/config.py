@@ -50,6 +50,8 @@ class ReleaseConfig:
     overlays: dict = None
     generated_manifest: list = None
     public_base: str = None
+    fail_fast: bool = True
+    parallel: int = 1
 
 
 def load_config(root):
@@ -84,7 +86,7 @@ def load_config(root):
         if not isinstance(gate, dict) or set(gate) - {'name', 'command', 'scope', 'timeout'}:
             raise ValueError('invalid gate configuration')
         name = gate.get('name')
-        if not isinstance(name, str) or not re.fullmatch(r'[a-z][a-z0-9-]*', name) or name in names:
+        if not isinstance(name, str) or not re.fullmatch(r'[a-z][a-z0-9-]*', name) or name in names or name == 'preflight-build':
             raise ValueError('gate names must be unique and cannot replace mandatory checks')
         names.add(name)
         argv(gate.get('command'))
@@ -101,6 +103,11 @@ def load_config(root):
         contained(root, source)
     if cfg.get('generated_manifest') is not None:
         argv(cfg['generated_manifest'])
+    parallel = cfg.get('parallel', 1)
+    if isinstance(parallel, bool) or not isinstance(parallel, int) or not 1 <= parallel <= 16:
+        raise ValueError('parallel must be a whole number of gates from 1 to 16')
+    if not isinstance(cfg.get('fail_fast', True), bool):
+        raise ValueError('fail_fast must be true or false')
     if cfg.get('public_base') is not None and not re.fullmatch(r'[0-9a-f]{40}', str(cfg['public_base'])):
         raise ValueError('public_base must be a full commit SHA')
     return ReleaseConfig(**dict(cfg, overlays=overlays))

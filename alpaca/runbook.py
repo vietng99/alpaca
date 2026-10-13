@@ -58,12 +58,14 @@ STAGE_TIMEOUT_RANGE = (1, 7 * 24 * 3600)
 # Every field, per block, and whether it is required. docs/runbook-format.md names each one and
 # test_runbook.py fails when the two drift apart.
 TOP_KEYS = {"runbook": True, "id": True, "title": True, "description": False, "spec": False,
-            "owner": False, "knobs": False, "stages": True, "research": False}
+            "owner": False, "knobs": False, "stages": True, "research": False, "kind": False,
+            "rollback": False}
 KNOB_KEYS = {"id": True, "description": True, "type": True, "default": True, "min": False,
              "max": False, "values": False, "owner_only": False, "source": False}
 STAGE_KEYS = {"id": True, "title": False, "description": False, "needs": False, "run": False,
               "workdir": False, "timeout": False, "env": False, "inputs": False, "outputs": False,
-              "checks": False, "retry": False, "fails": False, "owner_gate": False, "recovery": False}
+              "checks": False, "retry": False, "fails": False, "owner_gate": False, "recovery": False,
+              "external": False, "watch": False}
 CHECK_KEYS = {"id": True, "type": True, "description": False, "covers": False, "source": False}
 #: a fail case's `detect` is a check without `id`, `covers` and `source`
 DETECT_KEYS = {"type": True, "description": False}
@@ -84,6 +86,19 @@ SINCE_2 = {"knob": ("source",), "stage": ("recovery",), "check": ("source",), "g
            "fail": ("detect", "then", "covers", "source")}
 #: the fields format 3 added, per table; below format 3 each is FIELD-UNKNOWN, as it was
 SINCE_3 = {"top": ("research",)}
+#: ship runbooks (format 2): `kind: ship` marks a release or a deploy and brings the rules of `ship()`
+KINDS = ("plain", "ship")
+ROLLBACK_KEYS = {"automatic": True, "discretionary": True, "authority": True, "deputy": True}
+#: a stage's watch lists in `looks_at` the checks it judges (`checks` is the stage's own check list)
+WATCH_KEYS = {"after": True, "looks_at": True}
+#: the ship fields, per table; they exist in format 2 only, so each is FIELD-UNKNOWN in format 1 and 3
+SHIP_FIELDS = {"top": ("kind", "rollback"), "stage": ("external", "watch")}
+SHIP_FORMAT = 2
+#: a watch's `after`: a whole number and a unit, and the seconds each unit is
+WATCH_AFTER = re.compile(r"^([1-9][0-9]*)([mhd])$")
+WATCH_UNITS = {"m": 60, "h": 3600, "d": 86400}
+#: the windows a ship runbook must watch: (the text it writes, its seconds, the other spelling)
+SHIP_WATCHES = (("1h", 3600, "60m"), ("24h", 86400, "1d"))
 #: the answers a fail case gives besides `{run: <recovery stage id>}`
 THEN_WORDS = ("retry", "stop", "ask-owner")
 
@@ -102,9 +117,13 @@ ERROR_CODES = (
     "EC-UNNUMBERED", "THEN-MISSING", "THEN-UNKNOWN", "RECOVERY-UNKNOWN", "RECOVERY-NOT-MARKED",
     "RECOVERY-NEEDED", "RECOVERY-SELF", "RECOVERY-CHAIN", "RECOVERY-NO-ATTEMPT", "DETECT-INVALID",
     "COVERS-NO-DETECT",
+    # ship runbooks (format 2)
+    "KIND-UNKNOWN", "SHIP-NO-ROLLBACK", "SHIP-NO-EXTERNAL", "SHIP-NO-RECOVERY", "SHIP-NO-WATCH",
+    "WATCH-AFTER-INVALID", "WATCH-CHECK-UNKNOWN", "WATCH-BEFORE-CHANGE", "ROLLBACK-CHECK-UNKNOWN",
+    "ROLLBACK-DEPUTY-SAME",
 )
 WARNING_CODES = ("FR-UNCOVERED", "SPEC-CLARIFY", "COVERS-WITHOUT-SPEC", "SPEC-UNPARSED",
-                 "EC-IGNORED", "SOURCE-SHAPE", "SOURCE-MISSING")
+                 "EC-IGNORED", "SOURCE-SHAPE", "SOURCE-MISSING", "SHIP-PARTS-UNCHECKED")
 
 # ----------------------------------------------------------------- format 3: the research block
 # design/research-engine/runbook-format-3.md sections 4, 6.1, 7 and 14.1. Every rule below runs only
@@ -349,6 +368,20 @@ def source_shape(text):
     return kind in ("spec", "owner")
 
 
+def recovery_target(fail):
+    """The recovery stage id a recognized fail case sends to (`then: {run: <id>}`), else None."""
+    then = fail.get("then") if fail_recognized(fail) else None
+    if isinstance(then, dict) and list(then) == ["run"] and isinstance(then["run"], str):
+        return then["run"]
+    return None
+
+
+def fail_recognized(fail):
+    """A fail case the runner can recognize: respond acts only on these, and only these cover a
+    spec item or count as a recovery entry of a ship runbook."""
+    return isinstance(fail, dict) and isinstance(fail.get("detect"), dict)
+
+
 class _Checker:
     def __init__(self, data, base_dir, check_files, report):
         self.data, self.base, self.check_files, self.r = data, base_dir, check_files, report
@@ -357,6 +390,8 @@ class _Checker:
         # every stage id, and the ids of the recovery stages (format 2), known before any stage
         # is read, since a fail case may send to a stage declared after it
         self.stage_ids, self.recovery = set(), set()
+        # ship runbooks: what each valid stage id holds (see stage()), and the stage of each check id
+        self.stage_info, self.check_stage = {}, {}
 
     def table(self, table, name):
         """The field table as this file's format has it: format 1 has none of the SINCE_2 fields,
@@ -366,6 +401,8 @@ class _Checker:
             drop += SINCE_2.get(name, ())
         if self.fmt < RESEARCH_FORMAT:
             drop += SINCE_3.get(name, ())
+        if self.fmt != SHIP_FORMAT:
+            drop += SHIP_FIELDS.get(name, ())
         if not drop:
             return table
         return {k: v for k, v in table.items() if k not in drop}
@@ -383,6 +420,8 @@ class _Checker:
                 words = list(allowed) + [a for a, target in ALIASES.items() if target in allowed]
                 near = difflib.get_close_matches(str(key), words, n=1, cutoff=0.6)
                 hint = "; did you mean `%s`?" % ALIASES.get(near[0], near[0]) if near else ""
+                if key == "after" and "watch" in allowed:
+                    hint = "; did you mean `needs` (run after another stage) or `watch: {after: ...}`?"
                 self.r.error("FIELD-UNKNOWN", self._at(where, key),
                              "`%s` is not a field here; allowed: %s%s" % (
                                  key, ", ".join(sorted(allowed)), hint))
@@ -499,6 +538,7 @@ class _Checker:
             # a research contract always names the spec it covers, so coverage is always checked
             top = dict(top, spec=True, research=True)
         self.keys(d, top, "")
+        kind = self.read_kind() if "kind" in top and "kind" in d else "plain"
         if "runbook" in d:
             value = d["runbook"]
             if value == RESEARCH_FORMAT and not isinstance(value, bool) and "research" not in d:
@@ -517,6 +557,12 @@ class _Checker:
             self.local_path(spec, "spec", "spec")
         self.knob_list()
         self.stage_list()
+        if "rollback" in top and "rollback" in d:
+            self.rollback(d["rollback"])
+        if kind == "ship":
+            self.ship()
+        elif kind == "plain" and "kind" not in d and self.fmt == SHIP_FORMAT:
+            self.unchecked_ship_parts()
         if research:
             self.research()
         if unfilled:
@@ -669,13 +715,20 @@ class _Checker:
     def stage(self, stage, where, stage_ids, check_ids):
         self.keys(stage, self.table(STAGE_KEYS, "stage"), where)
         earlier = dict(stage_ids)
-        self.ident(stage, where, seen=stage_ids, kind="stage id")
+        sid = self.ident(stage, where, seen=stage_ids, kind="stage id")
         for key in ("title", "description"):
             self.text(stage, key, where)
         recovery = False
         if self.fmt >= 2:
             self.flag(stage, "recovery", where)
             recovery = stage.get("recovery") is True
+        external = False
+        if self.fmt == SHIP_FORMAT:
+            self.flag(stage, "external", where)
+            external = stage.get("external") is True
+            if external and "run" not in stage:
+                self.r.error("FIELD-UNKNOWN", where + ".external", "nothing runs in a gate-only stage, so it "
+                             "changes nothing; put `external` on the stage that runs the change")
         needs = self.items(stage, "needs", where)
         for n, need in enumerate(needs):
             if need in self.recovery:
@@ -717,6 +770,19 @@ class _Checker:
         self.outputs(stage, where)
         self.fails(stage, where)
         own = self.checks(stage, where, check_ids)
+        seconds = None
+        if "watch" in stage and self.fmt == SHIP_FORMAT:
+            seconds = self.watch(stage["watch"], where + ".watch", own, recovery, "run" in stage)
+        if sid:
+            for ident in own:
+                self.check_stage.setdefault(ident, sid)
+            self.stage_info[sid] = {
+                "where": where, "recovery": recovery, "own": own, "watch": seconds,
+                "external": external and run is not None and not recovery,
+                "needs": [n for n in needs if n in earlier and n not in self.recovery],
+                "links": [t for t in map(recovery_target, stage.get("fails") or []
+                                         if isinstance(stage.get("fails"), list) else [])
+                          if t in self.recovery]}
         listed = stage.get("checks")
         if run and (listed is None or listed == []):
             self.r.error("CHECKS-EMPTY", where + ".checks", "a stage that runs a command needs at least "
@@ -730,6 +796,150 @@ class _Checker:
             self.owner_gate(gate, where + ".owner_gate")
         if "retry" in stage:
             self.retry(stage["retry"], where + ".retry", own)
+
+    # -- ship runbooks (format 2)
+    def read_kind(self):
+        """The `kind` of the file: "plain", "ship", or None when it is refused (then no ship rule
+        runs, since the file already fails)."""
+        kind = self.text(self.data, "kind", "")
+        if kind is not None and kind not in KINDS:
+            self.r.error("KIND-UNKNOWN", "kind", "`kind` is `plain` (the default) or `ship`, found %r" % kind)
+            return None
+        return kind
+
+    def rollback(self, block):
+        """The rollback block of a ship runbook; its shape is checked wherever it is written."""
+        if block is UNREAD:
+            return
+        if not isinstance(block, dict):
+            self.r.error("FIELD-TYPE", "rollback", "`rollback` is a mapping with `automatic`, `discretionary`, "
+                         "`authority` and `deputy`, found %s" % _name(block))
+            return
+        self.keys(block, ROLLBACK_KEYS, "rollback")
+        self.items(block, "automatic", "rollback")
+        if block.get("automatic") == []:
+            self.r.error("FIELD-EMPTY", "rollback.automatic", "`automatic` names at least one check whose "
+                         "failure forces a rollback")
+        for n, ident in enumerate(block["automatic"] if isinstance(block.get("automatic"), list) else []):
+            info = self.stage_info.get(self.check_stage.get(ident)) if isinstance(ident, str) else None
+            if isinstance(ident, str) and ident.strip() and (info is None or info["recovery"]):
+                self.r.error("ROLLBACK-CHECK-UNKNOWN", "rollback.automatic[%d]" % n, "`%s` is not a check of a "
+                             "stage in the run order; `automatic` names the checks whose failure forces a "
+                             "rollback" % ident)
+        self.items(block, "discretionary", "rollback")
+        authority = self.text(block, "authority", "rollback")
+        deputy = self.text(block, "deputy", "rollback")
+        if authority and deputy and authority.strip().casefold() == deputy.strip().casefold():
+            self.r.error("ROLLBACK-DEPUTY-SAME", "rollback.deputy", "the deputy calls the rollback when the "
+                         "authority cannot; `deputy` names the same person as `authority` (%s)" % authority)
+
+    def watch(self, block, at, own, recovery, has_run):
+        """A stage's watch: the seconds of its `after` when the whole block is valid, else None."""
+        if block is UNREAD:
+            return None
+        if not isinstance(block, dict):
+            self.r.error("FIELD-TYPE", at, "`watch` is one mapping with `after` and `looks_at`; a stage holds "
+                         "one watch, so each window is its own stage")
+            return None
+        if recovery:
+            self.r.error("FIELD-UNKNOWN", at, "a recovery stage runs only when a fail case sends to it, "
+                         "outside the run order, so it watches nothing")
+            return None
+        if not has_run:
+            self.r.error("FIELD-UNKNOWN", at, "a watch runs the stage's checks after a wait; this stage has "
+                         "no `run`")
+            return None
+        before = len(self.r.errors)
+        self.keys(block, WATCH_KEYS, at)
+        seconds = None
+        if "after" in block and block["after"] is not UNREAD:
+            if not isinstance(block["after"], str):
+                self.r.error("FIELD-TYPE", at + ".after", "`after` is text such as `1h` or `24h`, found %s; "
+                             "YAML reads 1:00 as the number 60" % _name(block["after"]))
+            else:
+                text = self.text(block, "after", at)
+                found = WATCH_AFTER.fullmatch(text) if text else None
+                if found:
+                    seconds = int(found.group(1)) * WATCH_UNITS[found.group(2)]
+                elif text:
+                    self.r.error("WATCH-AFTER-INVALID", at + ".after", "`after` is a whole number followed by "
+                                 "m, h or d (`1h`, `24h`, `90m`), found %r" % text)
+        self.items(block, "looks_at", at)
+        if block.get("looks_at") == []:
+            self.r.error("FIELD-EMPTY", at + ".looks_at", "`looks_at` names at least one check of this stage")
+        for n, ident in enumerate(block["looks_at"] if isinstance(block.get("looks_at"), list) else []):
+            if isinstance(ident, str) and ident.strip() and ident not in own:
+                self.r.error("WATCH-CHECK-UNKNOWN", "%s.looks_at[%d]" % (at, n), "`%s` is not a check of "
+                             "this stage (%s); `looks_at` names the checks the watch judges"
+                             % (ident, ", ".join(own) or "none"))
+        return seconds if len(self.r.errors) == before else None
+
+    def ship(self):
+        """The rules of `kind: ship`: a rollback block, an external stage with a recovery entry,
+        and a 1h and a 24h watch that follow the change. Every gap is reported."""
+        if "rollback" not in self.data:
+            self.r.error("SHIP-NO-ROLLBACK", "rollback", "a ship runbook (`kind: ship`) needs a `rollback` "
+                         "block: `automatic` (the checks that force a rollback), `discretionary` (the "
+                         "conditions the authority judges), `authority` (who calls it) and `deputy`")
+        stages = self.data.get("stages")
+        if not isinstance(stages, list) or not stages:
+            return
+        info = self.stage_info
+        external = [sid for sid, i in info.items() if i["external"]]
+        if not external:
+            self.r.error("SHIP-NO-EXTERNAL", "stages", "a ship runbook changes something outside the project "
+                         "folder, so at least one stage that runs a command says `external: true`; none does")
+        for sid in external:
+            if not info[sid]["links"]:
+                self.r.error("SHIP-NO-RECOVERY", info[sid]["where"] + ".fails", "stage `%s` is `external: true`, "
+                             "so it needs a recovery entry: a fail case with `detect` and `then: {run: "
+                             "<recovery stage id>}` (a fail case without `detect` is never recognized, so it "
+                             "does not count)" % sid)
+        counted = {}
+        for sid, i in info.items():
+            if i["recovery"] or i["watch"] is None:
+                continue
+            if external and not self.follows_change(sid, set(external)):
+                self.r.error("WATCH-BEFORE-CHANGE", i["where"] + ".needs", "stage `%s` watches %ds after the "
+                             "change but does not follow a stage marked `external: true` through `needs`; "
+                             "list the stage that makes the change in `needs`, directly or through another "
+                             "stage" % (sid, i["watch"]))
+                continue
+            counted[i["watch"]] = sid
+        for text, seconds, other in SHIP_WATCHES:
+            if seconds not in counted:
+                self.r.error("SHIP-NO-WATCH", "stages", "a ship runbook needs a stage with `watch: {after: "
+                             "%s, looks_at: [...]}` that runs after the change; no stage has a valid one "
+                             "(`%s` counts the same; each watch is its own stage)" % (text, other))
+
+    def follows_change(self, sid, external):
+        """True when stage `sid` reaches a stage of `external` through `needs` (not itself)."""
+        seen, todo = set(), list(self.stage_info[sid]["needs"])
+        while todo:
+            need = todo.pop()
+            if need in external:
+                return True
+            if need not in seen:
+                seen.add(need)
+                todo.extend(self.stage_info[need]["needs"])
+        return False
+
+    def unchecked_ship_parts(self):
+        """A format 2 file with ship parts and no `kind` passes, with one warning: the ship rules did
+        not run."""
+        stages = [s for s in (self.data.get("stages") if isinstance(self.data.get("stages"), list) else [])
+                  if isinstance(s, dict)]
+        parts = []
+        if "rollback" in self.data:
+            parts.append("a `rollback` block")
+        if any("watch" in s for s in stages):
+            parts.append("a `watch`")
+        if any(s.get("external") is True for s in stages):
+            parts.append("an `external: true` stage")
+        if parts:
+            self.r.warn("SHIP-PARTS-UNCHECKED", "kind", "this runbook has %s but no `kind: ship`, so the ship "
+                        "rules (rollback, recovery entries, the 1h and 24h watch) did not run; add `kind: ship` "
+                        "if it ships" % ", ".join(parts))
 
     def outputs(self, stage, where):
         value = stage.get("outputs")
@@ -769,7 +979,7 @@ class _Checker:
                 continue
             covers = self.items(fail, "covers", at)
             self.source(fail, at)
-            if covers and not isinstance(fail.get("detect"), dict):
+            if covers and not fail_recognized(fail):
                 self.r.error("COVERS-NO-DETECT", at + ".covers", "only a fail case that detects the failure "
                              "and answers it covers a spec item; this one has no `detect`, so it is never "
                              "recognized. Give it `detect` and `then`, or list %s in the `covers` of the check "
@@ -3111,7 +3321,7 @@ def respond(data, stage, results, attempt, knobs, detected):
     retry = stage.get("retry") or {}
     failing = not all(code == verdict.PASS for code in results.values())
     for fail in (stage.get("fails") or []) if failing else []:
-        if not isinstance(fail, dict) or not isinstance(fail.get("detect"), dict):
+        if not fail_recognized(fail):
             continue
         ident, then = fail.get("id"), fail.get("then")
         if detected.get(ident) != verdict.PASS:

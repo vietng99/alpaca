@@ -17,6 +17,10 @@ fields (the loader in `alpaca/formation/manifest.py` refuses a file missing any 
 - `budget_class` - the resource class the formation declares up front.
 - `output` - the deliverable shape.
 
+Optional top-level keys: `escalation` (see Tiers and escalation), `default_for` (the phases the
+formation is the default for), `skill` and `cutover`. Any other top-level key is refused, so a
+misspelt `Escalation:` stops the load instead of being ignored.
+
 Example:
 
 ```
@@ -52,7 +56,8 @@ model table is refused. Resolve the current values with `--runtime claude` or `-
 
 A formation may also carry an optional `escalation:` block holding only `round_cap`; it may lower
 the policy cap (5), never raise it, and never to the class check's `after_failed_rounds` (3) or
-below, where the class check could never run. The rest of the ladder (the think stage before
+below, where the class check could never run. Leave the block out to keep the policy cap; an
+empty block or a `round_cap:` with no value is refused. The rest of the ladder (the think stage before
 round 1, one high investigator per failed round that reports before the next fix, the
 cause-to-action map, the class check that sends a non-converging task back through the think stage
 once, the stop at the cap) and the verifier rules live in `shield.yaml` alone. `alpaca/formation/shield.py` resolves them; print the resolved table with
@@ -65,7 +70,7 @@ Codex discovers its project entry under `.agents/skills/shield/` and uses native
 `manifest.registry(root)` scans this directory and registers every manifest both ways: name to
 formation (`registry.get`, `registry.names`) for the dispatch protocol, and formation file back
 to name (`registry.name_of`) for the doctrine registry. A file with no front matter, such as this
-README, is skipped, not refused; a file that HAS front matter but is missing a field is refused,
+README, is skipped, not refused; a file that HAS front matter but is missing a field or carries an unknown top-level key is refused,
 so a broken formation never registers silently.
 
 ## Blind pairs

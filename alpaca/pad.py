@@ -58,6 +58,29 @@ def _one_line(value, limit) -> str:
     return _render.cell(text)
 
 
+def not_now_line(row) -> str:
+    """One Not now entry: id, op (and whether it is closed), title, why it waits, what brings it
+    back. Every free-text value is cut by _one_line so one entry stays one bounded line."""
+    cut = lambda v: _one_line(v, RESUME_TEXT_MAX)
+    return "- %s (%s%s) %s - %s" % (row["id"], _render.cell(row["op"] or "-"),
+                                    " closed" if row["op_closed"] else "", cut(row["title"]),
+                                    "; ".join(ops.not_now_words(row, cut)))
+
+
+def overdue_line(row) -> str:
+    """One Overdue AAR items entry: id, op, due, days late, owner, source AAR and row. No title or
+    other report text, so no entry can read as a status claim to the record check. An item whose
+    due cannot be read is listed too, so a typo in its contract does not hide it."""
+    if row["days_late"] is None:
+        due = "not readable (see its contract)"
+    else:
+        due = "%s, %d day(s) late" % (_render.cell(row["due"]), row["days_late"])
+    return "- %s in %s, due %s, owner %s, from the %s AAR line %s" % (
+        row["id"], _render.cell(row["op"] or "-"), due,
+        _render.cell(row["owner"]) if row["owner"] else "(see its contract)",
+        _render.cell(row["source"]), row["line"] if row["line"] is not None else "-")
+
+
 def _data(raw) -> dict:
     """An event's data column as a dict; {} when it is absent or not a JSON object."""
     if isinstance(raw, dict):
@@ -310,11 +333,26 @@ def render(root) -> str:
     else:
         lines.append("(none open)")
     lines += ["", "## Open tasks", ""]
+    # op-057 t-617: deferred tasks are not open work; they have their own Not now section below.
     tasks = db.rows(conn, "tasks", "status IN ('open','doing','blocked') ORDER BY id")
     # M4.9: the statement and the claimant token are externally sourced; both cross _render.cell.
     lines += ["- %s [%s] %s%s" % (t["id"], t["status"], _render.cell(t["statement"]),
               (" (claimed by %s)" % _render.cell(t["claimant"])) if t["claimant"] else "")
               for t in tasks] or ["(none)"]
+    lines += ["", "## Not now", ""]
+    # op-057 t-617: deferred work is listed here, never dropped. A failure prints one line under
+    # the heading instead of hiding the list (an empty list would read as "nothing is parked").
+    try:
+        lines += [not_now_line(r) for r in ops.not_now(conn)] or ["(none)"]
+    except Exception as exc:
+        lines.append("(the Not now list could not be read: %s)" % type(exc).__name__)
+    lines += ["", "## Overdue AAR items", ""]
+    # op-057 t-623: an action item of a sealed AAR past its due by the record clock, not done.
+    try:
+        from alpaca import aaritems
+        lines += [overdue_line(r) for r in aaritems.overdue(conn)] or ["(none)"]
+    except Exception as exc:
+        lines.append("(the Overdue AAR items list could not be read: %s)" % type(exc).__name__)
     lines += ["", "## Recent events", ""]
     # The kinds that repeat on their own, and a probe's open/close pair, are counted on one
     # closing line instead of taking all eight slots.

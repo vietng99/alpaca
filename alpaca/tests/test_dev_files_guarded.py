@@ -168,6 +168,7 @@ def shipped_tests(root=REPO):
                     yield path
 
 
+@pytest.mark.dev_tree      # skips in a release tree; the release runs it in the development tree
 def test_every_shipped_test_names_development_files_through_the_helper():
     index = dev_only_index()
     if index is None or not index[0]:

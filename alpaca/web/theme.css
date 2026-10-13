@@ -35,11 +35,15 @@
   --amber-bg: #f7f1e5;
   --red: #a3423f;
   --red-bg: #f8edec;
+  --violet: #634a94;
+  --violet-bg: #f2eff8;
   --st-doing: var(--accent); --st-doing-bg: var(--accent-soft);
   --st-ready: var(--green); --st-ready-bg: var(--green-bg);
   --st-waiting: var(--amber); --st-waiting-bg: var(--amber-bg);
   --st-blocked: var(--red); --st-blocked-bg: var(--red-bg);
   --st-done: var(--muted); --st-done-bg: var(--surface-muted);
+  --st-deferred: var(--violet); --st-deferred-bg: var(--violet-bg);
+  --st-overdue: var(--red); --st-overdue-bg: var(--red-bg);
   --sidebar: #f1f1ee;
   --sidebar-text: #2b3036;
   --sidebar-muted: #5c636b;
@@ -84,6 +88,8 @@
   --amber-bg: #2f281b;
   --red: #e3a09c;
   --red-bg: #382423;
+  --violet: #bfaee6;
+  --violet-bg: #2a2638;
   --sidebar: #191b1e;
   --sidebar-text: #dcdfe2;
   --sidebar-muted: #a3a9b0;
@@ -187,6 +193,7 @@ option { background: var(--surface); color: var(--text); }
 .badge.blocked, .badge.stale, .badge.open { color: var(--amber); background: var(--amber-bg); }
 .badge.fail, .badge.error { color: var(--red); background: var(--red-bg); }
 .badge.running, .badge.active, .badge.doing, .badge.in_progress { color: var(--accent); background: var(--accent-soft); }
+.badge.deferred { color: var(--st-deferred); background: var(--st-deferred-bg); }
 .progress-track { background: var(--surface-muted); }
 .progress-track span { background: var(--chart-input); }
 .panel-foot { background: var(--surface-muted); }

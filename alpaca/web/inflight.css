@@ -83,6 +83,7 @@
 .if-state-done { color: var(--green); background: var(--green-bg); }
 .if-state-doing { color: var(--accent); background: var(--accent-soft); }
 .if-state-blocked { color: var(--amber); background: var(--amber-bg); }
+.if-state-deferred { color: var(--st-deferred); background: var(--st-deferred-bg); }
 .if-tests { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-top: var(--sp-1); }
 .if-test { font-size: var(--fs-xs); border-radius: var(--r-sm); padding: 0 var(--sp-1); }
 .if-test.ok { color: var(--green); background: var(--green-bg); }

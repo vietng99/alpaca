@@ -70,6 +70,22 @@ def test_full_plan_appends_wiki_lint_oracle_and_the_suite_last():
     assert "regression-suite" not in core and "wiki-mutation-oracle" not in core
 
 
+def test_no_suite_leaves_out_only_the_suite_row():
+    full = BC.plan(REPO, full=True)
+    assert BC.plan(REPO, full=True, suite=False) == full[:-1]
+    assert BC.plan(REPO, full=False, suite=False) == BC.plan(REPO, full=False)
+
+
+def test_no_suite_runs_no_pytest(tmp_path, monkeypatch):
+    root = str(tmp_path / "proj")
+    _mk_min_tree(root)
+    _write_oracle(root, flipped=1, hollow=0, total=1)
+    _write_test(root, "def test_broken():\n    assert False\n")
+    monkeypatch.setattr(BC, "regression_row", lambda root: pytest.fail("the suite ran under --no-suite"))
+    names = [name for name, _code in BC.rows(root, full=True, suite=False)]
+    assert names[-2:] == ["wiki-lint", "wiki-mutation-oracle"]
+
+
 def test_a_new_instrument_is_picked_up_without_editing_boot_check(tmp_path):
     """Drop a fresh selftest-bearing instrument into alpaca/gates of a throwaway tree; the census, and
     so boot-check's plan, names it with no edit to boot-check."""

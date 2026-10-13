@@ -339,7 +339,7 @@ Alpaca is domain-neutral. Set a `profile:` in `project.yaml` to bring your own s
 Also in the box:
 
 - **Formations** for work that needs more than one agent: `solo`, `builder-verifier`, `fan-out`, `bug-loop`, `nuclear`, `napalm`.
-- **Claude Code skills**, ready in any clone: `/alpaca-first-chat`, `/alpaca-onboard`, `/alpaca-op`, `/alpaca-from-notes`, `/alpaca-interview`, `/alpaca-runbook-forge`, `/alpaca-log-review`, and `/autoresearch` (the research engine, from contract to report).
+- **Claude Code skills**, ready in any clone: `/alpaca-first-chat`, `/alpaca-onboard`, `/alpaca-op`, `/alpaca-from-notes`, `/alpaca-interview`, `/alpaca-runbook-forge`, `/alpaca-log-review`, `/alpaca-aar`, and `/autoresearch` (the research engine, from contract to report).
 
 ## Autodrive levels
 
@@ -387,7 +387,7 @@ Claude Code has native lifecycle hooks. Codex follows AGENTS.md and uses explici
 - `.alpaca/`: fresh per-installation runtime created on use; never shipped.
 - `MANUAL.md` and `docs/manual.html`: command reference and phone-readable manual.
 - `doctrine/`, `MAP.md`, `contracts/`, `formations/`: the rules, the boot router, and the work shapes.
-- `.claude/skills/alpaca-*` and `.claude/skills/autoresearch/`: Alpaca's own skills (`/alpaca-first-chat`, `/alpaca-onboard`, `/alpaca-op`, `/alpaca-from-notes`, `/alpaca-interview`, `/alpaca-runbook-forge`, `/alpaca-log-review`, and `/autoresearch`, which has no `alpaca-` prefix). They are project skills, so Claude Code offers them in any clone with nothing to install.
+- `.claude/skills/alpaca-*` and `.claude/skills/autoresearch/`: Alpaca's own skills (`/alpaca-first-chat`, `/alpaca-onboard`, `/alpaca-op`, `/alpaca-from-notes`, `/alpaca-interview`, `/alpaca-runbook-forge`, `/alpaca-log-review`, `/alpaca-aar`, and `/autoresearch`, which has no `alpaca-` prefix). They are project skills, so Claude Code offers them in any clone with nothing to install.
 - `plugin/alpaca/`: optional bundled skills (load with `claude --plugin-dir ./plugin/alpaca`, see `docs/operators.md`).
 - `docs/runbook-format.md`, `templates/runbook-example/` and `/alpaca-runbook-forge`: the runbook format (a domain's stages, checks, knobs, retry rules and owner gates), a worked example, and the skill that writes a runbook from a spec. `alpaca runbook check` checks one.
 - `alpaca intake <spec> <runbook>`: turns a spec-kit or OpenSpec spec and its runbook into the op's checklist rows (one per success criterion, edge case or scenario, each with its bar), one task contract per stage and per owner gate (none for a recovery stage), and the profile stages; after a spec or runbook change it supersedes only the rows whose criterion or bar changed. `--dry-run` shows the plan. See `docs/intake.md`.

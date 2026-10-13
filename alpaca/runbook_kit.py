@@ -589,6 +589,12 @@ def schema():
                                              "then": ref("then"), "covers": ref("texts"),
                                              "source": ref("text")},
                          {"if": {"required": ["detect"]}, "then": {"required": ["then"]}})
+    nonempty = {"allOf": [ref("texts"), {"minItems": 1}]}
+    defs["rollback"] = block(runbook.ROLLBACK_KEYS, {
+        "automatic": nonempty, "discretionary": ref("texts"), "authority": ref("text"),
+        "deputy": ref("text")})
+    defs["watch"] = block(runbook.WATCH_KEYS, {
+        "after": {"type": "string", "pattern": runbook.WATCH_AFTER.pattern}, "looks_at": nonempty})
     defs["stage"] = block(runbook.STAGE_KEYS, {
         "id": slug, "title": ref("text"), "description": ref("text"), "needs": ref("texts"),
         "run": ref("text"), "workdir": ref("path"),
@@ -597,14 +603,17 @@ def schema():
         "inputs": ref("texts"), "outputs": {"type": "array", "items": ref("output")},
         "checks": {"type": "array", "items": ref("check")}, "retry": ref("retry"),
         "fails": {"type": "array", "items": ref("fail")}, "owner_gate": ref("owner_gate"),
-        "recovery": {"type": "boolean"}},
+        "recovery": {"type": "boolean"}, "external": {"type": "boolean"}, "watch": ref("watch")},
         {"anyOf": [{"required": ["run"]}, {"required": ["owner_gate"]}],
          "if": {"required": ["run"]},
          "then": {"required": ["checks"], "properties": {"checks": {"minItems": 1}}},
-         "else": {"not": {"required": ["checks"]}},
-         # a recovery stage runs a command and is never an owner gate
+         # nothing runs in a stage without `run`, so it has no checks, no watch, no external mark
+         "else": {"not": {"anyOf": [{"required": ["checks"]}, {"required": ["watch"]},
+                                    {"required": ["external"], "properties": {"external": {"const": True}}}]}},
+         # a recovery stage runs a command, is never an owner gate and watches nothing
          "allOf": [{"if": {"required": ["recovery"], "properties": {"recovery": {"const": True}}},
-                    "then": {"required": ["run"], "not": {"required": ["owner_gate"]}}}]})
+                    "then": {"required": ["run"], "not": {"anyOf": [{"required": ["owner_gate"]},
+                                                                   {"required": ["watch"]}]}}}]})
     for strict in (True, False):
         defs.update(_research_defs(block, ref, whole, slug, strict))
     # a `runbook: 1` file has none of the fields format 2 added
@@ -614,11 +623,15 @@ def schema():
         "stages": {"items": {"properties": dict(
             no("stage"), checks={"items": {"properties": no("check")}},
             fails={"items": {"properties": no("fail")}}, owner_gate={"properties": no("gate")})}}}}
+    # the ship fields exist in format 2 only
+    ship_off = {"properties": dict({k: False for k in runbook.SHIP_FIELDS["top"]}, stages={"items": {
+        "properties": {k: False for k in runbook.SHIP_FIELDS["stage"]}}})}
     version = lambda values: {"required": ["runbook"], "properties": {"runbook": {"enum": values}}}  # noqa: E731
     top = block(runbook.TOP_KEYS, {
         "runbook": {"enum": list(runbook.READ_FORMATS)}, "id": slug, "title": ref("text"),
         "description": ref("text"), "spec": ref("path"), "owner": ref("text"),
         "knobs": {"type": "array", "items": ref("knob")},
+        "kind": {"enum": list(runbook.KINDS)}, "rollback": ref("rollback"),
         "stages": {"type": "array", "minItems": 1, "items": ref("stage")},
         # the research block of a format 3 runbook: a block that names a defaults file may leave
         # any field to that file, so only its shape is stated; any other block holds every
@@ -626,16 +639,16 @@ def schema():
         "research": {"if": {"type": "object", "required": ["defaults"]}, "then": ref("research_layered"),
                      "else": ref("research")}},
         {"allOf": [
-            {"if": version([1]), "then": format_1},
+            {"if": version([1]), "then": {"allOf": [format_1, ship_off]}},
             # a plain runbook has no research block; a research runbook has one and names its spec
             {"if": version(list(runbook.FORMATS)), "then": {"not": {"required": ["research"]}}},
             # and every stage command of it has a timeout, and no fail case waits for a person
-            {"if": version([runbook.RESEARCH_FORMAT]), "then": {
+            {"if": version([runbook.RESEARCH_FORMAT]), "then": {"allOf": [ship_off, {
                 "required": ["research", "spec"],
                 "properties": {"stages": {"items": {
                     "if": {"required": ["run"]}, "then": {"required": ["timeout"]},
                     "properties": {"fails": {"items": {"properties": {
-                        "then": {"not": {"const": "ask-owner"}}}}}}}}}}}]})
+                        "then": {"not": {"const": "ask-owner"}}}}}}}}}}]}}]})
     out = {"$schema": "https://json-schema.org/draft/2020-12/schema",
            "title": "Alpaca runbook, format %d" % runbook.FORMAT,
            "description": "The shape of runbook.yaml (FORMAT.md), format %d; a `runbook: 1` file is "
@@ -653,7 +666,10 @@ def schema():
                        "path that leaves the folder only after normalising, a whole number written "
                        "as 2.0, keys given twice, a fail case sending to a recovery stage that "
                        "exists and is not itself, no stage needing a recovery stage, the shape of a "
-                       "source, numbered edge cases, and coverage of the spec. For a research "
+                       "source, numbered edge cases, coverage of the spec, the ship rules of a `kind: ship` "
+                       "runbook (a rollback block, an external stage with a recovery entry, a 1h and a "
+                       "24h watch that follow the change), watch and rollback lists naming checks, and "
+                       "a deputy other than the authority. For a research "
                        "runbook (runbook: 3) it cannot state either: the merge of a defaults file "
                        "(a block that names one is checked for its shape only, since the file may "
                        "give any field), coverage by metrics, cases and parts (COVERS-NONE), the "

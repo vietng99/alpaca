@@ -35,7 +35,7 @@ alpaca review move <rc-N> --accept|--reject --by owner --quote Q
 - "An L5 or L6 run" means the higher of the named session's level and the level of every session
   the environment names (`alpaca/intentgate.py` level; design D-3), so `--session cli` or a made-up
   id cannot lower it. The gates are asked on `task claim` and on `task move` to doing, review or
-  done. A move to open or blocked is never gated (`ACTIONS` in `alpaca/intentgate.py`). The
+  done. A move to open, blocked or deferred is never gated (`ACTIONS` in `alpaca/intentgate.py`). The
   providers are asked in the order batch, orders, oob, selfcheck (`PROVIDERS`).
 
 ## 2. Owner words

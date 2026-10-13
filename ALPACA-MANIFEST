@@ -58,6 +58,7 @@ plugin/alpaca/
 .claude/skills/alpaca-interview/
 .claude/skills/alpaca-runbook-forge/
 .claude/skills/alpaca-log-review/
+.claude/skills/alpaca-aar/
 .claude/skills/autoresearch/
 .claude/skills/shield/
 .agents/skills/shield/

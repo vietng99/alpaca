@@ -7,7 +7,7 @@ from datetime import datetime
 import json
 import re
 
-from alpaca import util
+from alpaca import ops as _ops, util
 
 
 _TASK_KINDS = ("task-add", "task-move", "task-claim", "claim", "claim-release", "lease-expired")
@@ -87,7 +87,8 @@ def tasks(conn, report_reader=None):
     except Exception:              # an older record without the event kind still lists its tasks
         contracts = {}
     items, now = [], util.now_iso()
-    for row in _rows(conn, "SELECT * FROM tasks ORDER BY CASE status WHEN 'doing' THEN 0 WHEN 'blocked' THEN 1 WHEN 'open' THEN 2 ELSE 3 END,id"):
+    parked = {r["id"]: r for r in _ops.not_now(conn)}
+    for row in _rows(conn, "SELECT * FROM tasks ORDER BY CASE status WHEN 'doing' THEN 0 WHEN 'blocked' THEN 1 WHEN 'open' THEN 2 WHEN 'deferred' THEN 3 ELSE 4 END,id"):
         events = histories.get(row["id"], [])
         additions = [e for e in events if e["kind"] == "task-add"]
         moves = [e for e in events if e["kind"] == "task-move" and e["data"].get("to")]
@@ -97,7 +98,8 @@ def tasks(conn, report_reader=None):
                     and latest["data"].get("to") == "done" else None)
         history = [{"event_id": e["id"], "at": e["ts"], "session": e["session"], "actor": e["actor"],
                     "kind": e["kind"], "from": e["data"].get("from"), "to": e["data"].get("to"),
-                    "reason": e["data"].get("reason"), "proof": e["data"].get("proof")} for e in events]
+                    "reason": e["data"].get("reason"), "reactivate_when": e["data"].get("reactivate_when"),
+                    "proof": e["data"].get("proof")} for e in events]
         op = ops.get(row["op"], {})
         items.append({"id": row["id"], "number": number(row["id"]), "title": row["title"] or row["statement"],
                       "description": row["statement"] if row["title"] else None,
@@ -105,6 +107,7 @@ def tasks(conn, report_reader=None):
                       "phase": row["phase"], "lease_until": row["lease_until"],
                       "assigned_session": _assigned_session(row, events, now),
                       "proof": row["proof"], "reason": row["why"],
+                      "deferral": parked.get(row["id"]),
                       "source": row["where_"] if isinstance(row["where_"], str) else None, "ref": row["id"],
                       "purpose": row["why"] or op.get("done_when") or op.get("intent"),
                       "created_at": row["created"] or (additions[0]["ts"] if additions else None),

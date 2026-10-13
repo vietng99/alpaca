@@ -87,6 +87,7 @@ def test_cli_version_flag(capsys):
     assert capsys.readouterr().out.strip() == 'Alpaca ' + VERSION
 
 
+@pytest.mark.dev_tree      # skips in a release tree; the release runs it in the development tree
 def test_project_release_config_overlays_the_release_channel():
     try:
         overlays = load_config(REPO).overlays

@@ -14,7 +14,7 @@ ENV_SESSION_VARS = ("ALPACA_SESSION_ID", "CLAUDE_CODE_SESSION_ID")
 # M4.12: the verb modules whose import registers the rest of the dispatch table. main() imports
 # these (reporting a shortfall) and surface.lint reads the resulting table via registered_verbs.
 # A domain profile adds its own verb modules (alpaca/profile.py `verbs`), see _profile_verb_modules.
-VERB_MODULES = ('ops', 'onboard', 'new', 'doctor', 'analytics_cli', 'serve', 'questions', 'board', 'messages', 'decisions', 'sort', 'export', 'review', 'upgrade', 'barrier', 'operator', 'proof', 'observability.cli', 'artifacts', 'backup', 'workspace', 'spec_kits', 'runbook', 'intake', 'start', 'note', 'interview', 'hub_publish', 'mission_cli', 'release.cli', 'research.cli', 'ownerword', 'brief', 'orders', 'selfcheck', 'oob', 'batch', 'watchdog.cli')
+VERB_MODULES = ('ops', 'onboard', 'new', 'doctor', 'analytics_cli', 'serve', 'questions', 'board', 'messages', 'decisions', 'sort', 'export', 'review', 'upgrade', 'barrier', 'operator', 'proof', 'observability.cli', 'artifacts', 'backup', 'workspace', 'spec_kits', 'runbook', 'intake', 'start', 'note', 'interview', 'hub_publish', 'mission_cli', 'release.cli', 'research.cli', 'ownerword', 'brief', 'orders', 'selfcheck', 'oob', 'batch', 'watchdog.cli', 'aar')
 
 
 def _profile_verb_modules():
@@ -62,14 +62,15 @@ def status_dict(root):
     conn = db.connect(root)
     n = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
     last = db.last_event(conn)
-    from alpaca import version
+    from alpaca import ops, version
     v = version.info()
     d = {"root": root, "version": v["version"], "channel": v["channel"], "events": n,
          "last_event": {"ts": last["ts"], "kind": last["kind"]} if last else None,
          "onboarded": db.meta_get(conn, "onboarded") is not None,
          "sessions": conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0],
          "ops_open": conn.execute("SELECT COUNT(*) FROM ops WHERE status='open'").fetchone()[0],
-         "tasks_open": conn.execute("SELECT COUNT(*) FROM tasks WHERE status IN ('open','doing')").fetchone()[0]}
+         "tasks_open": conn.execute("SELECT COUNT(*) FROM tasks WHERE status IN ('open','doing')").fetchone()[0],
+         "not_now": ops.not_now(conn)}
     # M2.7: the op index (states + cursors) rides on alpaca status --json for the dashboard/page.
     try:
         from alpaca import opindex

@@ -64,3 +64,28 @@ export function healthMeter(s,opts={}){
   return {value,text:`Health ${value}/${max}`,width:`${value/max*100}%`,band,stale:!!opts.since,valuetext:`${value} of ${max}, ${band}${old}`,
     title:[`Health ${value}/${max} (${band}${old})`,...(lost.length?lost:['No points lost']),...(s.notes||[]).map(n=>'Not scored: '+n)].join('\n')};
 }
+
+// The release bar under the health meter (op-056 t-614), from /hub/vitals.json `release`
+// (alpaca/release/progress.py current): the newest running release step, else one that just ended
+// without a result; null when none, so the bar hides. Percent and time left come from the step
+// durations earlier receipts recorded; with none recorded the bar says so instead of guessing.
+const RELEASE_KIND={build:'Release build',check:'Release check',preflight:'Release preflight',publish:'Release publish',tag:'Release tag'};
+const RELEASE_DONE=['PASS','FAIL','SKIPPED','STOPPED'];
+export function timeLeft(s){
+  if(typeof s!=='number')return 'no time estimate yet: no earlier timed run';
+  if(s<60)return 'under a minute left';
+  const m=Math.round(s/60);
+  return m<90?`about ${m} min left`:`about ${Math.floor(m/60)} h ${m%60} min left`;
+}
+export function releaseMeter(list){
+  const all=Array.isArray(list)?list:[],e=all.find(x=>x&&x.state==='running')||all[0];
+  if(!e)return null;
+  const steps=e.steps||[],count=st=>steps.filter(s=>s.status===st).length;
+  const done=steps.filter(s=>RELEASE_DONE.includes(s.status)).length,failed=count('FAIL'),stopped=count('STOPPED'),skipped=count('SKIPPED');
+  const name=RELEASE_KIND[e.kind]||'Release step',counts=[`${done} of ${steps.length} steps`,failed&&`${failed} FAIL`,stopped&&`${stopped} STOPPED`,skipped&&`${skipped} SKIPPED`].filter(Boolean).join(', ');
+  if(e.state==='ended')return {name,pct:'',width:'0%',value:0,step:'Ended without a result',eta:counts,band:'ended',valuetext:`${name} ended without a result`};
+  const pct=typeof e.percent==='number'?Math.max(0,Math.min(100,Math.round(e.percent))):0;
+  const running=steps.filter(s=>s.status==='running').map(s=>s.name);
+  return {name,pct:`${pct}%`,width:`${pct}%`,value:pct,step:running.join(', ')||'Starting',eta:`${counts}, ${timeLeft(e.seconds_left)}`,
+    band:failed?'fail':'ok',valuetext:`${name}: ${pct}% done, running ${running.join(', ')||'nothing yet'}, ${counts}, ${timeLeft(e.seconds_left)}`};
+}

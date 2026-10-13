@@ -793,6 +793,8 @@ def run_snapshot_jobs(root, conn, *, limit=8, stop_requested=None):
                 conn.execute('UPDATE obs_issue SET resolved_at=? WHERE issue_id=?',(util.now_iso(),_id(None,'snapshot-failed',job['job_key'])))
                 # A restored original also closes the wiki consumer's recorded gap.
                 conn.execute('UPDATE obs_issue SET resolved_at=? WHERE issue_id=? AND resolved_at IS NULL',(util.now_iso(),_id(None,'transcript-unavailable',job['session'])))
+                # A transcript that came back after a TranscriptGone close also closes that gap.
+                conn.execute('UPDATE obs_issue SET resolved_at=? WHERE issue_id=? AND resolved_at IS NULL',(util.now_iso(),_id(None,'transcript-gone',job['session'])))
             result['completed'] += 1
         # Large catch-up batches must report actual progress between jobs,
         # rather than appearing stale while the supervised process is working.

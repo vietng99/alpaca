@@ -126,3 +126,22 @@ def test_builder_verifier_is_the_verify_phase_default():
     bv = reg.get("builder-verifier")
     assert "verify" in (bv.raw.get("default_for") or []), \
         "builder-verifier does not declare itself the verify-phase default"
+
+
+def test_every_shipped_formation_loads_under_the_closed_key_set():   # op-013 t-245
+    import glob
+    forms = os.path.join(_root(), "formations")
+    loaded = {}
+    for path in sorted(glob.glob(os.path.join(forms, "*.md"))):
+        with open(path, encoding="utf-8") as fh:
+            if not fh.read().startswith("---"):
+                continue
+        m = manifest.load(path)
+        loaded[m.name] = m
+    assert set(loaded) == set(SIX) and set(manifest.registry(_root()).names()) == set(SIX)
+    used = set()
+    for m in loaded.values():
+        assert set(m.raw) <= set(manifest.KNOWN), m.name
+        used |= set(m.raw)
+    unused = set(manifest.OPTIONAL) - {manifest.ESCALATION} - used
+    assert not unused, "optional keys no shipped formation uses: %s" % sorted(unused)

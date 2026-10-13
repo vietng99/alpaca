@@ -949,7 +949,9 @@ def _open_op(conn, op):
         if not rows:
             raise IntakeError("no op %s; open one with alpaca op new" % op, code=BLOCKED)
     else:
-        rows = [r for r in db.rows(conn, "ops", "status='open' AND id != 'op-0' ORDER BY opened DESC")][:1]
+        from alpaca import ops
+        rows = [r for r in db.rows(conn, "ops", "status='open' AND id != 'op-0' AND " + ops.NOT_STANDING
+                                   + " ORDER BY opened DESC")][:1]
         if not rows:
             raise IntakeError("no open op; open one with alpaca op new \"<intent>\" or pass --op",
                               code=BLOCKED)

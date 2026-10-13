@@ -1,4 +1,8 @@
-"""Release commands use this installation's project root and record."""
+"""Release commands use this installation's project root and record.
+
+build, check and publish read the commit's files from a private checkout of it (release/source.py),
+along with the release configuration that commit declares, so edits and commits in the shared
+project root never change a running release."""
 import json
 import os
 from pathlib import Path
@@ -9,6 +13,8 @@ import uuid
 from alpaca import cli
 from .config import load_config
 from .build import build_release
+from .progress import Progress
+from .source import head, snapshot
 from .receipts import BuildReceipt, CheckReceipt, PublishReceipt, TagReceipt, load_receipt, record_receipt
 
 AGENT_MARKERS = ('CLAUDECODE', 'CLAUDE_CODE_SESSION_ID', 'CODEX_THREAD_ID', 'CODEX_SANDBOX')
@@ -28,7 +34,9 @@ def owner_confirmation(sha):
 def command(args):
     root = Path(cli._root()).resolve()
     try:
-        config = load_config(root)
+        # build, preflight, check and publish read the release configuration of the commit they work
+        # on; the others read the project root's
+        config = load_config(root) if args.release_verb in ('init', 'tag') else None
         if args.release_verb == 'init':
             from .workflows import initialize
             print(json.dumps(initialize(root, config, args.dev_output, args.public_output)))
@@ -43,20 +51,51 @@ def command(args):
             return 0
         if args.release_verb == 'build':
             out = root / (args.output or ('.alpaca/releases/' + uuid.uuid4().hex + '/tree'))
-            receipt = build_release(root, config, out)
+            source = snapshot(root, args.commit or head(root))
+            progress = Progress(root, 'build', head(source), ['build'], sequential=['build'])
+            try:
+                progress.start('build')
+                receipt = build_release(root, load_config(source), out, source)
+            finally:
+                progress.close()
             path = record_receipt(root, args.session or 'cli', receipt)
             print(json.dumps({'receipt': str(path), 'tree': receipt.tree, 'tree_hash': receipt.tree_hash}))
             return 0
+        if args.release_verb == 'preflight':
+            from .checks import preflight
+            from .checks import plan
+            source = snapshot(root, args.commit or head(root))
+            config = load_config(source)
+            steps, sequential = plan(config, 'preflight')
+            progress = Progress(root, 'preflight', head(source), steps, config.parallel, sequential)
+            try:
+                receipt = preflight(root, config, source, progress)
+            finally:
+                progress.close()
+            path = record_receipt(root, args.session or 'cli', receipt)
+            failed = next((g for g in receipt.gates if g['status'] == 'FAIL'), {})
+            print(json.dumps({'receipt': str(path), 'status': receipt.status, 'source_sha': receipt.source_sha,
+                              'failed_gate': failed.get('name', ''), 'first_failure': failed.get('first_failure', ''),
+                              'log': failed.get('log', '')}))
+            return 0 if receipt.status == 'PASS' else 1
         if args.release_verb == 'check':
-            from .checks import check_release
+            from .checks import check_release, plan
             build = load_receipt(root, args.receipt, BuildReceipt)
-            receipt = check_release(root, config, build)
+            source = snapshot(root, build.source_sha)
+            config = load_config(source)
+            steps, sequential = plan(config, 'check')
+            progress = Progress(root, 'check', build.source_sha, steps, config.parallel, sequential)
+            try:
+                receipt = check_release(root, config, build, source, progress)
+            finally:
+                progress.close()
             path = record_receipt(root, args.session or 'cli', receipt)
             print(json.dumps({'receipt': str(path), 'status': receipt.status}))
             return 0 if receipt.status == 'PASS' else 1
         if args.release_verb == 'publish':
             from .publish import publish_release
             checks = load_receipt(root, args.receipt, CheckReceipt)
+            source = snapshot(root, checks.build['source_sha'])
             expect = None
             if args.execute:
                 if not args.expect:
@@ -65,11 +104,23 @@ def command(args):
                 if reviewed.status != 'DRY_RUN' or reviewed.checks.get('attempt') != checks.attempt:
                     raise ValueError('--expect must be a dry-run receipt for these checks')
                 expect = reviewed.outgoing
-            receipt = publish_release(root, config, checks, dry_run=not args.execute, expect=expect)
+            progress = Progress(root, 'publish', checks.build['source_sha'], ['publish'], sequential=['publish'])
+            try:
+                progress.start('publish')
+                receipt = publish_release(root, load_config(source), checks, dry_run=not args.execute, expect=expect,
+                                          source=source)
+            finally:
+                progress.close()
             path = record_receipt(root, args.session or 'cli', receipt)
-            print(json.dumps({'receipt': str(path), 'status': receipt.status,
-                              'report': receipt.report, 'pr_url': receipt.pr_url,
-                              'error': receipt.error}))
+            out = {'receipt': str(path), 'status': receipt.status, 'report': receipt.report,
+                   'pr_url': receipt.pr_url, 'error': receipt.error}
+            if args.execute and receipt.status == 'PASS' and receipt.pr_url:
+                # an executed publish files its T+1h and T+24h watch tasks; a failure to file them
+                # comes back in `watch` and never changes this exit code (release/followup.py)
+                from .followup import file_watches
+                out['watch'] = file_watches(root, args.session or 'cli', receipt, op=args.watch_op,
+                                            runbook=args.watch_runbook)
+            print(json.dumps(out))
             return 0 if receipt.status in ('PASS', 'DRY_RUN') else 2
         if args.release_verb == 'tag':
             from .tag import tag_release
@@ -82,8 +133,14 @@ def command(args):
                 if reviewed.status != 'DRY_RUN' or reviewed.publish.get('attempt') != published.attempt:
                     raise ValueError('--expect must be a dry-run tag receipt for this publish receipt')
                 expect = reviewed.plan
-            receipt = tag_release(root, config, published, args.version, args.notes, dry_run=not args.execute,
-                                  expect=expect, latest=not args.not_latest)
+            progress = Progress(root, 'tag', published.checks.get('build', {}).get('source_sha', ''), ['tag'],
+                                sequential=['tag'])
+            try:
+                progress.start('tag')
+                receipt = tag_release(root, config, published, args.version, args.notes, dry_run=not args.execute,
+                                      expect=expect, latest=not args.not_latest)
+            finally:
+                progress.close()
             path = record_receipt(root, args.session or 'cli', receipt)
             print(json.dumps({'receipt': str(path), 'status': receipt.status, 'plan': receipt.plan,
                               'release_url': receipt.release_url, 'error': receipt.error}))
@@ -107,6 +164,9 @@ def parser(sub):
     approve.add_argument('--revoke', action='store_true', help='withdraw the approval of this commit')
     build = verbs.add_parser('build', help='stage an allowlisted deterministic tree')
     build.add_argument('--output', help='new output under .alpaca/releases/')
+    build.add_argument('--commit', help='full 40-character commit SHA to build (default: the checked-out HEAD)')
+    preflight = verbs.add_parser('preflight', help='run the project gates on a commit before approving it')
+    preflight.add_argument('--commit', help='full 40-character commit SHA (default: the checked-out HEAD)')
     check = verbs.add_parser('check', help='run mandatory and configured checks on a recorded build')
     check.add_argument('receipt', help='recorded build receipt path')
     publish = verbs.add_parser('publish', help='prepare a safe public sync; dry run by default')
@@ -115,6 +175,11 @@ def parser(sub):
     mode.add_argument('--execute', action='store_true', help='push sync branch and create or update its PR')
     mode.add_argument('--dry-run', action='store_true', help='write a report without remote changes (default)')
     publish.add_argument('--expect', help='the reviewed dry-run publish receipt; required with --execute')
+    publish.add_argument('--watch-op', help='the op that gets the T+1h and T+24h watch tasks of an executed '
+                         'publish (default: the one op of the live tasks this session holds, else the standing Release '
+                         'watch op)')
+    publish.add_argument('--watch-runbook', help='ship runbook whose 1h and 24h watch stages list the checks '
+                         '(default: release check receipt, hub reachable, install from the published tag)')
     tag = verbs.add_parser('tag', help='after the owner merges the sync PR, tag it vX.Y.Z and create its release page')
     tag.add_argument('receipt', help='recorded executed publish receipt path')
     tag.add_argument('--version', required=True, help='the released X.Y.Z; must match VERSION in the merged tree')

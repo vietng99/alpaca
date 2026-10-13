@@ -365,7 +365,9 @@ def run(root, notes_arg, *, kit=None, do_prepare=False, session="cli"):
     has_op, conn = False, None
     if os.path.isfile(paths.db_path(root)) or do_prepare:
         conn = db.connect(root)
-        has_op = conn.execute("SELECT COUNT(*) FROM ops WHERE status='open' AND id != 'op-0'").fetchone()[0] > 0
+        from alpaca import ops
+        has_op = conn.execute("SELECT COUNT(*) FROM ops WHERE status='open' AND id != 'op-0' AND "
+                              + ops.NOT_STANDING).fetchone()[0] > 0
     earlier = earlier_pick(conn, sha, signed["file"] if signed["state"] == "signed" else None)
     chosen, mode, reason = choose(root, kit, earlier)
     result = {"kit": chosen, "mode": mode, "reason": reason, "notes": label,

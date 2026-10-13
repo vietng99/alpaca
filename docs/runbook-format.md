@@ -60,6 +60,10 @@ in the spec (`- **EC-001**: ...`) and cover each one. `runbook: 3` is the resear
 runbook that also holds a `research` block (see "The research block"). Any other `runbook:` value
 is refused (`VERSION-UNSUPPORTED`).
 
+A `runbook: 2` file may also be a ship runbook: `kind`, `rollback` and, on a stage, `external` and
+`watch` (see "Ship runbooks"). These fields are `FIELD-UNKNOWN` in a `runbook: 1` file and in a
+`runbook: 3` file.
+
 ## Top level
 
 | field | required | meaning |
@@ -71,6 +75,8 @@ is refused (`VERSION-UNSUPPORTED`).
 | `spec` | no; yes with `runbook: 3` | the spec this runbook covers, a path relative to the runbook folder; `alpaca runbook check` reads it when `--spec` is not given |
 | `owner` | no | who approves the owner gates (a role, not a secret) |
 | `knobs` | no | the named settings a stage reads and a retry may move |
+| `kind` | no | `plain` (the default when the field is absent) or `ship` for a release or a deploy; `runbook: 2` only; a `ship` runbook is held to the rules in "Ship runbooks" |
+| `rollback` | yes with `kind: ship` | who calls a rollback and what forces one: `automatic`, `discretionary`, `authority` and `deputy`; `runbook: 2` only; see "Ship runbooks" |
 | `stages` | yes | the stages, in run order; at least one |
 | `research` | with `runbook: 3` | the research block of a research runbook (format 3), which also names its `spec`; a `runbook: 1` or `runbook: 2` file may not hold it |
 
@@ -120,6 +126,8 @@ the runbook states it once, a check compares against it, and no retry can loosen
 | `fails` | no | known ways the stage fails: mappings with `id` and `when`, and in format 2 `detect`, `then`, `covers` and `source` (see "Known failures") |
 | `owner_gate` | no | a step only a person may approve (below) |
 | `recovery` | no | `true` for a recovery stage (format 2): it runs only when a fail case sends to it (see "Known failures") |
+| `external` | no | `true` when the stage changes something outside the project folder (`runbook: 2` only; read by the ship rules, see "Ship runbooks") |
+| `watch` | no | `{after, looks_at}`: the stage judges the change again after a wait (`runbook: 2` only; see "Ship runbooks") |
 
 A stage passes when every one of its checks passes. `needs` names only earlier stages, so the
 order of the file is a valid run order and a cycle cannot be written.
@@ -482,6 +490,152 @@ that `run`. A stage may be only a gate (no `run`, no `checks`), for example a re
 Such a stage runs nothing, so a check there would never be judged: the check refuses it
 (`CHECKS-WITHOUT-RUN`). A number the owner should see before approving goes in `evidence`; a
 threshold a machine should judge goes in a check of the stage whose `run` writes the number.
+
+## Ship runbooks
+
+A ship runbook is a release or a deploy: it changes something outside the project folder, and a
+person must be able to undo that change and see whether it held. Write `kind: ship` at the top of
+a `runbook: 2` file and the checker holds it to the rules below. `kind` is `plain` or `ship`,
+exactly those two words in lower case; with no `kind` the runbook is plain and checks as it always
+did. No plain runbook needs any of the fields in this section.
+
+The rules, each reported as its own finding so one run names every gap:
+
+- a `rollback` block is present (`SHIP-NO-ROLLBACK`);
+- at least one stage that has a `run` says `external: true` (`SHIP-NO-EXTERNAL`);
+- every `external: true` stage has a recovery entry (`SHIP-NO-RECOVERY`);
+- one stage has `watch: {after: 1h, ...}` and one has `watch: {after: 24h, ...}`
+  (`SHIP-NO-WATCH`, which names the missing window);
+- a watch follows the change: the stage reaches an `external: true` stage through `needs`,
+  directly or through other stages (`WATCH-BEFORE-CHANGE`).
+
+### Which stages change something outside the project folder
+
+The rule is the `external: true` flag on the stage. The author states it: the stage deploys,
+publishes, pushes to a shared remote, or writes a service or a database the project does not own.
+The checker does not guess from the command, which it cannot decide, and an `owner_gate` is not the
+mark: a gate runs nothing and changes nothing, the stage after it does. Marking every stage that
+has a `run` would ask a recovery entry of build and test stages too. `external: true` needs a
+`run` (a stage that is only an owner gate may not say it). On a recovery stage the flag is allowed
+and means nothing more, since a recovery stage has no recovery of its own.
+
+### The recovery entry
+
+An external stage has a recovery entry when one of its fail cases has a `detect` and answers
+`then: {run: <recovery stage id>}`, and the target is a stage marked `recovery: true` (see "Known
+failures"). A fail case without `detect` is never recognized by the runner, so it does not count,
+and neither do `then: retry`, `then: stop` and `then: ask-owner`. The existing rule applies: the
+stage needs `retry.max_attempts` of 2 or more, because the recovery stage runs and then the stage
+runs once more. That is the cost of an entry: the answer is "undo, then run again". There is no
+"undo, then stop" answer.
+
+### `rollback`
+
+| field | required | meaning |
+|---|---|---|
+| `automatic` | yes | the ids of the checks whose failure forces a rollback; at least one, and each is a check of a stage in the run order (not of a recovery stage) |
+| `discretionary` | yes | the conditions the authority judges, as text; `[]` says there are none |
+| `authority` | yes | who calls the rollback, a role as in `owner` |
+| `deputy` | yes | who calls it when the authority cannot; not the same person as `authority` (`ROLLBACK-DEPUTY-SAME`; the comparison ignores case and edge spaces) |
+
+The shape of the block is checked whenever it is present, in a plain runbook too. A check in
+`automatic` forces an undo only through a fail case of its own stage that sends to a recovery
+stage; the checker does not tie the two together.
+
+### `watch`
+
+| field | required | meaning |
+|---|---|---|
+| `after` | yes | the wait after the change, as text: a whole number and a unit, `m`, `h` or `d` (`1h`, `24h`, `90m`) |
+| `looks_at` | yes | the ids of checks of this stage that the watch judges; at least one |
+
+`after` is read exactly. YAML reads an unquoted `1:00` as the number 60, so a number is refused
+(`FIELD-TYPE`); `1H`, `01h`, `0h`, `1.5h` and `1 h` are refused too (`WATCH-AFTER-INVALID`).
+`60m` counts as `1h` and `1d` counts as `24h`, to the second; `2h` counts as neither. A stage holds one
+`watch`, so each window is its own stage. A `watch` needs a stage with a `run` that is not a
+recovery stage (`FIELD-UNKNOWN` otherwise). The list is `looks_at` and not `checks`, which on a
+stage already means the check mappings. A name in `looks_at` that is not a check of the same stage
+is `WATCH-CHECK-UNKNOWN`.
+
+A watch counts toward the 1h or 24h rule only when it reaches the change through `needs`. Writing
+the watch stage before the deploy, or leaving the deploy out of its `needs`, is
+`WATCH-BEFORE-CHANGE`, and that watch then does not count.
+
+### Plain runbooks that carry ship parts
+
+A `runbook: 2` file with no `kind` that has a `rollback` block, a `watch` or an `external: true`
+stage passes, with one warning, `SHIP-PARTS-UNCHECKED`: the ship rules did not run. Add
+`kind: ship` if it ships. An explicit `kind: plain` says the author decided, and gives no warning.
+
+### What the checker does not do
+
+It checks shape and presence only. Nothing waits for `after`, and nothing reads `rollback` while a
+run goes on: no step calls a rollback. The block records who decides and what triggers it, so the
+decision is written down before the release, not after.
+
+### Example
+
+```yaml
+runbook: 2
+id: ship-demo
+title: Ship demo
+kind: ship
+owner: release owner
+rollback:
+  automatic: [health-1h, errors-24h]
+  discretionary:
+    - support tickets about the new release rise
+  authority: release owner
+  deputy: on-call engineer
+stages:
+  - id: build
+    run: make build
+    checks:
+      - id: build-exit
+        type: exit-code
+  - id: deploy
+    title: Deploy
+    needs: [build]
+    external: true
+    run: make deploy
+    owner_gate:
+      approve: deploy the built release to production
+    retry:
+      max_attempts: 2
+    checks:
+      - id: deploy-exit
+        type: exit-code
+    fails:
+      - id: deploy-broke
+        when: the deploy leaves the service unhealthy
+        detect:
+          type: exit-code
+        then: {run: undo-deploy}
+  - id: watch-1h
+    needs: [deploy]
+    run: make health
+    checks:
+      - id: health-1h
+        type: exit-code
+    watch:
+      after: 1h
+      looks_at: [health-1h]
+  - id: watch-24h
+    needs: [watch-1h]
+    run: make errors
+    checks:
+      - id: errors-24h
+        type: exit-code
+    watch:
+      after: 24h
+      looks_at: [errors-24h]
+  - id: undo-deploy
+    recovery: true
+    run: make rollback
+    checks:
+      - id: undo-exit
+        type: exit-code
+```
 
 ## The research block
 
@@ -1183,6 +1337,16 @@ Every error is reported at once, one per line: `ERROR <code> <where>: <message>`
 | `RECOVERY-NO-ATTEMPT` | a fail case sends to a recovery stage from a stage with one attempt (no `retry`, or `max_attempts: 1`) |
 | `DETECT-INVALID` | a `detect` breaks a check rule; the message names the rule |
 | `COVERS-NO-DETECT` | a fail case without `detect` lists `covers`; only a fail case that detects covers |
+| `KIND-UNKNOWN` | `kind` is text other than `plain` or `ship` |
+| `SHIP-NO-ROLLBACK` | a `kind: ship` runbook has no `rollback` block |
+| `SHIP-NO-EXTERNAL` | a `kind: ship` runbook has no stage that runs a command and says `external: true` |
+| `SHIP-NO-RECOVERY` | an `external: true` stage has no recovery entry (a fail case with `detect` and `then: {run: <recovery stage id>}`) |
+| `SHIP-NO-WATCH` | a `kind: ship` runbook has no valid `watch` of `1h` or of `24h` that follows the change; the message names the window |
+| `WATCH-AFTER-INVALID` | `watch.after` is text that is not a whole number and `m`, `h` or `d` |
+| `WATCH-CHECK-UNKNOWN` | `watch.looks_at` names a check that is not in the same stage |
+| `WATCH-BEFORE-CHANGE` | a stage with a `watch` does not reach an `external: true` stage through `needs` |
+| `ROLLBACK-CHECK-UNKNOWN` | `rollback.automatic` names a check that no stage of the run order has |
+| `ROLLBACK-DEPUTY-SAME` | `rollback.deputy` names the same person as `rollback.authority` |
 | `FIELD-UNFILLED` | format 3: a `<FILL:...>` template placeholder is still in the file |
 | `VALUE-UNKNOWN` | format 3: a research field's word is outside its list (not a check threshold, which is `VALUE-NOT-NUMBER`) |
 | `DEFAULTS-UNREADABLE` | format 3: the defaults file cannot be read or has no `research` mapping |
@@ -1209,7 +1373,8 @@ Warnings (`WARN <code> <where>: <message>`) do not change the verdict: `FR-UNCOV
 `SPEC-CLARIFY`, `COVERS-WITHOUT-SPEC`, `SPEC-UNPARSED` (an id found outside the known item
 shapes; it is still counted, see "Linking checks to the spec"), `EC-IGNORED` (a format 1
 runbook read with a spec that lists edge cases), and `SOURCE-SHAPE` and `SOURCE-MISSING` (see
-"Provenance").
+"Provenance"), and `SHIP-PARTS-UNCHECKED` (a `runbook: 2` file with ship parts and no `kind`, see
+"Ship runbooks").
 
 ## The partner kit: `alpaca runbook kit`
 

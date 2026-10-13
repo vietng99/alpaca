@@ -126,6 +126,8 @@
 .rm-waiting,.rm-resources,.rm-approval,.rm-assignment_expired{--rm-tone:var(--st-waiting)}
 .rm-blocked,.rm-failed{--rm-tone:var(--st-blocked)}
 .rm-done,.rm-skipped{--rm-tone:var(--st-done)}
+.rm-deferred{--rm-tone:var(--st-deferred)}
+.rm-dot-deferred{background:var(--st-deferred)}
 .rm-panel .rm-node{border:1px solid var(--line);border-left:4px solid var(--rm-tone);background:var(--surface)}
 .rm-panel .rm-node .rm-state{color:var(--rm-tone);font-size:var(--fs-xs);font-weight:500}
 .rm-panel .rm-done .rm-title-text,.rm-panel .rm-done .rm-title{color:var(--muted)}
@@ -163,8 +165,34 @@
 .rm-phase-current{border-color:var(--accent);background:var(--accent-soft)}
 .rm-phase-current .rm-phase-step{background:var(--accent);border-color:var(--accent);color:var(--text-on-accent)}
 .rm-phase-complete .rm-phase-step{background:var(--green-bg);border-color:var(--green);color:var(--green)}
+.rm-not-now{border-left:3px solid var(--st-deferred);border-radius:var(--r-sm);margin:0 var(--sp-6) var(--sp-3);padding:var(--sp-2) var(--sp-3);background:var(--st-deferred-bg);color:var(--text);font-size:var(--fs-sm);overflow-wrap:anywhere}
+.rm-not-now h3{margin:0;font-size:var(--fs-sm);font-weight:600;color:var(--st-deferred)}
+.rm-not-now>p{margin:var(--sp-1) 0 var(--sp-2);color:var(--muted)}
+.rm-not-now ul{margin:0;padding:0;list-style:none}
+.rm-not-now-item{padding:var(--sp-1) 0}
+.rm-not-now-item>button{text-align:left;padding:0;overflow-wrap:anywhere}
+.rm-not-now .rm-reasons{margin:var(--sp-1) 0 0}
+.rm-not-now-closed{margin:0;color:var(--muted)}
+.rm-aar{border-left:3px solid var(--rm-aar-tone,var(--muted));border-radius:var(--r-sm);margin:0 var(--sp-6) var(--sp-3);padding:var(--sp-2) var(--sp-3);background:var(--rm-aar-bg,transparent);color:var(--text);font-size:var(--fs-sm);overflow-wrap:anywhere}
+.rm-aar-owed{--rm-aar-tone:var(--st-waiting);--rm-aar-bg:var(--st-waiting-bg)}
+.rm-aar-owed.rm-aar-blocking{--rm-aar-tone:var(--st-blocked);--rm-aar-bg:var(--st-blocked-bg)}
+.rm-aar-changed{--rm-aar-tone:var(--st-waiting);--rm-aar-bg:var(--st-waiting-bg)}
+.rm-aar-draft{--rm-aar-tone:var(--st-doing);--rm-aar-bg:var(--st-doing-bg)}
+.rm-aar-sealed{--rm-aar-tone:var(--st-ready);--rm-aar-bg:var(--st-ready-bg)}
+.rm-aar h3{margin:0;font-size:var(--fs-sm);font-weight:600}
+.rm-aar-badge{color:var(--rm-aar-tone,var(--muted))}
+.rm-aar ul{margin:var(--sp-1) 0 0;padding:0;list-style:none}
+.rm-aar p{margin:var(--sp-1) 0 0}
+.rm-aar-error{color:var(--st-blocked)}
+.rm-overdue{display:inline-block;color:var(--st-overdue);background:var(--st-overdue-bg);font-size:var(--fs-xs);font-weight:600;border-radius:var(--r-sm);padding:0 var(--sp-1);overflow-wrap:anywhere}
+.rm-dot-overdue{background:var(--st-overdue)}
+.rm-group-overdue{color:var(--st-overdue);font-size:var(--fs-xs);font-weight:600}
+.fin-aar{font-weight:600}
+.fin-aar-owed,.fin-aar-changed{color:var(--st-waiting)}
+.fin-aar-draft{color:var(--st-doing)}
+.fin-aar-sealed{color:var(--st-ready)}
 .rm-owner-wait{border-left:3px solid var(--st-waiting);border-radius:var(--r-sm);margin:0 var(--sp-6) var(--sp-2);padding:var(--sp-2) var(--sp-3);color:var(--text);background:var(--st-waiting-bg);font-size:var(--fs-sm)}
-@media(max-width:600px){.rm-phase-strip{padding:0 var(--sp-4) var(--sp-3);grid-template-columns:1fr 1fr}.rm-owner-wait{margin:0 var(--sp-4) var(--sp-2)}}
+@media(max-width:600px){.rm-phase-strip{padding:0 var(--sp-4) var(--sp-3);grid-template-columns:1fr 1fr}.rm-owner-wait{margin:0 var(--sp-4) var(--sp-2)}.rm-not-now{margin:0 var(--sp-4) var(--sp-3)}.rm-aar{margin:0 var(--sp-4) var(--sp-3)}}
 @container(min-width:1150px){.rm-phases .rm-canvas[style]{grid-template-columns:var(--rm-phase-cols)}}
 
 /* Beams (beam.css) ride the card border, past the 4px status stripe on the left. */

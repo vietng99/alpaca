@@ -220,8 +220,8 @@ byte for byte and which are rebuilt from the package's own frames with their pix
 ## Dependencies installed at setup (not in this tree)
 
 `setup/bootstrap.sh` installs the Python packages in `requirements.txt` into a local virtual
-environment: PyYAML (MIT), pytest (MIT), html5lib (MIT) and, on Python older than 3.11, tomli
-(MIT). They carry their own notices and are not part of this tree.
+environment: PyYAML (MIT), pytest (MIT), pytest-xdist and its execnet (both MIT), html5lib (MIT)
+and, on Python older than 3.11, tomli (MIT). They carry their own notices and are not part of this tree.
 
 OpenSpec (`bin/openspec`, `alpaca spec init --kit openspec`) runs on the host's `node`, version
 20.19.0 or later, which Alpaca does not ship. spec-kit needs no runtime beyond `bash` and `git`.

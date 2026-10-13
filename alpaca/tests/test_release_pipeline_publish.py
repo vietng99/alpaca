@@ -269,3 +269,16 @@ def test_already_public_merge_metadata_is_not_new_outbound_data(ready):
     checks = checked_source(root, 'after-public-merge')
     result = publish((root, remote, seed, checks), dry_run=False, api=lambda *a: 'https://github.com/sample/project/pull/2')
     assert result.status == 'PASS'
+
+
+def test_dry_run_from_a_receipt_with_carried_gates(ready):
+    """A check that carried its passed gates publishes like any other, and the embedded receipt keeps the pointer."""
+    root, remote, seed, checks = ready
+    api('receipts').record_receipt(root, 'test', checks)
+    config = api('config').load_config(root)
+    from alpaca.tests.test_release_pipeline_build import build
+    second = api('checks').check_release(root, config, build(root, 'again'))
+    assert second.status == 'PASS' and any('carried' in g for g in second.gates)
+    result = publish((root, remote, seed, second), api=lambda *a: None)
+    assert result.status == 'DRY_RUN'
+    assert any(g.get('carried') for g in result.checks['gates'])

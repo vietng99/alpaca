@@ -108,6 +108,33 @@ retention:
   store: .alpaca/store
   max_bytes: 10485760
   max_age_days: 30
+disk:
+  grace_hours: 48
+  ended_grace_hours: 12
+  open_session_days: 14
+  sweep_every_hours: 6
+  tmp_root: /tmp
+  tmp_globs:
+  - t[0-9]*-*
+  - op[0-9]*-t-*
+  - pytest-t-*
+  prune:
+  - glob: .alpaca/verify/*/vf-*/v[0-9]*
+    task_part: 2
+    min_age_days: 2
+    why: verifier run trees of a done task; claims and kept reviews stay
+  - glob: .alpaca/releases/*/checks/*
+    dirs_only: true
+    min_age_days: 3
+    named_in: .alpaca/releases/receipts/*.json
+    name_part: 2
+    why: tree copies of a release check attempt no receipt names; the check logs stay
+  worktrees:
+    min_age_days: 3
+  warn_gib:
+    project: 30
+    scratch: 20
+    tmp: 16
 barrier:
   protected_paths:
   - .alpaca/

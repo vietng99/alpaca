@@ -11,7 +11,7 @@ const money = v => v == null ? '&ndash;' : esc(new Intl.NumberFormat(undefined,{
 const clock = s => s ? new Date(s*1000).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'}) : '';
 const stamp = s => s ? new Date(s*1000).toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : 'Not recorded';
 const span = s => { s = Math.max(0, Math.round(Number(s || 0) / 60)); const h = Math.floor(s/60), m = s%60; return h ? `${h} h ${String(m).padStart(2,'0')} m` : `${m} m`; };
-const STATE = {done:'Done', doing:'In progress', ready:'Ready', open:'Ready', blocked:'Blocked', unknown:'Unknown'};
+const STATE = {done:'Done', doing:'In progress', ready:'Ready', open:'Ready', blocked:'Blocked', deferred:'Not now', unknown:'Unknown'};
 const KIND = {read:'Read', edit:'Edit', run:'Run', test:'Test', agent:'Agent', workflow:'Workflow', message:'Message', ask:'Owner', tool:'Tool'};
 
 // Activity a reader loaded with "Show earlier", kept per task so a live refresh keeps it on screen.

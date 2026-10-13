@@ -370,15 +370,17 @@ def round_cap(m=None, root: str | None = None, pol: dict | None = None) -> int:
     when it is lower. A formation may lower the cap, never raise it."""
     pol = _pol(pol, root)
     cap = int(pol["escalation"]["round_cap"])
-    block = m.raw.get("escalation") if m is not None else None
-    if block is not None and (not isinstance(block, dict) or set(block) - {"round_cap"}):
-        raise ShieldError("formation %r: escalation may hold only round_cap (got %r)"
-                          % (m.name, block))
-    own = (block or {}).get("round_cap")
-    if own is None:
-        return cap
+    from alpaca.formation import manifest
+    if m is None or manifest.ESCALATION not in m.raw:
+        return cap                                   # absent: the policy cap
+    block = m.raw[manifest.ESCALATION]
+    if not isinstance(block, dict) or set(block) != set(manifest.ESCALATION_KEYS):
+        raise ShieldError("formation %r: escalation may hold only round_cap and must set it "
+                          "(got %r)" % (m.name, block))
+    own = block["round_cap"]
     if not isinstance(own, int) or isinstance(own, bool) or own < 1:
-        raise ShieldError("formation %r: escalation.round_cap must be a positive integer" % m.name)
+        raise ShieldError("formation %r: escalation.round_cap must be a positive integer "
+                          "(got %r)" % (m.name, own))
     if own > cap:
         raise ShieldError("formation %r raises round_cap to %d past the shield cap %d"
                           % (m.name, own, cap))

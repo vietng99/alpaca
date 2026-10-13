@@ -1,4 +1,6 @@
 PyYAML==6.0.1
 tomli==2.0.1; python_version < "3.11"
 pytest==9.1.1
+pytest-xdist==3.8.0
+execnet==2.1.2
 html5lib==1.1

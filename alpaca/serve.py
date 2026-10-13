@@ -824,9 +824,15 @@ class Live:
                                    "issues": issues.get("last_seen"), "issues_open": issues.get("open"),
                                    "failures": failures, "missing_children": coverage.get("missing_children")},
                                   time.time())
+        try:
+            # op-056 t-614: the running release steps and their time left, for the sidebar release bar
+            from alpaca.release import progress
+            release = progress.current(self.root)
+        except Exception:
+            release = []
         return json.dumps({"projection": projection,
                            "observability": {**capture, "issues": {"open": issues.get("open", 0)}},
-                           "score": value}, ensure_ascii=True)
+                           "score": value, "release": release}, ensure_ascii=True)
 
     def failure(self, component, error):
         """Count failures without logging request queries, source payloads or credentials."""

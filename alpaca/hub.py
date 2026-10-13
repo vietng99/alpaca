@@ -500,6 +500,14 @@ def _parts_below(root, path):
     return tuple(p for p in here[len(top):].split(os.sep) if p)
 
 
+def _aar_reports(root, conn):
+    """op-057 t-625: the AAR report path of every op on the record (alpaca/aar.py report_path); the
+    reader opens these and no other file in .alpaca/aar."""
+    from alpaca import aar
+    return {Path(aar.report_path(str(root), r["id"])).relative_to(root).as_posix()
+            for r in _rows(conn, "SELECT id FROM ops")}
+
+
 def _document_allowed(root, path):
     """Catalog paths cannot alias private runtime state, the Rune2 vault (only its doors serve the
     withdrawn and quarantined captures it keeps as files, op-008 t-441) or evidence attachments."""
@@ -513,6 +521,8 @@ def _document_allowed(root, path):
     if any(part.endswith((".evidence", ".kept")) for part in parts):
         return False
     if parts[0].startswith("."):
+        if parts[0] == ".alpaca" and len(parts) == 3 and parts[1] == "aar":
+            return path.suffix.lower() == ".md"      # an op's AAR report; document() also needs the op on the record
         return parts[0] == ".alpaca" and len(parts) > 2 and parts[1] in ("proofs", "reports", "reviews", "wiki")
     return parts[0] not in _SKIP
 
@@ -545,7 +555,8 @@ def document(root, path):
         allowed = target in _catalog_paths(root, "runbooks", sig)
     if not allowed:
         with _record(root) as conn:
-            allowed = target.relative_to(root).as_posix() in _proof_refs(root, conn)
+            rel = target.relative_to(root).as_posix()
+            allowed = rel in _proof_refs(root, conn) or rel in _aar_reports(root, conn)
     if not allowed:
         raise FileNotFoundError("No readable report at this path")
     limit = 512 * 1024
@@ -1249,7 +1260,9 @@ def _inline_text_ids(tasks):
     completions and every claimed (doing) task, and the overview page's two tasks in focus
     (cockpit.js cockpitTaskIds, hub.js overview()). They carry their text in the slim overview,
     so those tabs make one request."""
-    open_ = [t for t in tasks if t.get("status") not in ("done", "cancelled", "canceled")]
+    # deferred work is not in focus: the deferral patches updated_at, so the task just parked would
+    # otherwise be the newest (op-057 t-617).
+    open_ = [t for t in tasks if t.get("status") not in ("done", "deferred", "cancelled", "canceled")]
     focus = sorted(open_, key=lambda t: (bool(t.get("claimant")), str(t.get("updated_at") or t["id"])), reverse=True)[:1]
     latest = sorted((t for t in tasks if t.get("status") == "done"),
                     key=lambda t: _epoch(t.get("completed_at")), reverse=True)[:3]
@@ -1320,6 +1333,17 @@ def overview(root):
                 "opened": row["opened"], "closed": row["closed"],
                 "close_basis": (closes.get(row["id"]) or {}).get("basis") if row["status"] == "closed" else None}
                for row in _rows(conn, "SELECT * FROM ops ORDER BY opened DESC,id")]
+        from alpaca import aarview
+        try:
+            aar_states, aar_marks = aarview.project(conn, root, ops)
+        except Exception as exc:          # op-057 t-625: the page stays up and each op says the read failed
+            aar_states, aar_marks = {op["id"]: {"error": aarview.failed("AAR state", exc)} for op in ops}, {}
+        for op in ops:
+            if op["id"] in aar_states:
+                op["aar"] = aar_states[op["id"]]
+        for t in tasks:
+            if t["id"] in aar_marks:
+                t["aar_overdue"] = aar_marks[t["id"]]
         messages = [{**{k: row[k] for k in ("id", "ts", "session", "sender", "kind", "body", "ref")}, "to": row["to_"]}
                     for row in _rows(conn, "SELECT * FROM messages ORDER BY id DESC")]
         recovered = _rows(conn, "SELECT * FROM events WHERE kind='wiki-recovered' ORDER BY id DESC LIMIT 1")

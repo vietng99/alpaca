@@ -1738,7 +1738,9 @@ def test_machine_lock_dir_and_egress_dir(tmp_path, monkeypatch):
     lock_dir = paths.machine_lock_dir()
     assert lock_dir == os.path.join(os.path.dirname(workspace.registry_path()), "locks")
     root = str(tmp_path / "proj")               # a root of this run only: its own leaf hash
-    short = tempfile.mkdtemp(prefix="xdg-")     # a runtime folder as short as /run/user/<uid>
+    # a runtime folder as short as /run/user/<uid>: /tmp itself, since the suite routes tempfile
+    # into its basetemp, which under pytest-xdist is too deep for a Unix socket path
+    short = tempfile.mkdtemp(prefix="xdg-", dir="/tmp")
     try:
         monkeypatch.setenv("XDG_RUNTIME_DIR", short)
         a = paths.egress_dir(root, "rr-003", "t-140-implementer-t1")
@@ -1782,7 +1784,7 @@ def test_machine_lock_dir_and_egress_dir(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("plant", ["parent-mode", "leaf-mode", "leaf-link", "leaf-file"])
 def test_egress_dir_refuses_a_folder_that_is_not_private(plant, monkeypatch):
-    short = tempfile.mkdtemp(prefix="xdg-")
+    short = tempfile.mkdtemp(prefix="xdg-", dir="/tmp")     # short, see test_machine_lock_dir_and_egress_dir
     try:
         monkeypatch.setenv("XDG_RUNTIME_DIR", short)
         root, launch = "/some/root-%d" % os.getpid(), "t-140-implementer-t1"

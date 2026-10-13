@@ -40,6 +40,10 @@ and SessionEnd start it in the background, at most every `sweep_every_hours` (6)
 - with `alpaca retention gc --apply`, or in the same sweep, the `prune` rules for heavy run trees
   under `.alpaca/`: verifier trees of done tasks, rune2 run scratch of done tasks, and the tree
   copies of a release check attempt that no release receipt names (its check logs stay);
+- each release gate command gets its own `TMPDIR` under `/tmp` (`ag...`), removed when the command ends;
+- a release preflight removes its own candidate tree, seeds and gate checkouts when it ends and keeps
+  only its gate logs; a release source checkout (`.alpaca/releases/source/<sha>`, about 100 MB) unused
+  for 3 days is removed when the next one is made;
 - linked worktrees under `.alpaca/worktrees/` named `op<nnn>-...` whose op is closed, whose HEAD
   is merged into main, that have no changes and have been quiet 3 days: `git worktree remove`
   (never `--force`) and `git branch -d` for the branch. Worktrees of open ops stay.

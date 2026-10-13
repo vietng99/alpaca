@@ -985,13 +985,13 @@ class _Runner:
         tasks of earlier rounds are taken by queue_earlier as it hands them to the pool."""
         from alpaca import ops
         ops.expire_leases(self.conn)
+        from alpaca.research import lifecycle
         report = self.start.get("report_task")
-        if report and self.status(report) not in ("done", "blocked"):
+        if report and self.status(report) not in lifecycle._SETTLED:
             leases.take(self.conn, report, self.run, _LEASE_MINUTES, session=self.session,
                         reason="research run report")
-        from alpaca.research import lifecycle
         for task in self.start.get("repair_tasks") or []:
-            if self.status(task) in ("done", "blocked"):
+            if self.status(task) in lifecycle._SETTLED:
                 continue
             if lifecycle._events(self.conn, "claim", task):
                 leases.take(self.conn, task, self.run, _LEASE_MINUTES, session=self.session,
@@ -1003,7 +1003,7 @@ class _Runner:
             if d.get("round") != current or d.get("repair_task"):
                 continue
             for task in d.get("tasks") or []:
-                if self.status(task) not in ("done", "blocked") and \
+                if self.status(task) not in lifecycle._SETTLED and \
                         lifecycle._events(self.conn, "claim", task):
                     leases.take(self.conn, task, self.run, _LEASE_MINUTES, session=self.session,
                                 reason="research attempt (resume)")
@@ -1138,7 +1138,7 @@ class _Runner:
             r = lifecycle._research(self.conn, task)
             if r.get("role") != "attempt" or int(r.get("round") or 0) >= current:
                 continue
-            if self.status(task) in ("done", "blocked"):
+            if self.status(task) in lifecycle._SETTLED:
                 continue
             if self.conn.execute("SELECT 1 FROM events WHERE kind='proof-report' AND ref=?",
                                  (task,)).fetchone() is None:
@@ -1155,7 +1155,7 @@ class _Runner:
         if self.contract.mode == "repair":
             from alpaca.research import repair
             for task in self.start.get("repair_tasks") or []:
-                if self.status(task) in ("done", "blocked"):
+                if self.status(task) in lifecycle._SETTLED:
                     continue
                 if self.stop_requested():
                     return self.stop_state(), "a stop was requested", None
@@ -1252,7 +1252,7 @@ class _Runner:
         for key, task in lifecycle.run_keys(self.conn, self.run).items():
             r = lifecycle._research(self.conn, task)
             role = r.get("role")
-            if role not in ("attempt", "repair") or self.status(task) in ("done", "blocked"):
+            if role not in ("attempt", "repair") or self.status(task) in lifecycle._SETTLED:
                 continue
             if role == "repair":
                 proofs.close(self.conn, self.root, task, session=self.session, to="blocked",

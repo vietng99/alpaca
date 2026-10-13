@@ -94,7 +94,20 @@ class ApprovalReceipt:
     created_at: str = field(default_factory=timestamp)
 
 
-ReleaseReceipt = (BuildReceipt, CheckReceipt, PublishReceipt, TagReceipt, ApprovalReceipt)
+@dataclass
+class PreflightReceipt:
+    """The project gates run on one commit before anyone approves it (op-056 t-612). It reads no
+    term policy and is never evidence for publication: validate_checks loads only check receipts."""
+    source_sha: str
+    gates: list
+    status: str
+    attempt: str = field(default_factory=lambda: uuid.uuid4().hex)
+    kind: str = 'preflight'
+    schema: int = 1
+    created_at: str = field(default_factory=timestamp)
+
+
+ReleaseReceipt = (BuildReceipt, CheckReceipt, PublishReceipt, TagReceipt, ApprovalReceipt, PreflightReceipt)
 
 
 def record_receipt(root, session, receipt):

@@ -99,15 +99,18 @@ def clean_source(root, cfg):
         raise ValueError('release source changed since the commit; commit, approve, rebuild and recheck')
 
 
-def require(root, cfg, source_sha, expected=None):
-    """Return the approval reference for source_sha or refuse before any private scan."""
+def require(root, cfg, source_sha, expected=None, source=None):
+    """Return the approval reference for source_sha or refuse before any private scan. The record is
+    the project root's; the checked-out commit and its clean state are source's (release/source.py),
+    or the project root's when None."""
     found = current(root, source_sha, with_path=True)
     if found is None:
         raise ValueError('no current owner approval for this development commit')
     path, receipt = found
-    if git(root, 'rev-parse', 'HEAD').decode().strip() != source_sha:
+    tree = source or root
+    if git(tree, 'rev-parse', 'HEAD').decode().strip() != source_sha:
         raise ValueError('checked-out commit differs from the approved commit')
-    clean_source(root, cfg)
+    clean_source(tree, cfg)
     ref = reference(root, path, receipt)
     if expected is not None and expected != ref:
         raise ValueError('approval changed since checks')

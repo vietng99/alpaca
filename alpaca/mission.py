@@ -40,7 +40,7 @@ def _append(conn, kind, data, session, ref=None):
 def _tasks(conn):
     from alpaca import work_record
     fields = ('id', 'op', 'title', 'status', 'claimant', 'assigned_session', 'completed_at',
-              'completed_session', 'proof', 'updated_at', 'lease_until', 'phase', 'reason', 'statement')
+              'completed_session', 'proof', 'updated_at', 'lease_until', 'phase', 'reason', 'statement', 'deferral')
     return [{key: row.get(key) for key in fields} for row in work_record.tasks(conn)]
 
 
@@ -313,7 +313,7 @@ def project(root, tasks=(), at=None):
         if revision is None: state, reason = 'unknown', 'Configure this starter map for your project'
         elif errors: state, reason = 'blocked', '; '.join(errors)
         linked = [{**task_by_id[tid], 'link_kind': kind} for (n, tid), kind in links.items() if n == nid and tid in task_by_id]
-        active = [t for t in linked if t['status'] not in ('done', 'cancelled', 'canceled')]
+        active = [t for t in linked if t['status'] not in ('done', 'deferred', 'cancelled', 'canceled')]
         work = 'active' if any(t['status'] == 'doing' for t in active) else 'waiting' if any(t['status'] == 'blocked' for t in active) else 'assigned' if active else 'idle'
         history = [e for e in events if e.get('ref') == nid or e['kind'] == 'mission-snapshot' and nid in e['data'].get('changed', [])]
         changes = [e for e in history if e['kind'] == 'mission-snapshot']
