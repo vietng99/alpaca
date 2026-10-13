@@ -8,6 +8,7 @@ read budget is exhausted, counts are lower bounds and coverage says so explicitl
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -15,6 +16,8 @@ from pathlib import Path
 import re
 import sqlite3
 import sys
+import threading
+from contextlib import contextmanager
 
 from alpaca import db, paths, pool, transcripts
 
@@ -908,8 +911,103 @@ class _Capture:
                             truncated=rec.get("response_truncated", False))
 
 
+class _SharedConnection:
+    """The scope's one read-only connection; callers still close() it, which does nothing."""
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def close(self):
+        pass
+
+
+_SCOPE = threading.local()
+
+
+@contextlib.contextmanager
+def revision_scope(root):
+    """Within one batch run (the analytics index), reuse one read-only connection instead of
+    opening one per source_revision call (t-577); scoped() memoizes run-wide values."""
+    root = os.path.realpath(root)
+    if getattr(_SCOPE, "state", None) is not None:
+        yield
+        return
+    conn = db.connect_readonly(root)
+    _SCOPE.state = (root, conn, {})
+    try:
+        yield
+    finally:
+        _SCOPE.state = None
+        conn.close()
+
+
+def scoped(root, key, compute):
+    """compute() once per revision_scope for (root, key); every call outside a scope computes."""
+    state = getattr(_SCOPE, "state", None)
+    if state is None or state[0] != os.path.realpath(root):
+        return compute()
+    memo = state[2]
+    if (key,) not in memo:
+        memo[(key,)] = compute()
+    return memo[(key,)]
+
+
 def _connection(root):
+    state = getattr(_SCOPE, "state", None)
+    if state is not None and state[0] == os.path.realpath(root):
+        return _SharedConnection(state[1])
     return db.connect_readonly(root)
+
+
+_BATCH = threading.local()
+
+
+@contextmanager
+def revision_batch(root):
+    """Read the obs_source table once for every source_revision call made on this thread inside the block.
+
+    Each per-conversation query costs one statement and a connection, and a fold that asks for
+    every conversation's revision paid that twice per conversation (indexes on session and
+    parent_session help each query but not the count). The
+    rows are read once, in source_id order, and each call filters them in Python, which returns what
+    the query returned as of the start of the block. The caller keys a cached row on that revision,
+    so a row that moves later changes the next revision and recomputes."""
+    conn = _connection(root)
+    try:
+        rows = [dict(item) for item in conn.execute("SELECT * FROM obs_source ORDER BY source_id")]
+    except sqlite3.OperationalError as exc:
+        if 'no such table' not in str(exc):
+            raise
+        rows = []
+    finally:
+        conn.close()
+    prior = getattr(_BATCH, 'obs', None)
+    by_session, by_parent = {}, {}
+    for position, row in enumerate(rows):
+        by_session.setdefault(row['session'], []).append(position)
+        by_parent.setdefault(row['parent_session'], []).append(position)
+    _BATCH.obs = (os.path.realpath(root), rows, by_session, by_parent)
+    try:
+        yield
+    finally:
+        _BATCH.obs = prior
+
+
+def _obs_sources(conn, root, sid, parent_only=False):
+    """obs_source rows naming sid as the parent (parent_only, with a locator) or as either side."""
+    batch = getattr(_BATCH, 'obs', None)
+    # A batch answers only for the root it read; another root's call queries its own record.
+    if batch is not None and batch[0] == os.path.realpath(root):
+        _root, rows, by_session, by_parent = batch
+        if parent_only:
+            return [rows[at] for at in by_parent.get(sid, ()) if rows[at]['locator'] is not None]
+        return [rows[at] for at in sorted(set(by_session.get(sid, ())) | set(by_parent.get(sid, ())))]
+    if parent_only:
+        return conn.execute("SELECT source_id,session,locator FROM obs_source WHERE parent_session=? AND locator IS NOT NULL ORDER BY source_id", (sid,))
+    return [dict(item) for item in conn.execute("SELECT * FROM obs_source WHERE session=? OR parent_session=? ORDER BY source_id", (sid, sid))]
 
 
 def _record_rows(conn, sid, capture, table):
@@ -998,7 +1096,7 @@ def _children(root, sid, registered):
                 continue
     conn = _connection(root)
     try:
-        registered_children = conn.execute("SELECT source_id,session,locator FROM obs_source WHERE parent_session=? AND locator IS NOT NULL ORDER BY source_id", (sid,))
+        registered_children = _obs_sources(conn, root, sid, parent_only=True)
         for row in registered_children:
             child_path = Path(row['locator'])
             if not child_path.is_absolute():
@@ -1028,6 +1126,36 @@ def _children(root, sid, registered):
     finally:
         conn.close()
     return dict(sorted(found.items())), truncated
+
+
+def _subagent_fingerprint(root, sid, primary):
+    """Hash of every agent-*.jsonl under the subagent directories, uncapped: names and stats.
+
+    The child list above stops at MAX_CHILDREN and MAX_DIRECTORY_ENTRIES, but parse_session counts
+    every such file (its `subagents` figure), so a file past the cap must still move the key."""
+    from alpaca.analytics import parse_session
+    names = set()
+    for directory in (None, transcripts.subagents_dir(root, sid)):
+        names.update(parse_session.transcript_files(str(primary), directory)[1:])
+    stamps = []
+    for name in sorted(names):
+        try:
+            stat = os.stat(name)
+            stamps.append([name, stat.st_size, stat.st_mtime_ns])
+        except OSError:
+            stamps.append([name, None, None])
+    return _hash(json.dumps(stamps))
+
+
+def _locator_fingerprint(sources):
+    """Hash of whether each registered source locator is a readable file, for every source row.
+
+    observability._coverage checks exactly this for every required source of the session, children
+    included, so it is not limited to the capped child list."""
+    state = [[row['source_id'], row['locator'],
+              bool(row['locator']) and os.path.isfile(row['locator']) and os.access(row['locator'], os.R_OK)]
+             for row in sources]
+    return _hash(json.dumps(state))
 
 
 def source_revision(root, sid):
@@ -1060,12 +1188,14 @@ def source_revision(root, sid):
                  for table in ("events", "messages")] if conn else [0, 0]
         manifest = conn.execute("SELECT key,value FROM meta WHERE key IN (?,?) ORDER BY key", ('capture-manifest:' + sid, 'operator:' + sid)).fetchall()
         try:
-            sources = [dict(item) for item in conn.execute("SELECT * FROM obs_source WHERE session=? OR parent_session=? ORDER BY source_id", (sid, sid))]
+            sources = _obs_sources(conn, root, sid)
         except sqlite3.OperationalError as exc:
             if 'no such table' not in str(exc):
                 raise
             sources = []
         return {"sources": values, "record_heads": heads, "children_truncated": cut,
+                "subagent_files": _subagent_fingerprint(root, sid, primary),
+                "locators": _locator_fingerprint(sources),
                 "capability_revision": _hash(json.dumps([dict(item) for item in manifest] + sources, sort_keys=True)),
                 "window": [row["started"], row["ended"]] if row else []}
     finally:

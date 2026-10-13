@@ -300,3 +300,70 @@ def test_activity_expiry_pushes_a_board_revision_without_a_new_record(project, m
     assert json.loads(live.rev_blob())['board'] != revision
     assert live.gen > generation
     assert snapshot(project) == before
+
+
+def test_vitals_carry_the_connection_facts_and_score_in_counts(project, monkeypatch):
+    """t-590: the hub's 10 s poll reads /hub/vitals.json, not the full /health.json; it times the
+    page's data reads for the score's hub speed, and not itself."""
+    with running(project, refresh=True) as (live, url):
+        assert fetch(url, '/hub/overview.json')[0] == 200
+        assert fetch(url, '/data.json')[0] == 200
+        assert fetch(url, '/hub/assets/hub.js')[0] == 200
+        assert fetch(url, '/hub/assets/pages.json')[0] == 200
+        assert len(live.speed) == 2
+        code, body = fetch(url, '/hub/vitals.json')
+        assert code == 200 and len(live.speed) == 2 and len(body) < 20000
+        vitals = json.loads(body)
+        assert vitals['projection']['state'] == 'fresh'
+        capture = vitals['observability']
+        assert {'status', 'collector', 'backlog', 'coverage', 'issues'} <= set(capture) and 'sources' not in capture
+        assert isinstance(capture['coverage']['missing_children'], int) and set(capture['issues']) == {'open'}
+        score = vitals['score']
+        assert score['max'] == 1000 and score['value'] == sum(p['points'] for p in score['parts'])
+        assert [p['key'] for p in score['parts']] == ['page', 'speed', 'collector', 'capture', 'errors']
+        assert next(p for p in score['parts'] if p['key'] == 'page')['points'] == 250
+    calls = []
+    monkeypatch.setattr(hub, 'capture_health', lambda root: calls.append(root))
+    json.loads(live.vitals_json())
+    assert calls == []
+
+
+def test_vitals_score_counts_a_recent_server_failure(project, monkeypatch):
+    monkeypatch.setattr(hub, 'overview', lambda root: (_ for _ in ()).throw(RuntimeError('boom')))
+    with running(project) as (live, url):
+        assert fetch(url, '/hub/overview.json')[0] == 503
+        errors = next(p for p in json.loads(live.vitals_json())['score']['parts'] if p['key'] == 'errors')
+        assert errors['points'] == 100 and errors['reasons'][0].startswith('endpoint failed 0 min ago')
+
+
+def test_vitals_need_the_login_like_every_hub_route(project, monkeypatch):
+    monkeypatch.setenv('ALPACA_FILES_AUTH', 'reader:secret')
+    with running(project, remote=True) as (_, url):
+        assert fetch(url, '/hub/vitals.json')[0] == 401
+        assert fetch(url, '/hub/vitals.json', 'reader:secret')[0] == 200
+
+
+def test_a_reader_leaving_mid_response_is_a_disconnect_not_a_server_error(project, monkeypatch):
+    """t-590 r1: a client that resets the socket while a /hub/ route answers is counted under
+    `disconnect`, which the health score does not charge, not under `endpoint`."""
+    monkeypatch.setattr(hub, 'runs', lambda root: (_ for _ in ()).throw(ConnectionResetError('peer left')))
+    with running(project) as (live, url):
+        with pytest.raises(Exception):           # the server closes the connection: no reply to send to
+            fetch(url, '/hub/runs.json')
+        assert 'endpoint' not in live.failures and live.failures['disconnect']['last']['type'] == 'ConnectionResetError'
+        errors = next(p for p in json.loads(live.vitals_json())['score']['parts'] if p['key'] == 'errors')
+        assert errors['points'] == 150
+
+
+def test_the_speed_ring_keeps_the_last_five_minutes(project, monkeypatch):
+    live = serve.Live(project)
+    clock = [1000.0]
+    monkeypatch.setattr(serve.time, 'time', lambda: clock[0])
+    for _ in range(500):
+        live.note_speed(6.0)
+    clock[0] += 301
+    live.note_speed(0.1)
+    assert list(live.speed) == [(1301.0, 0.1)]
+    for _ in range(serve.SPEED_SAMPLES + 10):
+        live.note_speed(0.1)
+    assert len(live.speed) == serve.SPEED_SAMPLES

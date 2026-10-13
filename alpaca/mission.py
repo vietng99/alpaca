@@ -12,9 +12,13 @@ PREFIX = 'mission-'
 MAX_EVENTS = 10000
 
 
-def _event(row):
+def _event(row, slim=False):
+    """The row as a dict with its data decoded. slim: the row came from a query that also selects `slim`,
+    a snapshot's cut-down payload, which then stands in for data."""
     if row is None: return None
-    return {**dict(row), 'data': json.loads(row['data'])}
+    fields = dict(row)
+    cut = fields.pop('slim', None) if slim else None
+    return {**fields, 'data': json.loads(row['data'] if cut is None else cut)}
 
 
 def _latest(conn, kind, at=None):
@@ -270,14 +274,26 @@ def project(root, tasks=(), at=None):
             observation = model.observe(root, definition)
             tasks = list(tasks) if tasks else _tasks(conn)
             development = _development(root, conn, tasks)
-        rows = conn.execute("SELECT * FROM events WHERE kind LIKE 'mission-%' AND id<=? ORDER BY id DESC LIMIT ?",
+        # A snapshot's payload is the whole observation (most of the decoded bytes); the fold below reads
+        # only its changed and initialized lists, so SQLite cuts those two out (slim) and the rest is not
+        # decoded. Only a plain snapshot is cut: an object whose two lists are lists (or absent) and that
+        # carries none of the keys compact_history copies. Any other row (a string list, a null, a
+        # non-object, extra result or node keys) has slim NULL and is decoded whole, as it always was.
+        plain = ' AND '.join(["json_type(data) = 'object'",
+                              "COALESCE(json_type(data, '$.changed'), 'array') = 'array'",
+                              "COALESCE(json_type(data, '$.initialized'), 'array') = 'array'"] +
+                             ["json_type(data, '$.%s') IS NULL" % k for k in ('result', 'check', 'node', 'task', 'kind', 'reason')])
+        rows = conn.execute("SELECT *, CASE WHEN kind='mission-snapshot' AND json_valid(data) THEN CASE WHEN " + plain +
+                            " THEN json_object('changed', json(COALESCE(json_extract(data, '$.changed'), '[]')),"
+                            " 'initialized', json(COALESCE(json_extract(data, '$.initialized'), '[]'))) END END AS slim"
+                            " FROM events WHERE kind LIKE 'mission-%' AND id<=? ORDER BY id DESC LIMIT ?",
                             (at if at is not None else 2**63-1, MAX_EVENTS + 1)).fetchall()
         if len(rows) > MAX_EVENTS: errors.append('Map history exceeds the loaded event limit; verification is incomplete')
         events = []
         for row in reversed(rows[:MAX_EVENTS]):
-            try: events.append(_event(row))
+            try: events.append(_event(row, slim=True))
             except (ValueError, TypeError): errors.append('Unreadable mission event %s' % row['id'])
-        available = conn.execute("SELECT id,ts,data FROM events WHERE kind='mission-snapshot' ORDER BY id DESC LIMIT 50").fetchall()
+        available = conn.execute("SELECT id,ts FROM events WHERE kind='mission-snapshot' ORDER BY id DESC LIMIT 50").fetchall()
         snapshots = [{'id': r['id'], 'ts': r['ts']} for r in available]
     finally:
         conn.close()

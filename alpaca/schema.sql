@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS obs_source (
   capabilities TEXT NOT NULL DEFAULT '{}', required INTEGER NOT NULL DEFAULT 1,
   closed INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_obs_source_session ON obs_source(session);
+CREATE INDEX IF NOT EXISTS idx_obs_source_parent ON obs_source(parent_session);
 CREATE TABLE IF NOT EXISTS obs_generation (
   source_id TEXT NOT NULL, generation INTEGER NOT NULL, identity TEXT NOT NULL,
   prefix_bytes INTEGER NOT NULL DEFAULT 0, prefix_sha256 TEXT NOT NULL,

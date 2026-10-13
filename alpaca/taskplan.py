@@ -203,9 +203,9 @@ def project(conn, tasks, *, root=None, stages=()):
         except (ValueError, TypeError, AttributeError):
             continue
     evidence = {}
-    # One index for this projection; file hashes and verifier checks still run
-    # for every task, and the next request reads a new index.
-    seals = None
+    # One index for this projection. A done task's gate answer is kept while nothing it reads
+    # moved (proof.done_gate_cached); a task whose seal, events or files moved runs it again.
+    seals = refs = None
     for ident, task in by_id.items():
         if task['status'] != 'done' or ident not in entries:
             continue
@@ -215,8 +215,8 @@ def project(conn, tasks, *, root=None, stages=()):
             from alpaca import proof
             try:
                 if seals is None:
-                    seals = proof.seal_index(conn)
-                ok, _ = proof.done_gate(conn, str(root), ident, task.get('proof'), seals)
+                    seals, refs = proof.seal_index(conn), proof.event_refs(conn)
+                ok, _ = proof.done_gate_cached(conn, str(root), ident, task.get('proof'), seals, refs)
                 evidence[ident] = 'valid' if ok else 'invalid'
             except (ValueError, OSError, TypeError, KeyError):
                 evidence[ident] = 'unknown'

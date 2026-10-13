@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -33,7 +34,9 @@ def fixture():
                                 branch='feature/' + str(i), head=commits[i]['sha'],
                                 head_short=commits[i]['short'], head_time=1700000000,
                                 is_main=False, locked=None, prunable=None, ahead=i % 3,
-                                behind=0, uncommitted=i % 5, oldest_change=1700000000, session=None)
+                                behind=0, uncommitted=i % 5 if i < 40 else None, oldest_change=1700000000, session=None,
+                                watch='recent' if i < 5 else 'largest' if i < 10 else None, loaded=i < 40,
+                                checked_at=1700000000 if i < 40 else None)
                            for i in range(67)], uncommitted=[], activity=dict(stash=[], items=[]),
                 remotes=dict(remotes=[], tracking=[], release=[], tags=[], fetch_head=None), denials=[])
 
@@ -201,12 +204,22 @@ try {
   await js(`const s=document.querySelector('[data-vc-search]');s.value='Needle';s.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('[data-vc-expand]').focus();true`);
   await enter();
   check('actual hub binds search and expansion',await js(`document.querySelector('[data-vc-matches]').textContent.includes('2')&&document.querySelector('.vc-graph').classList.contains('expanded')`));
+  // The 5 s status poll (t-592) patches one cell in place: same node, same board, scroll kept.
+  await js(`window.cell=document.querySelectorAll('[data-wt-status]')[1];window.cellBefore=window.cell.textContent;window.scrollTo(0,200);window.y=window.scrollY;true`);
+  check('status cell starts from the snapshot count',await js(`!window.cellBefore.includes('77')&&window.cellBefore.includes('checked')`));
+  check('status poll updates the cell without a re-render',await until(`window.cell.textContent.includes('77')&&window.cell.isConnected&&window.cell===document.querySelectorAll('[data-wt-status]')[1]&&window.board===document.querySelector('#vcs-board')`,9000));
+  check('status poll keeps the scroll position',await js(`window.scrollY===window.y`));
+  // A worktree outside the live set loads on demand: its cell fills from /hub/vcs-tree.json.
+  await js(`window.loadBtn=document.querySelectorAll('[data-wt-load]')[40];window.loadPath=window.loadBtn.dataset.wtLoad;window.loadBtn.click();true`);
+  check('load status fills an on-demand row',await until(`[...document.querySelectorAll('[data-wt-status]')].find(c=>c.dataset.wtStatus===window.loadPath).textContent.includes('55')`,5000));
   // The hub deliberately postpones timed updates while a control in main has
   // focus. Blur after setting the state, then let its real 15-second clock run.
   await js(`document.activeElement.blur();window.started=performance.now();true`);
   check('real automatic refresh inserts new snapshot commit',await until(`!!document.querySelector('.vc-commits>li[data-key="${'b'.repeat(40)}"]')`,22000));
-  check('automatic refresh uses the same mounted board',await js(`window.board===document.querySelector('#vcs-board')&&performance.now()-window.started>=10000`));
+  check('automatic refresh uses the same mounted board',await js(`window.board===document.querySelector('#vcs-board')`));
   check('actual hub preserves selected commit query and expansion',await js(`document.querySelector('[data-vc-inspector]').textContent.includes(window.sha)&&document.querySelector('[data-vc-search]').value==='Needle'&&document.querySelector('.vc-graph').classList.contains('expanded')&&document.querySelectorAll('.vc-commits>li').length===91`));
+  check('the timed re-render keeps the newer status count',await js(`document.querySelectorAll('[data-wt-status]')[1].textContent.includes('77')`));
+  check('a row loaded on demand keeps its count through the re-render',await js(`[...document.querySelectorAll('[data-wt-status]')].find(c=>c.dataset.wtStatus===window.loadPath).textContent.includes('55')`));
 } finally {
   console.log(out.join('\n'));ws.close();chrome.kill();
 }
@@ -240,7 +253,20 @@ def test_actual_hub_vcs_preserves_reader_state_on_timed_refresh(project, tmp_pat
             data['graph']['commits'].insert(0, first)
         return data
 
+    from alpaca import gitview
+    path = fixture()['worktrees'][1]['path']
     monkeypatch.setattr(live, 'vcs', snapshot)
+    monkeypatch.setattr(live, 'vcs_status', lambda: {'generated': time.time(), 'hot_backlog': 0,
+        'worktrees': {path: dict(uncommitted=77, oldest_change=1700000000, checked_at=time.time())}})
+    other = fixture()['worktrees'][50]['path']
+    loaded = []
+
+    def vcs_tree(asked):
+        loaded.append(asked)
+        return dict(path=asked, uncommitted=55, oldest_change=1700000000, checked_at=time.time(), status_error=None,
+                    watch='opened', loaded=True, generated=time.time()) if asked == other else None
+
+    monkeypatch.setattr(live, 'vcs_tree', vcs_tree)
     httpd, base = _start(live, project)
     driver = tmp_path / 'actual_hub_vcs.mjs'
     driver.write_text(HUB_DRIVER.split('const ctl =')[0] + HUB_VCS_DRIVER)
@@ -255,4 +281,54 @@ def test_actual_hub_vcs_preserves_reader_state_on_timed_refresh(project, tmp_pat
     report = run.stdout + run.stderr
     print(report)
     assert run.returncode == 0 and 'FAIL ' not in report, report
-    assert report.count('PASS ') == 5 and len(calls) >= 2, report
+    assert report.count('PASS ') == 11 and len(calls) >= 2 and loaded == [other], report
+
+
+def test_status_cell_says_when_a_read_failed_and_the_backlog_note_is_said_not_hidden(tmp_path):
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('node required')
+    web = Path(__file__).resolve().parents[1] / 'web'
+    driver = tmp_path / 'cell.mjs'
+    driver.write_text(f"""import {{statusCell, backlogNote}} from '{web / "vcs.js"}';
+console.log(JSON.stringify([
+ statusCell({{uncommitted: 3, oldest_change: 100, checked_at: 900, status_error: 'GitError'}}, 1000),
+ statusCell({{uncommitted: null, checked_at: null, status_error: 'GitError'}}, 1000),
+ backlogNote(0), backlogNote(4)]));""")
+    out = json.loads(subprocess.run([node, str(driver)], capture_output=True, text=True, check=True).stdout)
+    assert 'status could not be read (GitError); last read 2 min ago' in out[0] and 'vc-dirty">3<' in out[0]
+    assert 'never read' in out[1]
+    assert out[2] == '' and '4 hot worktrees wait' in out[3]
+
+
+def test_worktree_card_shows_the_overall_line_the_live_groups_and_the_rest_on_demand(tmp_path):
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('node required')
+    data = fixture()
+    data['worktrees'][0].update(is_main=True, watch='main', path='/repo')
+    data['overall'] = dict(worktrees=67, uncommitted=80, loaded=40, not_loaded=27, dirty=32, failed=0, watched=10, main='/repo')
+    source = tmp_path / 'data.json'
+    source.write_text(json.dumps(data))
+    run = subprocess.run([node, '--input-type=module', '-e', """
+import fs from 'node:fs';
+import {pathToFileURL} from 'node:url';
+const {renderVcs}=await import(pathToFileURL(process.argv[1]).href);
+console.log(renderVcs(JSON.parse(fs.readFileSync(process.argv[2])),{href:()=> '#sessions',windowHref:d=>'#vcs?days='+d}));
+""", str(WEB / 'vcs.js'), str(source)], capture_output=True, text=True, check=True)
+    page = run.stdout
+    card = page[page.index('<h2>Worktrees</h2>'):page.index('id="vc-changes"')]
+    assert '67 worktrees' in card and '<strong>80</strong> uncommitted files across the 40 with a known status' in card
+    assert '27 not loaded' in card and 'data-wt-overall' in card
+    assert card.index('Main tree') < card.index('Most recent') < card.index('Largest') < card.index('Other worktrees (57)')
+    live = card[:card.index('Other worktrees')]
+    assert live.count('data-wt-status=') == 10 and 'data-wt-load' not in live    # main + 4 recent + 5 largest
+    rest = card[card.index('Other worktrees'):]
+    assert rest.count('data-wt-load=') == 57 and rest.count('data-wt-status=') == 57
+    assert '<details class="vc-disclosure" data-key="other-worktrees">' in card            # closed by default
+    assert rest.count('not loaded') == 27                                                 # never read: said, not 0
+    hub = (WEB / 'hub.js').read_text(encoding='utf-8')
+    assert "'/hub/vcs-tree.json?path='+encodeURIComponent(path)" in hub and 'loadTree:loadVcsTree' in hub
+    for name in ('vcs.js', 'vcs.css', 'hub.js'):
+        text = (WEB / name).read_bytes()
+        assert text.isascii(), name

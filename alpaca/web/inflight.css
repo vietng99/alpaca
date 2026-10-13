@@ -13,6 +13,7 @@
 .if-card { padding: var(--sp-4) var(--sp-5); scroll-margin-top: var(--sp-6); }
 .if-card.focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .if-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--sp-3) var(--sp-5); }
+.if-head.beam { padding: var(--sp-2) var(--sp-3); margin: calc(-1 * var(--sp-2)) calc(-1 * var(--sp-3)); border-radius: var(--r-md); }
 .if-title { display: flex; gap: var(--sp-3); align-items: flex-start; min-width: 0; }
 .if-title alpaca-orb { margin-top: var(--sp-1); }
 .if-title .eyebrow { display: block; font-size: var(--fs-xs); letter-spacing: .04em; color: var(--muted); font-weight: 500; }

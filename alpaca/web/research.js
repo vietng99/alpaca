@@ -203,7 +203,7 @@ export function renderResearchSection(data){
   if(!data||!Array.isArray(data.runs))return head('research runs unavailable')+`<div class="panel-body"><p class="muted">research runs unavailable: the research view could not be read.</p></div></section>`;
   if(!data.runs.length)return head('No research run is recorded')+`<div class="panel-body"><p class="muted">Start one with <code>/autoresearch</code> or <code>bin/alpaca research start --runbook PATH</code>.</p></div></section>`;
   const live=data.runs.filter(r=>!ENDED.includes(r.state)),ended=data.runs.filter(r=>ENDED.includes(r.state)).slice(0,3);
-  return head(`${live.length} not finished, ${data.runs.length} recorded`)+`<div class="rs-cards">${[...live,...ended].map(r=>runCard(r,true)).join('')}</div></section>`;
+  return head(`${live.length} not finished, ${data.recorded??data.runs.length} recorded`)+`<div class="rs-cards">${[...live,...ended].map(r=>runCard(r,true)).join('')}</div></section>`;
 }
 
 // ------------------------------------------------------------------ the run page

@@ -229,7 +229,7 @@ Wiki capture runs through session lifecycle commands or the enabled collector. R
 | **Activity** | Filter the event history by work and checks, task and flow progress, or all recorded events. Open the original recorded context. |
 | **Messages & handoffs** | Browse recorded reports and handoffs by recipient or message type, with links back to their tasks and sessions. |
 | **Report library** | Browse project reports, proofs and decisions; preview Markdown or sandboxed HTML and download the source. |
-| **Records** | The official record in one place: every operation with when it opened and closed, recorded decisions with their options and choice, sealed proofs, and the project wiki's status and cited briefing of any operation or task. Read-only. |
+| **Records** | The official record in one place: every operation with when it opened and closed, recorded decisions with their options and choice, sealed proofs, the project wiki's status and cited briefing of any operation or task, and Open vault: every item as an evidence graph, columns from evidence to conclusions, where selecting one lights its chain. Read-only. |
 | **Finished operations** | A Roadmap tab listing closed operations, newest first, with why each closed; open one to see the work it delivered. |
 | **Host load & capture health** | Inspect CPU and memory readings alongside collector, capture and projection status. Host load is separate from work progress. |
 | **Workspace navigation** | Search pages, work items and reports with Ctrl+K / Cmd+K, use light or dark themes, and browse on mobile. The optional [host-hub publisher](docs/host-hub.md) adds this project's summary tile to a separately configured shared hub. |

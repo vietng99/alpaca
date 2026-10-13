@@ -74,6 +74,9 @@ bin/alpaca release build
 bin/alpaca release check BUILD_RECEIPT_PATH
 bin/alpaca release publish CHECK_RECEIPT_PATH --dry-run
 bin/alpaca release publish CHECK_RECEIPT_PATH --execute --expect DRY_RUN_RECEIPT_PATH
+# after the owner merges the sync pull request:
+bin/alpaca release tag PUBLISH_RECEIPT_PATH --version X.Y.Z --notes NOTES.md --dry-run
+bin/alpaca release tag PUBLISH_RECEIPT_PATH --version X.Y.Z --notes NOTES.md --execute --expect DRY_RUN_TAG_RECEIPT_PATH
 ```
 
 Build and check print JSON with the receipt path for the next command. Publish defaults to a dry run. It writes a report with file changes, new top-level paths, large files and the source commit. Review that report before executing. Actual publication requires committed source files, a current approval and the `PUBLIC_REPO_TOKEN` environment variable. Credentials are never part of project configuration or receipts, and project gate/generator commands do not inherit publication credentials.
@@ -85,6 +88,18 @@ The publisher clones public history separately and creates a generated commit wh
 The first release records the source tip as its baseline. Later releases list every development commit since the previous published source in the report, generated commit and receipt. API retries preserve that list. The candidate must descend from the previous source; older retries, unrelated history and missing history are blocked. Use a full development clone when publishing.
 
 A previous normal merge is recognized only when ancestry and tree content agree. An unexpected public commit, edited sync branch or unsupported squash/rebase history stops publication for owner review. Do not reset public history to make the check pass. Resolve the discrepancy and explicitly review the next base. If a push succeeds but the PR API fails, the receipt keeps the pushed commit; retrying unchanged checked inputs under the same approval reuses that commit and updates the existing open PR.
+
+## Tag the release and write its release page
+
+Publishing ends at the sync pull request; it creates no tag and no GitHub release page. After the owner merges that pull request, `release tag` gives the merge commit the tag `vX.Y.Z` and creates the release page titled `Alpaca X.Y.Z` with the owner-reviewed notes, marked as the latest release unless `--not-latest` is given. It reads the publish receipt and refuses unless:
+
+- that receipt is an executed publish (status PASS) whose pull request is on the configured repository;
+- the pull request is merged into the target branch, and its head is the commit that receipt pushed;
+- the merged tree's `VERSION` in `alpaca/__init__.py`, when the file exists, equals `--version`;
+- the notes are nonempty, under 100,000 characters and pass the same leak policy as the PR report;
+- no tag of that name points at another commit.
+
+A dry run (the default) records the plan: repository, pull request, tag, target commit, title, latest flag and the notes hash, and keeps a copy of the notes beside the receipt. `--execute` requires `--expect` naming that reviewed dry-run receipt and refuses if anything in the plan changed. If the tag and its release page already exist on the same commit, the command records PASS and writes nothing. Write the notes for readers of the public repository: what is new, what changed and what was fixed, with no development task ids, host paths or private names.
 
 ## What the public side sees
 
@@ -108,7 +123,7 @@ Install the public draft as `.github/workflows/alpaca-public.yml` in the public 
 
 ## Credential
 
-Publication runs on the owner's machine. Create a fine-grained GitHub token limited to the one public repository with Contents and Pull requests read and write access. Add Workflows write only if the release must change files under `.github/workflows/`; GitHub refuses such pushes without it. Keep the token in a file outside the project that only the owner can read (mode 600), and pass it for one command:
+Publication runs on the owner's machine. Create a fine-grained GitHub token limited to the one public repository with Contents and Pull requests read and write access (Contents write also covers tags and release pages). Add Workflows write only if the release must change files under `.github/workflows/`; GitHub refuses such pushes without it. Keep the token in a file outside the project that only the owner can read (mode 600), and pass it for one command:
 
 ```sh
 PUBLIC_REPO_TOKEN="$(cat PATH_TO_TOKEN_FILE)" bin/alpaca release publish CHECK_RECEIPT_PATH --execute --expect DRY_RUN_RECEIPT_PATH
@@ -122,8 +137,8 @@ The example gates cover full pytest, full boot checks, manifest integrity, a fre
 
 ## Version numbers
 
-`bin/alpaca --version` prints `Alpaca 1.2.2`, and the hub header shows the same. The number lives in one place, `VERSION` in `alpaca/__init__.py`, and names the release the development tree is heading to.
+`bin/alpaca --version` prints `Alpaca 1.2.3`, and the hub header shows the same. The number lives in one place, `VERSION` in `alpaca/__init__.py`, and names the release the development tree is heading to.
 
 Whether a tree is a development checkout or a release is kept beside the number: the hub tooltip says "Development build at commit ..." or "Release build", and `alpaca status --json` carries `channel` (`dev` or `release`). For a bug report, `alpaca.version.info()["build"]` gives one SemVer string such as `1.2.0-dev+g03ae15d0f9fc.dirty` (dirty means uncommitted changes under `alpaca/` or `bin/`); a release build's is the bare number. The channel lives in `alpaca/_channel.py` (`CHANNEL = "dev"`); the release overlay `alpaca/_channel.py: templates/release/channel.py` in `project.yaml` swaps in `CHANNEL = "release"` at build time, so no one edits the channel by hand.
 
-To cut a release, bump `VERSION` in a development commit, approve that commit, then build, check and publish as above. After publishing, bump `main` to the next number.
+To cut a release, bump `VERSION` in a development commit, approve that commit, then build, check and publish as above. After the owner merges the sync pull request, tag it and write its release page with `release tag`. Then bump `main` to the next number.

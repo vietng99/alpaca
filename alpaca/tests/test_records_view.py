@@ -140,3 +140,227 @@ def test_the_wiki_routes_need_the_web_login_and_the_records_route_answers(server
     assert status == 200 and json.loads(body)["subject"] == "op-001"
     status, body = _fetch(url + "/hub/wiki-briefing.json?op=bad", "reader:test-password")
     assert status == 400 and "name one op" in json.loads(body)["error"]
+
+
+def _fake_briefing(monkeypatch, calls, gate=None):
+    from alpaca.wiki import service
+
+    class Brief:
+        gaps, truncated, items = ["g"], False, ()
+
+        def __init__(self, n):
+            self.text = "build %d" % n
+
+    def build(root, op=None, task=None, max_chars=2500):
+        calls.append((op, task))
+        if gate:
+            gate.wait(5)
+        return Brief(len(calls))
+
+    monkeypatch.setattr(service, "briefing", build)
+    monkeypatch.setattr(hub, "_WIKI_BRIEFING_CACHE", {})
+    monkeypatch.setattr(hub, "_WIKI_BRIEFING_BUILDS", {})
+    monkeypatch.setattr(hub, "WIKI_BRIEFING_MIN_GAP_S", 0)     # rebuild as soon as an input moves
+
+
+def _settle():
+    for thread in list(hub._WIKI_BRIEFING_BUILDS.values()):
+        thread.join(5)
+
+
+def test_a_briefing_is_built_once_until_the_record_moves(monkeypatch, tmp_path):
+    from alpaca import db
+    calls = []
+    _fake_briefing(monkeypatch, calls)
+    conn = db.connect(str(tmp_path))
+    db.append_event(conn, session="s", actor="a", kind="task-move", ref="t-001")
+    first = hub.wiki_briefing(tmp_path, op="op-001")
+    assert hub.wiki_briefing(tmp_path, op="op-001") == first and len(calls) == 1
+    first["gaps"].append("mutated")
+    assert hub.wiki_briefing(tmp_path, op="op-001")["gaps"] == ["g"]
+    hub.wiki_briefing(tmp_path, task="t-001")                  # another subject is its own entry
+    assert len(calls) == 2
+    # quiet kinds do not start a rebuild; a transcript snapshot and a record event do
+    db.append_event(conn, session="s", actor="a", kind="heartbeat")
+    hub.wiki_briefing(tmp_path, op="op-001")
+    _settle()
+    assert len(calls) == 2
+    db.append_event(conn, session="s", actor="a", kind="transcript-snapshot")
+    hub.wiki_briefing(tmp_path, op="op-001")
+    _settle()
+    assert len(calls) == 3
+    conn.close()
+
+
+def test_a_moved_store_serves_the_old_briefing_at_once_and_the_new_one_after_the_rebuild(monkeypatch, tmp_path):
+    import threading
+    from alpaca import db
+    from alpaca.wiki.config import Config
+    calls, gate = [], threading.Event()
+    _fake_briefing(monkeypatch, calls)
+    db.connect(str(tmp_path)).close()
+    store = Config.for_project(tmp_path).db_path
+    store.parent.mkdir(parents=True, exist_ok=True)
+    store.write_bytes(b"x")
+    assert hub.wiki_briefing(tmp_path, op="op-001")["text"] == "build 1"
+    _fake_briefing_gate = threading.Event()
+    from alpaca.wiki import service
+
+    def slow(root, op=None, task=None, max_chars=2500):
+        calls.append(op)
+        _fake_briefing_gate.wait(5)
+        return type("B", (), {"text": "build %d" % len(calls), "gaps": [], "truncated": False, "items": ()})()
+
+    monkeypatch.setattr(service, "briefing", slow)
+    store.write_bytes(b"xy")                                   # the collector wrote the store
+    # many readers while the rebuild runs: all answer with the old briefing, one build starts
+    readers = [hub.wiki_briefing(tmp_path, op="op-001")["text"] for _ in range(5)]
+    assert readers == ["build 1"] * 5 and len(calls) == 2
+    _fake_briefing_gate.set()
+    _settle()
+    assert hub.wiki_briefing(tmp_path, op="op-001")["text"] == "build 2" and len(calls) == 2
+    # the age bound also starts a rebuild
+    key = next(iter(hub._WIKI_BRIEFING_CACHE))
+    stamp, sig, value = hub._WIKI_BRIEFING_CACHE[key]
+    hub._WIKI_BRIEFING_CACHE[key] = (stamp - hub.WIKI_BRIEFING_TTL_S - 1, sig, value)
+    assert hub.wiki_briefing(tmp_path, op="op-001")["text"] == "build 2"
+    _settle()
+    assert len(calls) == 3
+
+
+def test_concurrent_first_requests_start_one_build(monkeypatch, tmp_path):
+    import threading
+    calls, gate = [], threading.Event()
+    _fake_briefing(monkeypatch, calls, gate)
+    results = []
+    threads = [threading.Thread(target=lambda: results.append(hub.wiki_briefing(tmp_path, op="op-001")["text"]))
+               for _ in range(6)]
+    for t in threads:
+        t.start()
+    gate.set()
+    for t in threads:
+        t.join(10)
+    assert results == ["build 1"] * 6 and len(calls) == 1
+
+
+def test_a_failed_first_build_reaches_its_reader_and_is_not_kept(monkeypatch, tmp_path):
+    from alpaca.wiki import service
+
+    def broken(root, **kw):
+        raise RuntimeError("store unreadable")
+
+    _fake_briefing(monkeypatch, [])
+    monkeypatch.setattr(service, "briefing", broken)
+    with pytest.raises(RuntimeError):
+        hub.wiki_briefing(tmp_path, op="op-001")
+    assert not hub._WIKI_BRIEFING_CACHE and not hub._WIKI_BRIEFING_BUILDS
+
+
+@pytest.fixture
+def heads(monkeypatch, tmp_path):
+    """A fake briefing whose text is the record's newest task-move id, with a switch to fail."""
+    from alpaca import db
+    from alpaca.wiki import service
+    state = {"calls": 0, "fail": False, "delay": 0.0}
+
+    def build(root, op=None, task=None, max_chars=2500):
+        import time
+        state["calls"] += 1
+        time.sleep(state["delay"])
+        if state["fail"]:
+            raise RuntimeError("store unreadable")
+        c = db.connect_readonly(str(root))
+        try:
+            n = c.execute("SELECT COALESCE(MAX(id),0) FROM events WHERE kind='task-move'").fetchone()[0]
+        finally:
+            c.close()
+        return type("B", (), {"text": "head=%d" % n, "gaps": [], "truncated": False, "items": ()})()
+
+    monkeypatch.setattr(service, "briefing", build)
+    monkeypatch.setattr(hub, "_WIKI_BRIEFING_CACHE", {})
+    monkeypatch.setattr(hub, "_WIKI_BRIEFING_BUILDS", {})
+    conn = db.connect(str(tmp_path))
+    yield tmp_path, conn, state
+    conn.close()
+
+
+def _move(conn):
+    from alpaca import db
+    db.append_event(conn, session="s", actor="a", kind="task-move", ref="t-001")
+
+
+def _age(seconds):
+    key = next(iter(hub._WIKI_BRIEFING_CACHE))
+    stamp, sig, value = hub._WIKI_BRIEFING_CACHE[key]
+    hub._WIKI_BRIEFING_CACHE[key] = (stamp - seconds, sig, value)
+
+
+def test_a_briefing_older_than_the_maximum_age_is_waited_for_not_served(heads):
+    root, conn, state = heads
+    _move(conn)
+    first = hub.wiki_briefing(root, op="op-001")
+    assert first["text"] == "head=1" and first["refreshing"] is False and first["built_at"] > 0
+    _age(3600)                                    # nobody read it for an hour, and the record moved
+    for _ in range(5):
+        _move(conn)
+    served = hub.wiki_briefing(root, op="op-001")
+    assert served["text"] == "head=6" and served["refreshing"] is False and state["calls"] == 2
+
+
+def test_within_the_maximum_age_the_old_briefing_is_served_and_marked_refreshing(heads):
+    root, conn, state = heads
+    _move(conn)
+    hub.wiki_briefing(root, op="op-001")
+    _age(hub.WIKI_BRIEFING_TTL_S + 1)
+    _move(conn)
+    stale = hub.wiki_briefing(root, op="op-001")
+    assert stale["text"] == "head=1" and stale["refreshing"] is True
+    _settle()
+    assert hub.wiki_briefing(root, op="op-001")["text"] == "head=2"
+
+
+def test_a_rebuild_that_keeps_failing_raises_once_the_old_briefing_is_too_old(heads):
+    root, conn, state = heads
+    _move(conn)
+    hub.wiki_briefing(root, op="op-001")
+    state["fail"] = True
+    _move(conn)
+    assert hub.wiki_briefing(root, op="op-001")["text"] == "head=1"      # young enough: served, rebuild fails
+    _settle()
+    _age(hub.WIKI_BRIEFING_MAX_AGE_S)
+    with pytest.raises(RuntimeError):
+        hub.wiki_briefing(root, op="op-001")
+    state["fail"] = False
+    assert hub.wiki_briefing(root, op="op-001")["text"] == "head=2"
+
+
+def test_the_age_of_a_briefing_counts_from_when_its_build_began(heads):
+    import time
+    root, conn, state = heads
+    _move(conn)
+    state["delay"] = 0.4
+    before = time.monotonic()
+    hub.wiki_briefing(root, op="op-001")
+    stamp = next(iter(hub._WIKI_BRIEFING_CACHE.values()))[0]
+    assert stamp - before < 0.2
+
+
+def test_background_builds_of_a_subject_are_at_least_the_minimum_gap_apart(monkeypatch, tmp_path):
+    from alpaca import db
+    calls = []
+    _fake_briefing(monkeypatch, calls)
+    monkeypatch.setattr(hub, "WIKI_BRIEFING_MIN_GAP_S", 10)
+    conn = db.connect(str(tmp_path))
+    first = hub.wiki_briefing(tmp_path, op="op-001")
+    db.append_event(conn, session="s", actor="a", kind="task-move", ref="t-001")
+    soon = hub.wiki_briefing(tmp_path, op="op-001")             # inputs moved, but the build is fresh
+    _settle()
+    assert len(calls) == 1 and soon["text"] == first["text"] and soon["refreshing"] is False
+    key = next(iter(hub._WIKI_BRIEFING_CACHE))
+    stamp, sig, value = hub._WIKI_BRIEFING_CACHE[key]
+    hub._WIKI_BRIEFING_CACHE[key] = (stamp - hub.WIKI_BRIEFING_MIN_GAP_S - 1, sig, value)
+    later = hub.wiki_briefing(tmp_path, op="op-001")            # past the gap: served at once, one rebuild
+    assert later["text"] == first["text"] and later["refreshing"] is True
+    _settle()
+    assert len(calls) == 2 and hub.wiki_briefing(tmp_path, op="op-001")["text"] == "build 2"
+    conn.close()

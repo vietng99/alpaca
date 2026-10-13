@@ -29,10 +29,17 @@ sha256 3ac2386646bf81f03d724a9f9104bec84bbeedf95d616d0becd50e63a30cc197, supplie
 directory from the unpacked package 2 (usage in that file). What it copies and what it converts:
 
 - Copied byte for byte from package 2: `arthur-core.js` (the same bytes as package 1),
-  `arthur-geometry.js` (new), `arthur-avatar.js` (package 2's: it loads arthur-geometry.js and accepts
-  per-action source rectangles), `arthur-avatar.css` (the same bytes as package 1),
-  `assets/arthur-spritesheet.png` (the gaze atlas; its image data recompressed, zlib level 9, the same filtered pixel bytes, sha256 96f87e0f2a61c0b160b6e3447c4d43f0f8b78a8de5c0b6137922aa21b57f11df, because its original compressed bytes matched a private-term rule of the release leak scan by chance) and the 11 original `assets/strips/*.png` (all
-  byte-identical to package 1's). `arthur-host-controller.js` is not shipped: `../arthur.js` keeps
+  `arthur-geometry.js` (new), `arthur-avatar.css` (the same bytes as package 1). `arthur-avatar.js` is
+  package 2's (it loads arthur-geometry.js and accepts per-action source rectangles) with one patch
+  (t-595, `AVATAR_PATCH` in `setup/vendor_arthur.py`): it loads the idle strip before the avatar is
+  ready and every other image the first time a draw needs it, and keeps the frame on screen until the
+  image arrives; the package loaded all 33 images first, about 11 MB. The gaze atlas is a
+  lossless WebP (t-595; `to_webp` checks the decoded pixels equal the PNG's); the strips stay PNG, the 11 original
+  ones byte-identical to package 1's (Chrome decodes a WebP strip one level off on 693 edge pixels, which the
+  Studio look baseline refuses). The atlas had its image data recompressed
+  because its original bytes matched a private-term rule of the release leak scan by chance (the gaze frames'
+  pixels, sha256 0748e95b7b1fe3dfd48686f9ddc5520b7bfa2fdeadbd0bb47d3f186773bd751a over their RGBA bytes in
+  order, are the package's), and since t-595 it is cut to the full-width rows of the 16 gaze frames (1536 x 416, decoded 2.5 MB instead of 14 MB, which stalled Chrome's main thread over 100 ms at 6x CPU slowdown), because the avatar draws only those from it; `stripsManifest` in `../arthur.js` moves the frames up by the cut. Deviation (owner-accepted 2026-10-12, decision dec-48ee879e9201): Chrome decodes the WebP atlas at most one level off the PNG's on edge pixels of the gaze frames (about 18,700 pixels over the 16 frames), and the atlas is drawn only while the cursor moves. `arthur-host-controller.js` is not shipped: `../arthur.js` keeps
   driving Arthur with its own priority and reaction queue.
 - Converted: the 21 new actions (sleeping, stamping, raising_hand, juggling, drinking_coffee,
   shield_up, counting_coins, packing_box, merging_papers, telescope, spit, sunglasses, nightcap,
@@ -49,8 +56,9 @@ directory from the unpacked package 2 (usage in that file). What it copies and w
   frames, durations, loop flag, label and trigger, and drops the full-size sheet geometry
   (sourceSize, frameRects, destinationRect).
 
-The directory weighs about 10.6 MB (`alpaca/tests/test_hub_arthur.py` holds it under 12 MB). The hub
-serves it with `Cache-Control: no-cache` and a sha256 ETag, so a reload revalidates each file and an
-unchanged one answers 304 (`../../serve.py`). The artwork is the owner's own and ships in every
+The directory weighs about 8.3 MB (`alpaca/tests/test_hub_arthur.py` holds it under 12 MB). The hub
+serves its images and scripts with `Cache-Control: max-age=86400` and a sha256 ETag, under URLs that
+carry a content version (`?v=`, `arthur_version` in `../../serve.py`), so a visit within a day asks for
+none of them and a changed file has a new URL; the stylesheet revalidates. The artwork is the owner's own and ships in every
 project and release with no license line (owner, 2026-10-08). `../arthur.js` places Arthur in the hub
 sidebar.

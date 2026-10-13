@@ -43,7 +43,8 @@ export const MUTATIONS = {
   'orb-click-no-reload': {check: 'M2-orb-click-reloads', asset: 'hub.js', find: "$('#pulse-orb').addEventListener('click',()=>route(true));", replace: ''},
   'orbs-frozen': {check: 'M3-thinking-orbs-animate', asset: 'orb.js', find: 'if (live.size && !reduced()) raf = requestAnimationFrame(tick);', replace: ''},
   'loader-still': {check: 'M4-loader-sequence', css: '.seq-orb,.seq-orb:last-child,.seq-line,.seq-line:last-child{animation:none!important}'},
-  'beams-still': {check: 'M5-border-beams', css: '.beam,.beam::before,.beam::after{animation:none!important}'},
+  'beams-still': {check: 'M5-border-beams', css: '.beam-ring,.beam-ring>i{animation:none!important}'},
+  'beams-no-pause': {check: 'M5-border-beams', asset: 'beam.js', find: 'shown.get(ring) ? a.play() : a.pause();', replace: 'a.play();'},
   'morph-full-repaint': {check: 'M6-morph-patch-in-place', asset: 'morph.js', find: 'const t=document.createElement(\'template\');t.innerHTML=html;const changed=morphChildren(el,t.content);last.set(el,html);return changed;', replace: 'el.innerHTML=html;last.set(el,html);return true;'},
   'arthur-no-offline': {check: 'M7-arthur-loop-priority', asset: 'arthur.js', find: "if (offline) return {action: 'problem', caption: 'Offline'};", replace: ''},
   'arthur-no-celebrate': {check: 'M8-arthur-celebrates-done', asset: 'arthur.js', find: "if (cheer) out.push({action: 'celebrate', why: cheer});", replace: ''},
@@ -183,6 +184,9 @@ async function open(path, {warp = 1, reduced = false, width = 1440, height = 900
   counts.clear();
   await navigate(b, base + path);
   if (ready && !await b.until(ready, 30000, 120)) throw Error('page not ready: ' + path);
+  // Arthur loads a strip the first time a pose needs it (t-595), so the page's first poses fetch and decode images
+  // for a moment after it is ready; a check that samples frames waits for that to end rather than race it.
+  await b.quiet(400, 10000);
 }
 const js = expr => b.js(expr);
 const until = (expr, ms = 20000) => b.until(expr, ms, 100);
@@ -285,23 +289,31 @@ check('M4-loader-sequence', 'M4', 'Loader: orbs join one by one with their lines
   const done = await until(`!document.querySelector('#main .orb-seq') && !!document.querySelector('#main h1, #main .rm-panel')`, 15000);
   return {pass: shown && n >= 3 && names.includes('seq-in') && joined > first && done && released > 0, info: `orbs ${n}, animations ${names.join(',')}, visible ${first} -> ${joined}, lines ${lines.map(v => v.toFixed(1)).join('/')}, released ${released}`};
 });
-check('M5-border-beams', 'M5', 'Border beams ride live cards; the alert beam on cards that need the owner', async () => {
-  await open('/hub/#roadmap', {ready: HUB_READY + ` && !!document.querySelector('.beam')`});
-  const got = await js(`(async()=>{const beams=[...document.querySelectorAll('.beam')],alerts=beams.filter(e=>e.classList.contains('beam-alert'));
-    const a0=beams.map(e=>getComputedStyle(e).getPropertyValue('--beam-angle'));await new Promise(r=>setTimeout(r,300));const a1=beams.map(e=>getComputedStyle(e).getPropertyValue('--beam-angle'));
-    const spin=beams.filter(e=>e.getAnimations().some(a=>a.animationName==='beam-spin'&&a.playState==='running')).length;
-    const speeds=[...new Set(beams.map(e=>getComputedStyle(e).animationDuration.split(',')[0]))];
-    return {beams:beams.length,alerts:alerts.length,turning:a0.filter((x,i)=>x!==a1[i]).length,spin,speeds};})()`);
-  return {pass: got.beams >= 2 && got.alerts >= 1 && got.spin === got.beams && got.turning === got.beams && got.speeds.length >= 2, info: JSON.stringify(got)};
+check('M5-border-beams', 'M5', 'Border beams ride live cards; the alert beam is a still red ring; off-screen beams pause', async () => {
+  await open('/hub/#roadmap', {ready: HUB_READY + ` && !!document.querySelector('.beam .beam-ring')`});
+  const got = await js(`(async()=>{const wait=ms=>new Promise(r=>setTimeout(r,ms));await wait(400);
+    const beams=[...document.querySelectorAll('.beam')],alerts=beams.filter(e=>e.classList.contains('beam-alert')),live=beams.filter(e=>!e.classList.contains('beam-alert'));
+    const comet=e=>e.querySelector(':scope > .beam-ring > i'),state=e=>comet(e).getAnimations().filter(a=>a.animationName==='beam-spin').map(a=>a.playState).join();
+    const inView=e=>{const r=e.getBoundingClientRect();return r.bottom>0&&r.top<innerHeight&&r.right>0&&r.left<innerWidth;};
+    const onScreen=live.filter(inView),t0=onScreen.map(e=>getComputedStyle(comet(e)).transform);await wait(300);const t1=onScreen.map(e=>getComputedStyle(comet(e)).transform);
+    const onRunning=onScreen.filter(e=>state(e)==='running').length;
+    const alertMoving=alerts.filter(e=>e.getAnimations({subtree:true}).some(a=>a.playState==='running')).length;
+    const filtered=beams.filter(e=>getComputedStyle(e.querySelector('.beam-ring')).filter!=='none'||getComputedStyle(comet(e)).filter!=='none').length;
+    // take one live card off screen: its beam must pause, and run again when it returns
+    const host=live[0];host.style.top='-9000px';await wait(400);const hidden=state(host);host.style.top='';await wait(400);const back=state(host);
+    return {beams:beams.length,alerts:alerts.length,live:live.length,onScreen:onScreen.length,onRunning,turning:t0.filter((x,i)=>x!==t1[i]).length,alertMoving,filtered,hidden,back};})()`);
+  return {pass: got.beams >= 2 && got.alerts >= 1 && got.live >= 1 && got.onScreen >= 1 && got.onRunning === got.onScreen && got.turning === got.onScreen && got.alertMoving === 0 && got.filtered === 0 && got.hidden === 'paused' && got.back === 'running', info: JSON.stringify(got)};
 });
 check('M6-morph-patch-in-place', 'M6', 'A live refresh patches the page in place: same nodes, scroll kept', async () => {
   // In-flight refreshes its board through morph.js patch(); a new claim adds a card and keeps every other node.
+  // Scroll anchoring is off for the page: Chrome would move scrollY itself to keep the visible part still
+  // when the new card lands above it, and the check is that the page's own code never moves the reader.
   await open('/hub/#inflight', {ready: HUB_READY + ` && !!document.querySelector('#inflight-board')`});
   await until(`window.__revs.length>0`, 15000);
   await sleep(800);
   const n = `(document.querySelector('#main').textContent.match(/(\\d+) in flight/)||[])[1]`;
   const before = await js(n);
-  await js(`document.documentElement.style.minHeight='5000px';scrollTo(0,300);window.__nodes=[...document.querySelectorAll('#inflight-board *')];window.__board=document.querySelector('#inflight-board');true`);
+  await js(`document.documentElement.style.minHeight='5000px';document.documentElement.style.overflowAnchor='none';scrollTo(0,300);window.__nodes=[...document.querySelectorAll('#inflight-board *')];window.__board=document.querySelector('#inflight-board');true`);
   poke('claim');
   const ok = await until(`${n}!==${JSON.stringify(before)}`, 30000);
   await sleep(400);
@@ -318,7 +330,7 @@ check('M7-arthur-loop-priority', 'M7', 'Arthur plays the looping pose the record
   await sleep(5000);
   const stale = await js(`window.__arthur.getState().action`);
   // the lost connection: the health call fails, so the page's own 10 s check keeps the row at "Offline"
-  await js(`(()=>{const f=window.fetch;window.__realFetch=f;window.fetch=(u,o)=>String(u).includes('/health.json')?Promise.reject(new TypeError('offline')):f(u,o);return true;})()`);
+  await js(`(()=>{const f=window.fetch;window.__realFetch=f;window.fetch=(u,o)=>String(u).includes('/hub/vitals.json')?Promise.reject(new TypeError('offline')):f(u,o);return true;})()`);
   const offline = await until(`window.__arthur.getState().action==='problem' && document.querySelector('#arthur-caption').textContent==='Offline'`, 15000);
   await js(`(()=>{window.fetch=window.__realFetch;const c=document.querySelector('#connection');c.classList.remove('error');c.querySelector('span').textContent='Live';return true;})()`);
   const back = await until(`window.__arthur.getState().action==='waiting'`, 15000);
@@ -332,6 +344,8 @@ check('M7-arthur-poses-render', 'M7', 'Every pose in the Arthur package draws it
   for (const a of actions) {
     // arthur.js puts its own pose back on its 15 s tick; a sample it cut short is taken again
     let got;
+    // a pose's strip loads the first time it is played (t-595): have it decoded before the frames are sampled
+    await js(`(async()=>{const p=window.__arthur;await p._load(p.manifest.actions[${JSON.stringify(a)}].image);return true;})()`);
     for (let attempt = 0; attempt < 3; attempt++) {
     got = await js(`(async()=>{const p=window.__arthur;p.setAction(${JSON.stringify(a)},{loop:true});const c=document.querySelector('#arthur canvas');const seen=new Set(),frames=new Set();
       for(let i=0;i<14;i++){await new Promise(r=>setTimeout(r,90));const st=p.getState();frames.add(st.frameIndex);seen.add(c.toDataURL().length+':'+c.toDataURL().slice(-64));}
@@ -690,14 +704,18 @@ check('L4-new-activity-notice', 'L4', 'A change while the reader is busy shows t
 check('L5-connection-health', 'L5', 'Connection health every 10 s; the sidebar orb listens, and reconnects when the stream drops', async () => {
   await open('/hub/#work', {warp: 10});
   await until(`window.__es.length>0 && document.querySelector('#connection alpaca-orb').getAttribute('state')==='listening'`, 15000);
-  const h0 = count('/health.json');
+  const h0 = count('/hub/vitals.json');
   await sleep(3500);
-  const h1 = count('/health.json');
+  const h1 = count('/hub/vitals.json');
   await js(`window.__es[0].dispatchEvent(new Event('error'));true`);
   const lost = await until(`document.querySelector('#connection span').textContent==='Reconnecting' && document.querySelector('#connection alpaca-orb').getAttribute('state')==='connecting'`, 5000);
   await js(`window.__es[0].dispatchEvent(new Event('open'));true`);
   const back = await until(`document.querySelector('#connection alpaca-orb').getAttribute('state')==='listening'`, 5000);
-  return {pass: h1 - h0 >= 2 && lost && back, info: `health reads ${h0} -> ${h1}, reconnecting shown ${lost}, back ${back}`};
+  // the health bar under Arthur shows what the fixture server's own /hub/vitals.json says (t-590): its
+  // label, aria-valuenow and band equal a fresh read of the endpoint, within one 10 s poll
+  const meter = await until(`fetch('/hub/vitals.json').then(r=>r.json()).then(v=>{const m=document.querySelector('#health-meter');window.__vitals=v.score.value+' '+v.score.band;return m.getAttribute('aria-valuenow')===String(v.score.value)&&m.querySelector('.health-label').textContent==='Health '+v.score.value+'/1000'&&m.dataset.band===v.score.band;})`, 15000);
+  const shown = await js(`document.querySelector('#health-meter .health-label').textContent+' '+document.querySelector('#health-meter').dataset.band`);
+  return {pass: h1 - h0 >= 2 && lost && back && meter, info: `health reads ${h0} -> ${h1}, reconnecting shown ${lost}, back ${back}; meter ${shown} for vitals ${await js('window.__vitals')} ${meter}`};
 });
 check('L6-own-polls', 'L6', 'Pages with their own poll keep it: the cockpit host panel every 3 s', async () => {
   await open('/hub/#cockpit', {warp: 10});

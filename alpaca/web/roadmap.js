@@ -1,12 +1,20 @@
 import {createRouter} from './roadmap-routing.js';
 import {orb} from './orb.js';
 import {levelChip} from './autodrive.js';
+import {BEAM_RING} from './beam.js';
 // Recorded work areas and dependencies shared by the cockpit and Work checklist.
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const models=new Map(), memory=new Map();
+const models=new Map(), memory=new Map(), bound=new WeakSet(), shape=new WeakMap();
 let pendingFocus=null;
 const scope=o=>`${globalThis.location?.pathname||''}:${o.project?.name||'project'}:v2`;
 function prefs(key){if(!memory.has(key)){let value={};try{value=JSON.parse(sessionStorage.getItem('alpaca.roadmap.'+key)||'{}');}catch{}memory.set(key,{collapsed:{},details:{},focus:'',chat:'',scroll:0,category:'',showDone:false,...(value&&typeof value==='object'?value:{})});}return memory.get(key);}
+// Which cards the focus or chat selection marks: the class each card carries, in the markup itself so a
+// live patch does not strip it and put it back.
+function selectionClasses(op,p){
+ const all=nodesOf(op),selected=new Set(p.chat?all.filter(n=>n.session===p.chat).map(n=>n.id):p.focus?[p.focus]:[]),related=new Set();
+ for(const edge of op.edges||[]){if(selected.has(edge.from))related.add(edge.to);if(selected.has(edge.to))related.add(edge.from);}
+ return id=>selected.has(id)?' rm-selected':selected.size?(related.has(id)?' rm-related':' rm-dimmed'):'';
+}
 function keep(key){try{sessionStorage.setItem('alpaca.roadmap.'+key,JSON.stringify(prefs(key)));}catch{}}
 const taskMap=o=>new Map((o.tasks||[]).map(t=>[t.id,t]));
 const nodesOf=op=>(op.groups||[]).flatMap(g=>g.nodes||[]);
@@ -51,6 +59,7 @@ function runNode(op,tasks,o){
 // decision rides the red one. The state label carries the matching orb.
 const ALERT=['approval','blocked','failed','assignment_expired'];
 const beamOf=(node,tasks)=>terminal(node,tasks)?'':node.state==='working'?' beam':ALERT.includes(node.state)?' beam beam-alert':'';
+const ringOf=(node,tasks)=>beamOf(node,tasks)?BEAM_RING:'';
 const STATE_ORB={working:'working',approval:'breathing',assignment_expired:'breathing',blocked:'searching',failed:'searching',ready:'connecting',resources:'weaving'};
 const stateOrb=(node,tasks)=>!terminal(node,tasks)&&STATE_ORB[node.state]?`<span class="rm-state-orb">${orb(STATE_ORB[node.state],20)}</span>`:'';
 const nodeLevel=(o,node,tasks)=>terminal(node,tasks)?'':levelChip(o.levels?.[node.session||tasks.get(node.id)?.assigned_session],true);
@@ -64,19 +73,19 @@ function workspace(available,tasks,o){
  const runGroups=research.length?[{id:'__research_runs__',title:'Research runs',category:'Research runs',nodes:research.map(op=>runNode(op,tasks,o))}]:[];
  return {op:'all',title:'All operations',revision:1,groups:[...groups.values(),...runGroups],edges:plain.flatMap(op=>op.edges||[]),error:available.filter(op=>op.error).map(op=>op.op+': '+op.error).join('; ')};
 }
-function runCard(node,tasks,o){
+function runCard(node,tasks,o,mark=''){
  const lead=node.lead&&tasks.get(node.lead);
- return `<article class="rm-node rm-compact rm-run rm-${esc(node.state)}${beamOf(node,tasks)}" data-rm-node="${esc(node.id)}">
+ return `<article class="rm-node rm-compact rm-run rm-${esc(node.state)}${beamOf(node,tasks)}${mark}" data-rm-node="${esc(node.id)}" data-key="n:${esc(node.id)}">
    <div class="rm-node-top"><span class="mono">${esc(node.run)}</span><span class="rm-state" title="${esc(node.label)}">${stateOrb(node,tasks)}${esc(node.label)}</span></div>${node.session&&!node.done?`<span class="rm-claim rm-claim-line">${nodeLevel(o,node,tasks)}<span class="mono">@${esc(String(node.session).slice(0,8))}</span></span>`:''}
    <a class="rm-title" href="#research?run=${encodeURIComponent(node.run)}" title="Open research run ${esc(node.run)}"><span class="rm-title-text">Research run ${esc(node.run)}</span></a>
    <small class="rm-run-count">${node.total-node.open} of ${node.total} tasks done${lead?` / now ${esc(lead.id)}: ${esc(lead.title||'')}`:''}</small>
-  </article>`;
+  ${ringOf(node,tasks)}</article>`;
 }
-function nodeCard(node,tasks,o,compact=false,expanded=false){
- if(node.run)return runCard(node,tasks,o);
+function nodeCard(node,tasks,o,compact=false,expanded=false,mark=''){
+ if(node.run)return runCard(node,tasks,o,mark);
  const task=tasks.get(node.id)||{id:node.id,title:node.id},needs=node.after||[],reasons=node.reasons||[],op=plans(o).find(p=>p.op===task.op);
  if(compact){
-  return `<article class="rm-node rm-compact rm-${esc(node.state)}${beamOf(node,tasks)}" data-rm-node="${esc(node.id)}">
+  return `<article class="rm-node rm-compact rm-${esc(node.state)}${beamOf(node,tasks)}${mark}" data-rm-node="${esc(node.id)}" data-key="n:${esc(node.id)}">
    <div class="rm-node-top"><span class="mono">${esc(node.id)}</span><span class="rm-state" title="${esc(node.label)}">${stateOrb(node,tasks)}${esc(node.label||'Needs organization')}</span></div>${claimChip(node,tasks,true,nodeLevel(o,node,tasks))}
    <button type="button" class="rm-title" data-task="${esc(node.id)}" title="${esc(task.title)}"><span class="rm-title-text">${esc(task.title)}</span></button>
    <button type="button" class="rm-more" data-rm-details="${esc(node.id)}" aria-controls="rm-info-${esc(node.id)}" aria-expanded="${expanded}" aria-label="Details and actions for ${esc(node.id)}" title="Details and actions">&#8943;</button>
@@ -84,9 +93,9 @@ function nodeCard(node,tasks,o,compact=false,expanded=false){
    ${node.state==='unplanned'?`<small class="rm-recorded">Recorded: ${esc(task.status||'unknown')}</small>`:''}
    <div class="rm-needs">${needs.length?'After '+needs.map(id=>taskLink(id,tasks)).join(' + '):node.state==='unplanned'?'Order not recorded':'No task prerequisites'}</div>
    ${reasons.length?`<ul class="rm-reasons">${reasons.map(r=>`<li>${esc(r)}</li>`).join('')}</ul>`:''}<div class="rm-node-foot">${node.session?`<a class="rm-chat" href="#sessions?sid=${encodeURIComponent(node.session)}" title="${esc(operatorName(node)+' / '+node.session)}">Open chat</a>`:''}<button type="button" class="rm-focus" data-rm-focus="${esc(node.id)}" aria-label="Trace ${esc(node.id)} dependencies">Trace path</button></div></div>
-  </article>`;
+  ${ringOf(node,tasks)}</article>`;
  }
- return `<article class="rm-node rm-${esc(node.state)}${beamOf(node,tasks)}" data-rm-node="${esc(node.id)}">
+ return `<article class="rm-node rm-${esc(node.state)}${beamOf(node,tasks)}${mark}" data-rm-node="${esc(node.id)}" data-key="n:${esc(node.id)}">
  <div class="rm-node-top"><span class="mono">${esc(node.id)}</span><span class="rm-state" title="${esc(node.label)}">${stateOrb(node,tasks)}${esc(node.label||'Needs organization')}</span></div>
  <button type="button" class="rm-title" data-task="${esc(node.id)}" title="${esc(task.title)}">${esc(task.title)}</button>${claimChip(node,tasks)}${nodeLevel(o,node,tasks)}
  <div class="rm-context">${esc(op?titleOf(o,op):task.op)}${task.phase?' / '+esc(task.phase):''}</div>
@@ -94,7 +103,7 @@ function nodeCard(node,tasks,o,compact=false,expanded=false){
  ${needs.length?`<div class="rm-needs"><span>After</span> ${needs.map(id=>taskLink(id,tasks)).join(' <span>+</span> ')}</div>`:'<div class="rm-needs">'+(node.state==='unplanned'?'Order not recorded':'No task prerequisites')+'</div>'}
  ${reasons.length?`<ul class="rm-reasons">${reasons.map(r=>`<li>${esc(r)}</li>`).join('')}</ul>`:''}
  <div class="rm-node-foot">${node.session?`<a class="rm-chat" href="#sessions?sid=${encodeURIComponent(node.session)}" title="${esc(node.session)}">Open assigned chat</a>`:`<span class="rm-unassigned">${task.claimant?'Worker: '+esc(task.claimant):terminal(node,tasks)?'Completed work':'No assigned chat'}</span>`}<button type="button" class="rm-focus" data-rm-focus="${esc(node.id)}" aria-label="Trace ${esc(node.id)} dependencies">Trace</button></div>
- </article>`;
+ ${ringOf(node,tasks)}</article>`;
 }
 function operationPicker(o,selected){
  const tasks=taskMap(o),available=plans(o),row=(id,title,nodes)=>{
@@ -125,11 +134,14 @@ function renderOne(o,op,options={}){
  const shown=groups.flatMap(g=>g.nodes.filter(n=>showDone||!terminal(n,tasks))),shownIds=new Set(shown.map(n=>n.id));
  if(p.chat&&!shown.some(n=>n.session===p.chat))p.chat='';
  if(p.focus&&!shownIds.has(p.focus))p.focus='';
- models.set(viewKey,{o,op,mode,key,options,visibleIds,selector,renderedGroups:groups});
+ // The model keeps its identity across renders: handlers bound to a panel the patch kept read the newest data.
+ const model={o,op,mode,key,options,visibleIds,selector,renderedGroups:groups},prior=models.get(viewKey);
+ if(prior)Object.assign(prior,model);else models.set(viewKey,model);
+ const mark=selectionClasses(op,p);
  const done=all.filter(n=>n.run?n.done:tasks.get(n.id)?.status==='done').length,working=scoped.filter(n=>n.state==='working'||n.state==='assignment_expired').length,ready=scoped.filter(n=>n.state==='ready').length;
  const holder=layout?p:global,folded=mode==='map'&&Boolean(holder.panelCollapsed),bodyId='rm-body-'+encodeURIComponent(viewKey);
  const title=op.op==='all'?'Work by area':titleOf(o,op),summary=op.summary||(op.op==='all'?'Follow each feature from its current task to what comes next.':'Follow the recorded prerequisites within this operation.');
- return `<section class="panel rm-panel rm-${mode==='map'?'map':'list'} ${layout?'rm-'+esc(layout):''} ${folded?'rm-folded':''}" data-rm-key="${esc(viewKey)}">
+ return `<section class="panel rm-panel rm-${mode==='map'?'map':'list'} ${layout?'rm-'+esc(layout):''} ${folded?'rm-folded':''}" data-rm-key="${esc(viewKey)}" data-key="rm:${esc(viewKey)}">
  ${mode==='map'?`<div class="rm-shell-heading"><button type="button" data-rm-toggle aria-expanded="${!folded}" aria-controls="${esc(bodyId)}"><span class="rm-chevron" aria-hidden="true">&gt;</span><strong>${esc(heading||'Task roadmap')}</strong><span class="rm-shell-count">${working} in progress / ${ready} ready / ${done} of ${all.length} done</span><span class="rm-toggle-label">${folded?'Expand':'Collapse'}</span></button></div>`:''}
  <div class="rm-body" id="${esc(bodyId)}" ${folded?'hidden':''}>
  <div class="rm-heading"><div><span class="eyebrow">${esc(eyebrow||(mode==='map'?'TASK ROADMAP':'GROUPED CHECKLIST'))}</span><h2>${esc(title)}</h2><p>${esc(summary)}</p><p class="rm-progress-line">${working} in progress <span aria-hidden="true">/</span> ${ready} ready <span aria-hidden="true">/</span> ${done} of ${all.length} done</p></div><div class="rm-controls">${selector?operationPicker(o,op.op==='all'?'':op.op):''}${chatPicker(shown,tasks,p)}<button type="button" class="button rm-clear" data-rm-clear ${!p.chat&&!p.focus?'hidden':''}>Clear focus</button></div></div>
@@ -139,11 +151,11 @@ function renderOne(o,op,options={}){
  ${op.error?`<p class="inline-warning rm-note">Plan unavailable: ${esc(op.error)}</p>`:''}
  <div class="rm-legend"><span><i class="rm-dot rm-dot-working"></i>In progress</span><span><i class="rm-dot rm-dot-ready"></i>Ready</span><span><i class="rm-dot rm-dot-waiting"></i>Waiting</span><span><i class="rm-dot rm-dot-blocked"></i>Blocked or failed</span><span><i class="rm-dot rm-dot-done"></i>Done</span><span><i class="rm-dot rm-dot-unplanned"></i>Needs organization</span><span class="rm-legend-help">Arrows show prerequisites. Tasks sharing a resource wait their turn.</span></div>
  ${!groups.length?`<p class="rm-note">${all.length?'No tasks match these filters.':'No tasks have been recorded yet.'}</p>`:''}
- <div class="rm-scroll"><div class="rm-canvas"${canvasStyle?` style="${esc(canvasStyle)}"`:''}><svg class="rm-connectors" aria-hidden="true"></svg>${groups.map(group=>{
+ <div class="rm-scroll" data-key="scroll"><div class="rm-canvas"${canvasStyle?` style="${esc(canvasStyle)}"`:''}><svg class="rm-connectors" aria-hidden="true" data-key="rm-connectors" data-morph-keep></svg>${groups.map(group=>{
   const count=group.nodes.filter(n=>terminal(n,tasks)).length,complete=count===group.nodes.length,groupNodes=group.nodes.filter(n=>shownIds.has(n.id));
   const expanded=!Object.hasOwn(p.collapsed,group.id)?!complete:!p.collapsed[group.id];
   const current=group.nodes.find(n=>['working','assignment_expired'].includes(n.state))||group.nodes.find(n=>n.state==='ready')||group.nodes.find(n=>!terminal(n,tasks));
-  return `<details class="rm-group ${group.id.includes('__unplanned__')?'rm-unplanned-group':''}" data-rm-group="${esc(group.id)}" ${expanded?'open':''}><summary><span class="rm-group-port" aria-hidden="true"></span><span class="rm-chevron" aria-hidden="true">&gt;</span><span class="rm-group-name"><small>${esc(group.category||'Other work')}</small><strong>${esc(group.title)}</strong></span><span class="rm-group-count">${count}/${group.nodes.length}${mode==='map'?'':' complete'}</span><span class="rm-group-current">${current&&['working','assignment_expired'].includes(current.state)?orb('working',20):current&&ALERT.includes(current.state)?orb('breathing',20):''}${current?esc((tasks.get(current.id)?.title||current.id)+' / '+current.label):'Complete'}</span></summary>${groupNodes.length?(group.subgroups?group.subgroups.map(s=>{const inSub=s.nodes.filter(n=>shownIds.has(n.id));return inSub.length?`<div class="rm-sub" data-rm-sub="${esc(s.id)}"><div class="rm-sub-title">${esc(s.title)}${s.note?`<small>${esc(s.note)}</small>`:''}</div><div class="rm-track">${inSub.map(n=>nodeCard(n,tasks,o,mode==='map',Boolean(p.details[n.id]))).join('')}</div></div>`:'';}).join(''):`<div class="rm-track">${groupNodes.map(n=>nodeCard(n,tasks,o,mode==='map',Boolean(p.details[n.id]))).join('')}</div>`):`<p class="rm-note">${count} completed tasks. <button type="button" class="button" data-rm-completed="true">View full plan</button></p>`}</details>`;
+  return `<details class="rm-group ${group.id.includes('__unplanned__')?'rm-unplanned-group':''}" data-rm-group="${esc(group.id)}" data-key="g:${esc(group.id)}" ${expanded?'open':''}><summary><span class="rm-group-port" aria-hidden="true"></span><span class="rm-chevron" aria-hidden="true">&gt;</span><span class="rm-group-name"><small>${esc(group.category||'Other work')}</small><strong>${esc(group.title)}</strong></span><span class="rm-group-count">${count}/${group.nodes.length}${mode==='map'?'':' complete'}</span><span class="rm-group-current">${current&&['working','assignment_expired'].includes(current.state)?orb('working',20):current&&ALERT.includes(current.state)?orb('breathing',20):''}${current?esc((tasks.get(current.id)?.title||current.id)+' / '+current.label):'Complete'}</span></summary>${groupNodes.length?(group.subgroups?group.subgroups.map(s=>{const inSub=s.nodes.filter(n=>shownIds.has(n.id));return inSub.length?`<div class="rm-sub" data-rm-sub="${esc(s.id)}" data-key="s:${esc(s.id)}"><div class="rm-sub-title">${esc(s.title)}${s.note?`<small>${esc(s.note)}</small>`:''}</div><div class="rm-track">${inSub.map(n=>nodeCard(n,tasks,o,mode==='map',Boolean(p.details[n.id]),mark(n.id))).join('')}</div></div>`:'';}).join(''):`<div class="rm-track">${groupNodes.map(n=>nodeCard(n,tasks,o,mode==='map',Boolean(p.details[n.id]),mark(n.id))).join('')}</div>`):`<p class="rm-note">${count} completed tasks. <button type="button" class="button" data-rm-completed="true">View full plan</button></p>`}</details>`;
  }).join('')}</div></div>
  <p class="rm-footnote">${layout==='phases'?'Phases run in order; each lists its tasks by workstream. Finished tasks stay on the map as done.':showDone?'Full plan includes completed work.':'Completed work is folded away. Choose Full plan to see every step.'} A chat assignment does not confirm a running process.</p></div></section>`;
 }
@@ -194,10 +206,17 @@ export function renderRoadmap(o,options={}){
  return renderOne(o,op,options);
 }
 
+// What decides where the cards sit: the cards and groups shown, the recorded edges, which groups and
+// card details are open. A live patch routes the arrows again only when this changed.
+function layoutShape(panel,model){
+ return JSON.stringify([model.mode,model.renderedGroups.map(g=>[g.id,g.nodes.map(n=>n.id)]),(model.op.edges||[]).map(e=>[e.from,e.to]),
+  [...panel.querySelectorAll('[data-rm-group]')].map(g=>g.open),[...panel.querySelectorAll('[data-rm-details]')].map(b=>b.getAttribute('aria-expanded')),panel.querySelector('.rm-body')?.hidden]);
+}
 let markerSerial=0;
 function draw(panel,model){
  const canvas=panel.querySelector('.rm-canvas'),svg=panel.querySelector('.rm-connectors');
  if(!canvas||!svg)return;
+ shape.set(panel,layoutShape(panel,model));
  svg.replaceChildren();
  if(model.mode!=='map'||panel.querySelector('.rm-body')?.hidden)return;
  const bounds=canvas.getBoundingClientRect(),ns='http://www.w3.org/2000/svg';
@@ -240,9 +259,8 @@ function draw(panel,model){
 }
 
 function highlight(panel,model){
- const p=prefs(model.key),all=nodesOf(model.op),selected=new Set(p.chat?all.filter(n=>n.session===p.chat).map(n=>n.id):p.focus?[p.focus]:[]);
- const related=new Set();for(const edge of model.op.edges||[]){if(selected.has(edge.from))related.add(edge.to);if(selected.has(edge.to))related.add(edge.from);}
- for(const el of panel.querySelectorAll('[data-rm-node]')){const id=el.dataset.rmNode;el.classList.toggle('rm-selected',selected.has(id));el.classList.toggle('rm-related',!selected.has(id)&&related.has(id));el.classList.toggle('rm-dimmed',selected.size>0&&!selected.has(id)&&!related.has(id));}
+ const mark=selectionClasses(model.op,prefs(model.key));
+ for(const el of panel.querySelectorAll('[data-rm-node]')){const marks=mark(el.dataset.rmNode);for(const name of ['rm-selected','rm-related','rm-dimmed'])el.classList.toggle(name,marks.includes(name));}
  draw(panel,model);
 }
 
@@ -270,33 +288,36 @@ export function rememberRoadmap(root=document){
 
 export function bindRoadmap(root=document){
  for(const panel of root.querySelectorAll('[data-rm-key]')){
-  if(panel.dataset.rmBound)continue;panel.dataset.rmBound='1';
+  if(bound.has(panel))continue;bound.add(panel);
   const model=models.get(panel.dataset.rmKey);if(!model)continue;
   const p=prefs(model.key),scroll=panel.querySelector('.rm-scroll');
   for(const group of panel.querySelectorAll('[data-rm-group]'))if(Object.hasOwn(p.collapsed,group.dataset.rmGroup))group.open=!p.collapsed[group.dataset.rmGroup];
   scroll.scrollLeft=p.scroll||0;
-  scroll.addEventListener('scroll',()=>{p.scroll=scroll.scrollLeft;keep(model.key);},{passive:true});
-  for(const group of panel.querySelectorAll('details[data-rm-group]'))group.addEventListener('toggle',()=>{p.collapsed[group.dataset.rmGroup]=!group.open;keep(model.key);draw(panel,model);});
-  const search=panel.querySelector('[data-rm-search]');
+  // Scroll, toggle and search input are listened for on the panel, not on the elements: a live patch can
+  // add a group or a picker, and what it adds is covered without binding again.
+  panel.addEventListener('scroll',event=>{if(event.target.matches('.rm-scroll')){p.scroll=event.target.scrollLeft;keep(model.key);}},{passive:true,capture:true});
+  panel.addEventListener('toggle',event=>{
+   const el=event.target;
+   if(el.matches('details[data-rm-group]')){p.collapsed[el.dataset.rmGroup]=!el.open;keep(model.key);draw(panel,model);return;}
+   if(!el.matches('[data-rm-picker]')||!panel.isConnected)return;
+   if(el.open){
+    for(const other of panel.querySelectorAll('[data-rm-picker]'))if(other!==el)other.open=false;
+    p.pickers=[el.dataset.rmPicker];
+   }else p.pickers=p.pickers.filter(name=>name!==el.dataset.rmPicker);
+   keep(model.key);
+  },true);
   function filterOperations(){
+   const search=panel.querySelector('[data-rm-search]');if(!search)return;
    const query=search.value.trim().toLowerCase();let count=0;
    for(const item of panel.querySelectorAll('[data-rm-operation]')){item.hidden=!item.dataset.rmSearchText.includes(query);if(!item.hidden)count++;}
    panel.querySelector('[data-rm-no-results]').hidden=Boolean(count);
   }
-  if(search){search.value=p.search||'';filterOperations();search.addEventListener('input',()=>{p.search=search.value;keep(model.key);filterOperations();});}
-  const pickers=[...panel.querySelectorAll('[data-rm-picker]')];
+  const search=panel.querySelector('[data-rm-search]');
+  if(search){search.value=p.search||'';filterOperations();}
+  panel.addEventListener('input',event=>{if(event.target.matches('[data-rm-search]')){p.search=event.target.value;keep(model.key);filterOperations();}},true);
+  panel._rmFilter=filterOperations;
   p.pickers=(p.pickers||[]).slice(-1);
-  for(const picker of pickers){
-   picker.open=p.pickers.includes(picker.dataset.rmPicker);
-   picker.addEventListener('toggle',()=>{
-    if(!panel.isConnected)return;
-    if(picker.open){
-     for(const other of pickers)if(other!==picker)other.open=false;
-     p.pickers=[picker.dataset.rmPicker];
-    }else p.pickers=p.pickers.filter(name=>name!==picker.dataset.rmPicker);
-    keep(model.key);
-   });
-  }
+  for(const picker of panel.querySelectorAll('[data-rm-picker]'))picker.open=p.pickers.includes(picker.dataset.rmPicker);
   function replace(options=model.options){
    rememberRoadmap(panel.parentElement);
    const wrapper=document.createElement('div');wrapper.innerHTML=options.layout==='phases'?renderPhaseMap(model.o,model.op.op,options):renderRoadmap(model.o,options);
@@ -361,6 +382,17 @@ export function bindRoadmap(root=document){
   }
  }
  pendingFocus=null;
+}
+
+// After a live patch of a container holding roadmap panels: bind a panel the patch added, put back the
+// operation filter a patch may have undone, and route the arrows again only when the layout changed.
+export function patchedRoadmap(root=document){
+ bindRoadmap(root);
+ for(const panel of root.querySelectorAll('[data-rm-key]')){
+  const model=models.get(panel.dataset.rmKey);if(!model)continue;
+  if(panel.querySelector('[data-rm-search]')?.value)panel._rmFilter?.();
+  if(shape.get(panel)!==layoutShape(panel,model))draw(panel,model);
+ }
 }
 
 export function taskPlanDetail(o,id){

@@ -1,4 +1,5 @@
-import {renderRoadmap,bindRoadmap,rememberRoadmap} from './roadmap.js';
+import {renderRoadmap,bindRoadmap,rememberRoadmap,patchedRoadmap} from './roadmap.js';
+import {patch as patchHtml, render as renderHtml} from './morph.js';
 import {createRouter} from './roadmap-routing.js';
 // Persistent capabilities with recorded evidence, work and explanatory impact paths.
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -9,7 +10,7 @@ const chip=(s)=>`<span class="mm-state mm-${esc(s)}"><i aria-hidden="true">${sym
 const href=(route,params={})=>'#'+route+(Object.keys(params).length?'?'+new URLSearchParams(params):'');
 // The map is a view of the Roadmap page; its links go there directly (#mission still redirects).
 const mapHref=(params={})=>href('roadmap',{view:'mission',...params});
-const store=new Map(), models=new Map();
+const store=new Map(), models=new Map(), bound=new WeakSet(), signed=new WeakMap(), shaped=new WeakMap();
 const keyFor=d=>d.title;
 function stateFor(d){const key=keyFor(d);if(!store.has(key))store.set(key,{mode:'work',selected:null,depth:'all',query:'',tag:'',all:true,suggested:false,closed:[],focus:null,componentOnly:false});return store.get(key);}
 const propagates=e=>['depends_on','feeds','governs'].includes(e.kind);
@@ -48,8 +49,15 @@ function groupSummary(data,g,dev){
  const children=data.nodes.filter(n=>n.group===g.id),tasks=[...new Map(children.flatMap(n=>n.tasks).map(t=>[t.id,t])).values()];
  return workSummary({tasks,state:children.some(n=>n.state==='failing')?'failing':children.some(n=>['stale','blocked'].includes(n.state))?'stale':'unknown'},dev);
 }
-function nodeCard(node,dev){const w=workSummary(node,dev);return `<article class="mm-node mm-dev-${esc(w.tone)} ${node.lifecycle!=='current'?'mm-planned':''}" data-mm-node="${esc(node.id)}" data-mm-group-id="${esc(node.group)}">
- <button class="mm-node-title" data-mm-select="${esc(node.id)}" aria-pressed="false" title="${esc(node.purpose)}">${esc(node.title)}</button>
+// What the search, the concern filter and the selection do to each card. The markup carries it, so a
+// live patch of the map leaves the cards as the reader sees them; paint() only has to keep it current.
+function nodeFlags(data,st){
+ const paths=st.selected?impactPaths(data,st.selected,st):new Map(),query=st.query.toLowerCase();
+ return {paths,flags:new Map(data.nodes.map(n=>[n.id,{show:(!query||[n.title,n.purpose,n.id,...n.tags].join(' ').toLowerCase().includes(query))&&(!st.tag||n.tags.includes(st.tag)),
+  selected:n.id===st.selected,affected:paths.has(n.id),working:n.work!=='idle'}]))};
+}
+function nodeCard(node,dev,f){const w=workSummary(node,dev),cls=['mm-node','mm-dev-'+esc(w.tone),node.lifecycle!=='current'&&'mm-planned',f.selected&&'mm-selected',f.affected&&'mm-affected',f.working&&'mm-working'].filter(Boolean).join(' ');return `<article class="${cls}" data-mm-node="${esc(node.id)}" data-mm-group-id="${esc(node.group)}" data-key="n:${esc(node.id)}"${f.show?'':' hidden'}>
+ <button class="mm-node-title" data-mm-select="${esc(node.id)}" aria-pressed="${f.selected}" title="${esc(node.purpose)}">${esc(node.title)}</button>
  <div class="mm-node-foot"><span>${esc(w.label)}</span><span title="Linked tasks with current completion proof / all linked tasks">${w.done===null?w.total+' linked':w.total?w.done+'/'+w.total:w.open+' tasks'}</span></div>
  ${node.state==='failing'||node.state==='stale'?`<span class="mm-node-check">${esc(labels[node.state])}</span>`:''}</article>`;}
 function workOverview(data,dev){
@@ -71,11 +79,11 @@ function renderDevelopment(data,st){
 
 export function renderMission(data,{compact=false,node=null}={}){
  if(!data)return '<section class="panel mm-empty"><h2>Mission map</h2><p>Map data is unavailable. Refresh to try again.</p></section>';
- models.set(keyFor(data),data);const st=stateFor(data);if(node&&data.nodes.some(n=>n.id===node)){st.selected=node;const group=data.nodes.find(n=>n.id===node).group;st.closed=st.closed.filter(g=>g!==group);}
+ if(!compact)models.set(keyFor(data),data);const st=stateFor(data);if(node&&data.nodes.some(n=>n.id===node)){st.selected=node;const group=data.nodes.find(n=>n.id===node).group;st.closed=st.closed.filter(g=>g!==group);}
  const counts=data.counts,dev=development(data),summary=`${data.nodes.filter(n=>n.lifecycle==='current').length} components across ${data.groups.length} sectors`;
- if(compact)return `<section class="panel mm-overview"><div class="panel-head"><div><h2>Mission map</h2><p>Development across ${data.groups.length} sectors</p></div><a class="text-link" href="${esc(mapHref())}">Open development map &rarr;</a></div><div class="mm-overview-grid">${data.groups.map(g=>{const w=groupSummary(data,g,dev);return `<a class="mm-overview-area mm-dev-${esc(w.tone)}" href="${esc(mapHref({group:g.id}))}"><strong>${esc(g.title)}</strong><small>${esc(w.label)}${w.total?' &middot; '+(w.done===null?w.total+' linked':w.done+'/'+w.total+' tasks'):''}</small></a>`;}).join('')}</div></section>`;
- const tags=[...new Set(data.nodes.flatMap(n=>n.tags))].sort();
- return `<section class="mm-root" data-mm-root="${esc(keyFor(data))}">
+ if(compact)return `<section class="panel mm-overview"><div class="panel-head"><div><h2>Mission map</h2><p>Development across ${data.groups.length} sectors</p></div><a class="text-link" href="${esc(mapHref())}">Open development map &rarr;</a></div><div class="mm-overview-grid">${data.groups.map(g=>{const w=groupSummary(data,g,dev);return `<a class="mm-overview-area mm-dev-${esc(w.tone)}" data-key="area:${esc(g.id)}" href="${esc(mapHref({group:g.id}))}"><strong>${esc(g.title)}</strong><small>${esc(w.label)}${w.total?' &middot; '+(w.done===null?w.total+' linked':w.done+'/'+w.total+' tasks'):''}</small></a>`;}).join('')}</div></section>`;
+ const tags=[...new Set(data.nodes.flatMap(n=>n.tags))].sort(),{flags}=nodeFlags(data,st),visible=data.nodes.filter(n=>flags.get(n.id).show);
+ return `<section class="mm-root${st.selected?' mm-has-selection':''}" data-mm-root="${esc(keyFor(data))}" data-key="mm" data-mode="${esc(st.mode)}">
  <div class="mm-heading"><div><h1>Mission map</h1><p>Follow the components being updated, the work ahead, and what each change affects.</p></div><span class="mm-scope">${esc(summary)}</span></div>
  ${!data.configured?'<div class="mm-notice"><strong>Starter map</strong><p>Configure your project capabilities and their checks with <code>alpaca mission init</code>. This map carries no verification claim.</p></div>':''}
  ${data.errors.length?`<div class="mm-notice mm-error" role="alert">${data.errors.map(e=>`<p>${esc(e)}</p>`).join('')}</div>`:''}
@@ -84,11 +92,11 @@ export function renderMission(data,{compact=false,node=null}={}){
  <div class="mm-toolbar"><div class="mm-modes" role="group" aria-label="Map view">${[['work','Development'],['system','Components'],['impact','Change impact']].map(([id,label])=>`<button data-mm-mode="${id}" aria-pressed="${st.mode===id}">${label}</button>`).join('')}</div><label class="mm-search"><span class="mm-sr">Search capabilities</span><input type="search" data-mm-search placeholder="Find a component..." value="${esc(st.query)}"></label>
  <label><span class="mm-sr">Concern filter</span><select data-mm-tag><option value="">All concerns</option>${tags.map(t=>`<option value="${esc(t)}" ${st.tag===t?'selected':''}>${esc(t)}</option>`).join('')}</select></label>
  <label><span class="mm-sr">History snapshot</span><select data-mm-history><option value="">Current system</option>${data.snapshots.map(s=>`<option value="${s.id}" ${data.at===s.id?'selected':''}>${esc(date(s.ts))} / ${s.id}</option>`).join('')}</select></label></div>
- <div class="mm-options"><button class="mm-inline" data-mm-expand>Expand all</button><button class="mm-inline" data-mm-collapse>Collapse all</button><span class="mm-context" data-mm-context></span><label><input type="checkbox" data-mm-all ${st.all?'checked':''}> All links</label><label><input type="checkbox" data-mm-suggested ${st.suggested?'checked':''}> Suggested links</label><label>Impact <select data-mm-depth><option value="all" ${st.depth==='all'?'selected':''}>All dependents</option><option value="direct" ${st.depth==='direct'?'selected':''}>Direct only</option></select></label></div>
- <div class="mm-section-label">SYSTEM SECTORS &middot; COMPONENTS</div><div class="mm-layout"><div class="mm-canvas" data-mm-canvas><svg class="mm-links" aria-hidden="true" data-mm-links></svg><div class="mm-groups">${data.groups.map(g=>`<details class="mm-group mm-${esc(g.state)}" data-mm-group="${esc(g.id)}" ${st.closed.includes(g.id)?'':'open'}><summary><span class="mm-group-label">${esc(g.title)}</span><span class="mm-group-count">${g.total} components</span></summary><div class="mm-group-nodes">${data.nodes.filter(n=>n.group===g.id).map(n=>nodeCard(n,dev)).join('')}</div></details>`).join('')}</div><p class="mm-empty" data-mm-no-results hidden>No capabilities match these filters.</p></div>
- <aside class="mm-detail" data-mm-detail aria-label="Capability details"></aside></div>
+ <div class="mm-options"><button class="mm-inline" data-mm-expand>Expand all</button><button class="mm-inline" data-mm-collapse>Collapse all</button><span class="mm-context" data-mm-context data-key="mm-context" data-morph-keep></span><label><input type="checkbox" data-mm-all ${st.all?'checked':''}> All links</label><label><input type="checkbox" data-mm-suggested ${st.suggested?'checked':''}> Suggested links</label><label>Impact <select data-mm-depth><option value="all" ${st.depth==='all'?'selected':''}>All dependents</option><option value="direct" ${st.depth==='direct'?'selected':''}>Direct only</option></select></label></div>
+ <div class="mm-section-label">SYSTEM SECTORS &middot; COMPONENTS</div><div class="mm-layout"><div class="mm-canvas" data-mm-canvas><svg class="mm-links" aria-hidden="true" data-mm-links data-key="mm-links" data-morph-keep></svg><div class="mm-groups">${data.groups.map(g=>`<details class="mm-group mm-${esc(g.state)}" data-mm-group="${esc(g.id)}" data-key="g:${esc(g.id)}" ${st.closed.includes(g.id)?'':'open'}${visible.some(n=>n.group===g.id)?'':' hidden'}><summary><span class="mm-group-label">${esc(g.title)}</span><span class="mm-group-count">${g.total} components</span></summary><div class="mm-group-nodes">${data.nodes.filter(n=>n.group===g.id).map(n=>nodeCard(n,dev,flags.get(n.id))).join('')}</div></details>`).join('')}</div><p class="mm-empty" data-mm-no-results${visible.length?' hidden':''}>No capabilities match these filters.</p></div>
+ <aside class="mm-detail" data-mm-detail aria-label="Capability details" data-key="mm-detail" data-morph-keep></aside></div>
  <div class="mm-legend"><span class="mm-dev-complete">Work complete / verified</span><span class="mm-dev-working">In progress</span><span class="mm-dev-ready">Ready</span><span class="mm-dev-waiting">Blocked / needs recheck</span><span class="mm-dev-planned">Planned</span><span>Component colors show development progress. Verification details are separate.</span></div>
- <div data-mm-development>${renderDevelopment(data,st)}</div>
+ <div data-mm-development data-key="mm-development" data-morph-keep${st.mode==='system'?' hidden':''}>${renderDevelopment(data,st)}</div>
  <details class="mm-coverage-detail"><summary>Map coverage: ${data.coverage.mapped} of ${data.coverage.total} inventoried files mapped${data.coverage.unmapped.length?' &middot; '+data.coverage.unmapped.length+' unmapped':''}</summary><p>Scope: ${esc(data.coverage.scope.join(', ')||'No inventory defined')}. Dependency coverage is declared, not exhaustive.</p>${data.coverage.complete?'':'<p>Some inputs were excluded or could not be read. Coverage is incomplete.</p>'}${data.coverage.unmapped.length?`<ul>${data.coverage.unmapped.map(p=>`<li><code>${esc(p)}</code></li>`).join('')}</ul>`:'<p>Every file in the declared inventory has a capability mapping.</p>'}</details>
  <p class="mm-footnote" role="status" data-mm-message>Checked ${esc(date(data.checked_at))}. Task completion and current component verification are separate records.</p></section>`;
 }
@@ -102,33 +110,67 @@ function detail(data,st){
  <dl class="mm-dates"><dt>${node.last_changed?.baseline?'First mapped':'Last changed'}</dt><dd>${esc(date(node.last_changed?.ts))}${node.last_changed?.unrecorded?'<small>Filesystem observation; capture pending</small>':''}</dd><dt>Last verified fix</dt><dd>${node.last_fix?`${esc(date(node.last_fix.ts))}<a href="${esc(href('work',{q:node.last_fix.task}))}">${esc(node.last_fix.task)}</a>`:'Not recorded'}</dd><dt>Last checked</dt><dd>${esc(date(node.last_checked?.ts))}${node.last_checked?`<small>Recorded ${esc(node.last_checked.result)}</small>`:''}</dd></dl>
  ${st.mode==='impact'?`<section><h3>Potential impact &middot; ${paths.size}</h3><p class="mm-small">Reachability identifies checks to revisit. It does not establish a failure.</p>${paths.size?`<ol class="mm-paths">${[...paths].map(([id,path])=>`<li>${linkNode(id)}<small>${path.map(e=>esc(titles.get(e.source))).concat(esc(titles.get(id))).join(' &rarr; ')}</small>${path.map(e=>`<p>${esc(e.reason)}${e.confidence==='inferred'?' (suggested)':''}</p>`).join('')}</li>`).join('')}</ol>`:'<p>No dependents are recorded in this scope. Unknown relationships can still exist.</p>'}</section>`:''}
  <section><h3>Linked work</h3>${node.tasks.length?node.tasks.map(t=>`<a class="mm-task" href="${esc(href('work',{q:t.id}))}"><strong>${esc(t.title||t.id)}</strong><small>${esc(t.id)} &middot; ${esc(t.status)} &middot; ${esc(t.link_kind)}</small></a>${t.assigned_session?`<a class="mm-small" href="${esc(href('sessions',{sid:t.assigned_session}))}">Working chat</a>`:''}${t.proof?`<a class="mm-small" href="${esc(href('library',{path:t.proof.replace(/^local:/,'')}))}">Proof report</a>`:''}`).join(''):'<p>No work is explicitly linked to this capability.</p>'}</section>
- <section><h3>Recorded checks</h3>${node.checks.length?node.checks.map(c=>`<div class="mm-check"><strong>${esc(c.data.check)}</strong><span>${esc(c.data.result)} &middot; ${esc(date(c.ts))}</span><code>${esc(c.data.command.join(' '))}</code><button class="mm-inline" data-mm-evidence="${c.id}">Read check evidence</button></div>`).join(''):'<p>No checks have run for this capability.</p>'}<div data-mm-log></div></section>
+ <section><h3>Recorded checks</h3>${node.checks.length?node.checks.map(c=>`<div class="mm-check"><strong>${esc(c.data.check)}</strong><span>${esc(c.data.result)} &middot; ${esc(date(c.ts))}</span><code>${esc(c.data.command.join(' '))}</code><button class="mm-inline" data-mm-evidence="${c.id}">Read check evidence</button></div>`).join(''):'<p>No checks have run for this capability.</p>'}<div data-mm-log data-key="mm-log" data-morph-keep></div></section>
  <section><h3>Relationships</h3>${related.length?related.map(e=>`<div class="mm-relationship">${linkNode(e.source)}<span>${esc(e.kind.replaceAll('_',' '))}</span>${linkNode(e.target)}<p>${esc(e.reason)}</p><small>${esc(e.confidence)} &middot; ${esc(e.evidence.join(', '))}</small></div>`).join(''):'<p>No relationships recorded.</p>'}</section>
  <details><summary>Mapped files &middot; ${node.files.length}</summary><ul class="mm-file-list">${node.files.map(f=>`<li><code>${esc(f)}</code></li>`).join('')}</ul></details>
  <section><h3>Change history</h3>${node.history.length?`<ol class="mm-history">${node.history.map(e=>`<li><strong>${esc(e.kind.replace('mission-','').replaceAll('-',' '))}${e.data.result?' &middot; '+esc(e.data.result):''}</strong><small>${esc(date(e.ts))}</small><a href="${esc(e.kind==='mission-snapshot'?mapHref({at:e.id,node:node.id}):href('activity',{ref:node.id,kind:'all'}))}">Record ${e.id}</a></li>`).join('')}</ol>`:'<p>No changes recorded.</p>'}</section>`;
 }
 
-function paint(root,data,st,{refreshPlan=true}={}){
- const paths=st.selected?impactPaths(data,st.selected,st):new Map();
- root.querySelectorAll('[data-mm-mode]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.mmMode===st.mode)));
- root.dataset.mode=st.mode;root.classList.toggle('mm-has-selection',Boolean(st.selected));
+// Writes only what differs, so a refresh that changed nothing leaves the page untouched.
+const setAttr=(el,name,value)=>{if(el.getAttribute(name)!==value)el.setAttribute(name,value);};
+const setHidden=(el,hidden)=>{if(el.hidden!==hidden)el.hidden=hidden;};
+const setText=(el,text)=>{if(el.textContent!==text)el.textContent=text;};
+// refreshPlan: true redraws the development plan from scratch; 'patch' (a live refresh) patches it in place.
+// redraw: false leaves the links for the caller to route when the layout moved.
+function paint(root,data,st,{refreshPlan=true,redraw=true}={}){
+ const {paths,flags}=nodeFlags(data,st);
+ root.querySelectorAll('[data-mm-mode]').forEach(b=>setAttr(b,'aria-pressed',String(b.dataset.mmMode===st.mode)));
+ setAttr(root,'data-mode',st.mode);root.classList.toggle('mm-has-selection',Boolean(st.selected));
  let visible=0;
- root.querySelectorAll('[data-mm-node]').forEach(el=>{const n=data.nodes.find(n=>n.id===el.dataset.mmNode);const show=(!st.query||[n.title,n.purpose,n.id,...n.tags].join(' ').toLowerCase().includes(st.query.toLowerCase()))&&(!st.tag||n.tags.includes(st.tag));el.hidden=!show;if(show)visible++;
-  el.classList.toggle('mm-selected',n.id===st.selected);el.classList.toggle('mm-affected',paths.has(n.id));el.classList.toggle('mm-working',n.work!=='idle');
-  el.querySelector('[data-mm-select]').setAttribute('aria-pressed',String(n.id===st.selected));});
- root.querySelectorAll('[data-mm-group]').forEach(g=>{g.hidden=![...g.querySelectorAll('[data-mm-node]')].some(n=>!n.hidden);});
- root.querySelector('[data-mm-no-results]').hidden=visible>0;
- root.querySelector('[data-mm-context]').textContent=st.mode==='impact'?(st.selected?`${paths.size} potentially affected capabilities`:'Select a capability to trace its dependents'):st.mode==='work'?'Components show work progress; the plan below shows what to do next.':'Select a component to reveal its connections and work.';
- root.querySelector('[data-mm-detail]').innerHTML=detail(data,st);
+ root.querySelectorAll('[data-mm-node]').forEach(el=>{const f=flags.get(el.dataset.mmNode);if(!f)return;setHidden(el,!f.show);if(f.show)visible++;
+  el.classList.toggle('mm-selected',f.selected);el.classList.toggle('mm-affected',f.affected);el.classList.toggle('mm-working',f.working);
+  setAttr(el.querySelector('[data-mm-select]'),'aria-pressed',String(f.selected));});
+ root.querySelectorAll('[data-mm-group]').forEach(g=>setHidden(g,![...g.querySelectorAll('[data-mm-node]')].some(n=>!n.hidden)));
+ setHidden(root.querySelector('[data-mm-no-results]'),visible>0);
+ setText(root.querySelector('[data-mm-context]'),st.mode==='impact'?(st.selected?`${paths.size} potentially affected capabilities`:'Select a capability to trace its dependents'):st.mode==='work'?'Components show work progress; the plan below shows what to do next.':'Select a component to reveal its connections and work.');
+ const aside=root.querySelector('[data-mm-detail]');
+ if(refreshPlan==='patch')patchHtml(aside,detail(data,st));else renderHtml(aside,detail(data,st));
  const plan=root.querySelector('[data-mm-development]'),filterFocused=document.activeElement?.matches('[data-mm-component-only]');
- if(refreshPlan){rememberRoadmap(plan);plan.innerHTML=renderDevelopment(data,st);}
- plan.hidden=st.mode==='system';bindRoadmap(plan);
+ if(refreshPlan==='patch')patchHtml(plan,renderDevelopment(data,st));
+ else if(refreshPlan){rememberRoadmap(plan);renderHtml(plan,renderDevelopment(data,st));}
+ setHidden(plan,st.mode==='system');
+ if(refreshPlan==='patch')patchedRoadmap(plan);else bindRoadmap(plan);
  if(filterFocused)plan.querySelector('[data-mm-component-only]')?.focus({preventScroll:true});
- requestAnimationFrame(()=>draw(root,data,st));
+ if(redraw)requestAnimationFrame(()=>draw(root,data,st));
+}
+
+// The data a live refresh compares: everything but the check time, which moves on every read. It
+// changes with each five minute bucket of that time, so the "Checked" note stays roughly current.
+const dataSignature=data=>JSON.stringify(data,(key,value)=>key==='checked_at'?undefined:value)+'@'+Math.floor((Date.parse(data.checked_at)||0)/300000);
+// What decides where the links run: the cards and their groups, the links drawn, which groups are open
+// or hidden, and the reader's selection and link options.
+const drawShape=(root,data,st)=>JSON.stringify([data.nodes.map(n=>[n.id,n.group]),data.edges.map(e=>[e.source,e.target,e.confidence]),st.mode,st.selected,st.all,st.suggested,st.depth,
+ [...root.querySelectorAll('[data-mm-group]')].map(g=>[g.open,g.hidden]),[...root.querySelectorAll('[data-mm-node]')].map(n=>n.hidden)]);
+// True when the page showing this map was drawn from different data than `data`.
+export function missionMoved(container,data){
+ const root=container?.querySelector('[data-mm-root]');
+ return !root||!signed.has(root)||signed.get(root)!==dataSignature(data);
+}
+// After a live patch of the map's markup: bring the parts the script owns (selection, detail, plan,
+// links) up to date, and route the links again only when the layout moved.
+export function patchedMission(container){
+ const root=container.querySelector('[data-mm-root]');if(!root)return;
+ bindMission(container);
+ const data=models.get(root.dataset.mmRoot);if(!data)return;
+ const sig=dataSignature(data);if(signed.get(root)===sig)return;signed.set(root,sig);
+ const st=stateFor(data);
+ paint(root,data,st,{refreshPlan:'patch',redraw:false});
+ if(shaped.get(root)!==drawShape(root,data,st))requestAnimationFrame(()=>draw(root,data,st));
 }
 
 function draw(root,data,st){
  if(!root.isConnected)return;
+ shaped.set(root,drawShape(root,data,st));
  const canvas=root.querySelector('[data-mm-canvas]'),svg=root.querySelector('[data-mm-links]');svg.innerHTML='';
  if(matchMedia('(max-width:700px)').matches)return;
  const bounds=canvas.getBoundingClientRect(),paths=st.selected?impactPaths(data,st.selected,st):new Map();
@@ -160,9 +202,11 @@ export function rememberMission(container){
 }
 
 export function bindMission(container){
- const root=container.querySelector('[data-mm-root]');if(!root||root.dataset.bound)return;root.dataset.bound='true';
- const data=models.get(root.dataset.mmRoot),st=stateFor(data);
+ const root=container.querySelector('[data-mm-root]');if(!root||bound.has(root))return;bound.add(root);
+ // A live patch keeps this root and hands it newer data, so the handlers look the data up when they run.
+ const data0=models.get(root.dataset.mmRoot),st0=stateFor(data0);
  root.addEventListener('click',async e=>{
+  const data=models.get(root.dataset.mmRoot),st=stateFor(data);
   const choose=e.target.closest('[data-mm-select]'),mode=e.target.closest('[data-mm-mode]'),close=e.target.closest('[data-mm-close]'),evidence=e.target.closest('[data-mm-evidence]');
   if(choose){const follow=Boolean(choose.closest('[data-mm-detail]'));st.selected=choose.dataset.mmSelect;const group=root.querySelector(`[data-mm-group="${CSS.escape(data.nodes.find(n=>n.id===st.selected).group)}"]`);if(group)group.open=true;paint(root,data,st);if(follow||matchMedia('(max-width:800px)').matches)root.querySelector('[data-mm-detail] h2').focus({preventScroll:true});if(matchMedia('(max-width:800px)').matches)root.querySelector('[data-mm-detail]').scrollIntoView({block:'start'});}
   if(mode){st.mode=mode.dataset.mmMode;paint(root,data,st);}
@@ -171,8 +215,8 @@ export function bindMission(container){
   if(evidence){const box=root.querySelector('[data-mm-log]');box.textContent='Loading check evidence...';evidence.disabled=true;
    try{const response=await fetch('/hub/mission-evidence.json?event='+encodeURIComponent(evidence.dataset.mmEvidence));if(!response.ok)throw Error('Evidence could not be loaded');const value=await response.json();box.innerHTML=`<pre>${esc(value.text)}</pre>${value.truncated?'<p>Showing the first 64 KiB.</p>':''}`;}catch(err){box.textContent=err.message;}finally{evidence.disabled=false;}}
  });
- root.addEventListener('input',e=>{if(e.target.matches('[data-mm-search]')){st.query=e.target.value;paint(root,data,st);}});
- root.addEventListener('change',async e=>{const t=e.target;
+ root.addEventListener('input',e=>{if(e.target.matches('[data-mm-search]')){const data=models.get(root.dataset.mmRoot),st=stateFor(data);st.query=e.target.value;paint(root,data,st);}});
+ root.addEventListener('change',async e=>{const t=e.target,data=models.get(root.dataset.mmRoot),st=stateFor(data);
   if(!t.matches('[data-mm-component-only],[data-mm-depth],[data-mm-tag],[data-mm-all],[data-mm-suggested],[data-mm-history]'))return;
   if(t.matches('[data-mm-component-only]'))st.componentOnly=t.checked;
   if(t.matches('[data-mm-depth]'))st.depth=t.value;
@@ -182,8 +226,8 @@ export function bindMission(container){
   if(t.matches('[data-mm-history]')){location.hash=mapHref(t.value?{at:t.value}:{});return;}
   paint(root,data,st);
  });
- root.addEventListener('toggle',e=>{if(e.target.matches('[data-mm-group]')){st.closed=[...root.querySelectorAll('[data-mm-group]')].filter(g=>!g.open).map(g=>g.dataset.mmGroup);requestAnimationFrame(()=>draw(root,data,st));}},true);
- root._mmObserver=new ResizeObserver(()=>draw(root,data,st));root._mmObserver.observe(root.querySelector('[data-mm-canvas]'));
- paint(root,data,st,{refreshPlan:false});
- if(st.focus)root.querySelector(`[data-mm-node] [data-mm-select="${CSS.escape(st.focus)}"]`)?.focus({preventScroll:true});
+ root.addEventListener('toggle',e=>{if(e.target.matches('[data-mm-group]')){const data=models.get(root.dataset.mmRoot),st=stateFor(data);st.closed=[...root.querySelectorAll('[data-mm-group]')].filter(g=>!g.open).map(g=>g.dataset.mmGroup);requestAnimationFrame(()=>draw(root,data,st));}},true);
+ root._mmObserver=new ResizeObserver(()=>{const data=models.get(root.dataset.mmRoot);if(data)draw(root,data,stateFor(data));});root._mmObserver.observe(root.querySelector('[data-mm-canvas]'));
+ paint(root,data0,st0,{refreshPlan:false});signed.set(root,dataSignature(data0));
+ if(st0.focus)root.querySelector(`[data-mm-node] [data-mm-select="${CSS.escape(st0.focus)}"]`)?.focus({preventScroll:true});
 }

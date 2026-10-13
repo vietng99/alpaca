@@ -27,6 +27,7 @@ import json
 import math
 import os
 import re
+import stat
 import threading
 import time
 from datetime import datetime, timezone
@@ -355,6 +356,16 @@ def read(path, cards=None, cards_rev=""):
         return st
 
 
+def _snapshot(st, rows):
+    """What one board iterates for a transcript: the parse state as of now, taken under _LOCK.
+
+    `rows` are the board's own copies of the responses, so a later read() that re-prices or grows
+    the shared state (another window, a new rate card) cannot change a board that is being built.
+    The lists are copied; the call, error and hook dicts are never changed once parsed."""
+    return dict(st, responses=rows, calls=list(st["calls"]), errors=dict(st["errors"]), prompts=list(st["prompts"]),
+                hooks=list(st["hooks"]), events=list(st["events"]), compactions=list(st["compactions"]), live=st)
+
+
 def summary(path, cards=None, cards_rev=""):
     """Totals for one transcript: the fallback the index uses for a child metrics cannot open."""
     st = read(path, cards, cards_rev)
@@ -579,6 +590,163 @@ def _meta_hooks(conn):
     return out
 
 
+def _touched(st, realroot):
+    """({response: files its calls touched}, {response: commands}) for one parsed transcript.
+
+    Resolving every call's paths is the cost of the board, and a transcript that has not moved
+    resolves to the same sets, so they are kept on its parsed state under the fingerprint read()
+    parsed it at (size, mtime): an append changes it and only that transcript is resolved again.
+    The sets are only read by the caller. The paths are resolved outside _LOCK (st is a board's
+    own snapshot) and only the store is under it."""
+    key = (st["size"], st["mtime"], realroot)
+    keep = st.get("live", st)              # the memo lives on the shared parse state, not on a board's snapshot
+    with _LOCK:
+        memo = keep.get("touched")
+    if memo is not None and memo[0] == key:
+        return memo[1], memo[2]
+    targets = {}
+    commands = {}
+    for c in st["calls"]:
+        t = insights.targets(c, realroot, resolved=True)
+        if t:
+            targets.setdefault(c["r"], set()).update(t)
+        if c.get("cmd"):
+            commands.setdefault(c["r"], []).append(c["cmd"])
+    with _LOCK:
+        keep["touched"] = (key, targets, commands)
+    return targets, commands
+
+
+def _link_stamp(root, conn, sid):
+    """What fanout.child_links reads, as a cheap comparable value: the state of every directory
+    under the session's subagent directories and of the directory above each (lstat, so a swap
+    for a symlink shows: its mtime and whether it is a link; an added, removed or replaced child
+    moves its directory's mtime) and each registered child source with whether its file is there.
+    None when it cannot be read, which is never cached."""
+    from alpaca.analytics import detail
+    try:
+        registered = transcripts.registered(conn, sid)
+        if registered and not os.path.isabs(registered):
+            registered = os.path.join(root, registered)
+        top = [transcripts.subagents_dir(root, sid)]
+        if registered:
+            top.insert(0, os.path.join(os.path.dirname(registered), os.path.splitext(os.path.basename(registered))[0], "subagents"))
+        stamp = [registered]
+
+        def look(path):
+            try:
+                st = os.lstat(path)
+                return (path, st.st_mtime_ns, stat.S_ISLNK(st.st_mode), st.st_ino)
+            except OSError:
+                return (path, None, None, None)
+        for directory in top:
+            stamp.append(look(os.path.dirname(directory)))
+            stack = [directory]
+            while stack:
+                here = stack.pop()
+                stamp.append(look(here))
+                try:
+                    with os.scandir(here) as entries:
+                        stack += [e.path for e in entries if e.is_dir(follow_symlinks=False)]
+                except OSError:
+                    pass
+        try:
+            for row in detail._obs_sources(conn, root, sid, parent_only=True):
+                locator = row["locator"]
+                if not os.path.isabs(locator):
+                    locator = os.path.join(root, locator)      # as detail._children reads it
+                local = transcripts.local_path(root, row["session"])
+                stamp.append((row["source_id"], locator, os.path.isfile(locator), os.path.islink(locator),
+                              os.path.isfile(local), os.path.islink(local)))
+        except Exception as exc:
+            if "no such table" not in str(exc):
+                return None
+        return tuple(stamp)
+    except Exception:
+        return None
+
+
+_LINKS = {}
+LINKS_KEEP = 256
+
+
+def _child_links(root, conn, sid):
+    """fanout.child_links, kept per session under _link_stamp: listing a session's children
+    resolves every path under it, which a session that has not moved need not repeat."""
+    stamp = _link_stamp(root, conn, sid)
+    with _LOCK:
+        hit = _LINKS.get((root, sid))
+    if stamp is not None and hit is not None and hit[0] == stamp:
+        return dict(hit[1])
+    try:
+        links = fanout.child_links(root, conn, sid, strict=True)
+    except Exception:
+        return {}                          # served as no children, but not kept: the next board reads it again
+    if stamp is not None:
+        with _LOCK:
+            _LINKS.pop((root, sid), None)
+            _LINKS[(root, sid)] = (stamp, dict(links))
+            while len(_LINKS) > LINKS_KEEP:
+                _LINKS.pop(next(iter(_LINKS)))
+    return links
+
+
+_SPEND = {}
+SPEND_KEEP = 1024     # sessions whose cycle shares are kept
+_ROWS = {}            # sid -> (fingerprint, spend rows) of the sessions read last, for the signals
+ROWS_KEEP = 48
+
+
+def _cycle_spend(root, loaded, cycle_rows, held, rows_of, active):
+    """[(cost, tokens, sessions)] per cycle: what each session holding its task spent while it did.
+
+    It reads every response of every session and does not depend on the window, so each session's
+    share of a cycle is kept under that session's parse fingerprint (size, mtime and rate cards of
+    each of its transcripts) and the holds it had: a session that has not moved is not read again
+    for it, and one that did move is read once for all its cycles."""
+    spend = []
+    rows = {}
+    for cycle in cycle_rows:
+        ident = (cycle["task"], cycle["start"], cycle["done"])
+        cost = tokens = 0.0
+        sessions = set()
+        for item in loaded:
+            sid = item["s"]["sid"]
+            mine = held.get(sid, ())
+            if not any(task == cycle["task"] and a < cycle["done"] and b > cycle["start"] for task, a, b in mine):
+                continue
+            stamp = (root, tuple((thread, st["size"], st["mtime"], st["cards"]) for thread, st in item["threads"]), tuple(mine))
+            with _LOCK:
+                entry = _SPEND.pop(sid, None)
+                if entry is None or entry[0] != stamp:
+                    entry = (stamp, {})
+                _SPEND[sid] = entry
+                while len(_SPEND) > SPEND_KEEP:
+                    _SPEND.pop(next(iter(_SPEND)))
+                share = entry[1].get(ident)
+            if share is None:
+                if sid not in rows:
+                    rows[sid] = rows_of(item)
+                c = t = 0.0
+                hit = False
+                for r in rows[sid]:
+                    if cycle["start"] <= r["ts"] <= cycle["done"]:
+                        now_held = active(sid, r["ts"])
+                        if cycle["task"] in now_held:
+                            c += r["cost"] / len(now_held)
+                            t += r["tokens"] / len(now_held)
+                            hit = True
+                share = (c, t, hit)
+                with _LOCK:
+                    entry[1][ident] = share
+            if share[2]:
+                cost += share[0]
+                tokens += share[1]
+                sessions.add(sid)
+        spend.append((cost, tokens, sorted(sessions)))
+    return spend
+
+
 def _signals(root, conn, loaded, top, start, end, size, now):
     """The nine insights (alpaca.analytics.insights) for the sessions on the board, plus the
     project-wide lists: cost per outcome, collisions and the slowest hooks."""
@@ -593,27 +761,29 @@ def _signals(root, conn, loaded, top, start, end, size, now):
     meta = _meta_hooks(conn)
     realroot = os.path.realpath(root)
 
-    # Every response of every session, with the files its tool calls touched, for spend attribution.
-    per_session = {}
-    for item in loaded:
+    # Every response of a session, with the files its tool calls touched, for spend attribution.
+    def rows_of(item):
         sid = item["s"]["sid"]
+        stamp = (realroot, tuple((thread, st["size"], st["mtime"], st["cards"]) for thread, st in item["threads"]))
+        with _LOCK:
+            hit = _ROWS.get(sid)
+        if hit is not None and hit[0] == stamp:
+            return hit[1]
         rows = []
         for thread, st in item["threads"]:
-            targets = {}
-            commands = {}
-            for c in st["calls"]:
-                t = insights.targets(c, realroot)
-                if t:
-                    targets.setdefault(c["r"], set()).update(t)
-                if c.get("cmd"):
-                    commands.setdefault(c["r"], []).append(c["cmd"])
+            targets, commands = _touched(st, realroot)
             resp = st["responses"]
             for i, r in enumerate(resp):
                 nxt = resp[i + 1]["ts"] if i + 1 < len(resp) else r["ts"]
                 rows.append({"ts": r["ts"], "tokens": _tokens(r), "cost": r["cost"] if r["cost"] is not None and r["cost"] >= 0 else 0.0,
                              "time": max(0.0, min(nxt - r["ts"], IDLE_TIME)), "targets": targets.get(i, set()),
                              "cmd": " ".join(commands.get(i, [])), "thread": thread})
-        per_session[sid] = rows
+        with _LOCK:
+            _ROWS.pop(sid, None)
+            _ROWS[sid] = (stamp, rows)
+            while len(_ROWS) > ROWS_KEEP:
+                _ROWS.pop(next(iter(_ROWS)))
+        return rows
 
     def active(sid, ts):
         return [task for task, a, b in held.get(sid, ()) if a <= ts < b]
@@ -621,20 +791,8 @@ def _signals(root, conn, loaded, top, start, end, size, now):
     # t-148 cost per outcome, and the reopened cycles t-147 counts as waste.
     cycle_rows = insights.cycles(events)
     task_cost = {}
-    for cycle in cycle_rows:
-        cost = tokens = 0.0
-        sessions = set()
-        for sid, rows in per_session.items():
-            if not any(task == cycle["task"] and a < cycle["done"] and b > cycle["start"] for task, a, b in held.get(sid, ())):
-                continue
-            for r in rows:
-                if cycle["start"] <= r["ts"] <= cycle["done"]:
-                    now_held = active(sid, r["ts"])
-                    if cycle["task"] in now_held:
-                        cost += r["cost"] / len(now_held)
-                        tokens += r["tokens"] / len(now_held)
-                        sessions.add(sid)
-        cycle.update(cost=cost, tokens=tokens, sessions=sorted(sessions))
+    for cycle, (cost, tokens, sessions) in zip(cycle_rows, _cycle_spend(realroot, loaded, cycle_rows, held, rows_of, active)):
+        cycle.update(cost=cost, tokens=tokens, sessions=list(sessions))
         entry = task_cost.setdefault(cycle["task"], {"cost": 0.0, "tokens": 0.0, "sessions": set(), "cycles": 0})
         entry["cost"] += cost
         entry["tokens"] += tokens
@@ -708,9 +866,10 @@ def _signals(root, conn, loaded, top, start, end, size, now):
         sig["waste"] = {"cost": sum(w["cost"] or 0 for w in waste), "items": sorted(waste, key=lambda w: -(w["cost"] or 0))[:40],
                         "runs": runs_waste, "count": len(waste)}
         # t-145 claimed, off-task and unclaimed spend.
+        mine_rows = rows_of(item)
         split = {k: {"tokens": 0.0, "cost": 0.0, "time": 0.0} for k in ("claimed", "off", "unclaimed")}
         files, seen_tasks, pathless = {}, set(), set()
-        for r in per_session.get(sid, ()):
+        for r in mine_rows:
             if not inside(r["ts"]):
                 continue
             now_held = active(sid, r["ts"])
@@ -736,7 +895,7 @@ def _signals(root, conn, loaded, top, start, end, size, now):
         sig["offtask"] = dict(split, files=sorted(files.values(), key=lambda f: -f["cost"])[:15],
                               tasks=sorted(seen_tasks), pathless=sorted(pathless))
         # t-149 idle, cache re-writes after idle, owner wait.
-        stamps = [r["ts"] for r in per_session.get(sid, ()) if inside(r["ts"])]
+        stamps = [r["ts"] for r in mine_rows if inside(r["ts"])]
         idle_s, gaps = insights.idle(stamps)
         rewrites = []
         for thread, st in item["threads"]:
@@ -878,11 +1037,12 @@ def board(root, sessions, window="24h", now=None, families=None, start=None, end
             threads = []
             if path and os.path.isfile(path):
                 try:
-                    st = read(path, cards, cards_rev)
-                    threads.append((None, st))
-                    main = [dict(row, agent=None, kind="main", wf=None) for row in st["responses"]]
-                    events += st["events"]
-                    explicit += st["compactions"]
+                    with _LOCK:
+                        st = read(path, cards, cards_rev)
+                        main = [dict(row, agent=None, kind="main", wf=None) for row in st["responses"]]
+                        threads.append((None, _snapshot(st, main)))
+                        events += st["events"]
+                        explicit += st["compactions"]
                 except OSError:
                     read_errors += 1
             kids = []
@@ -892,16 +1052,19 @@ def board(root, sessions, window="24h", now=None, families=None, start=None, end
                 if not entry.get("path"):
                     unreadable += 1
                     continue
+                kind = entry.get("kind") or "subagent"
                 try:
-                    st = read(entry["path"], cards, cards_rev)
+                    with _LOCK:
+                        st = read(entry["path"], cards, cards_rev)
+                        kid = [dict(row, agent=cid, kind=kind, wf=entry.get("workflow")) for row in st["responses"]]
+                        snap = _snapshot(st, kid)
+                        events += [dict(ev, agent=cid) for ev in st["events"]]
                 except OSError:
                     read_errors += 1
                     continue
-                kind = entry.get("kind") or "subagent"
                 kinds[cid] = kind
-                threads.append((cid, st))
-                kids.append([dict(row, agent=cid, kind=kind, wf=entry.get("workflow")) for row in st["responses"]])
-                events += [dict(ev, agent=cid) for ev in st["events"]]
+                threads.append((cid, snap))
+                kids.append(kid)
             for row in main:
                 if row["side"]:
                     row["kind"] = "subagent"
@@ -1063,7 +1226,7 @@ def board(root, sessions, window="24h", now=None, families=None, start=None, end
                     priced = [r["cost"] for r in kid if r["cost"] is not None and r["cost"] >= 0]
                     usage[kid[0]["agent"]] = {"tokens": sum(_tokens(r) for r in kid), "responses": len(kid),
                                               "cost": sum(priced) if priced else None}
-            links = fanout.child_links(root, conn, x["sid"])
+            links = _child_links(root, conn, x["sid"])
             x["child_links"] = links
             runs = []
             for name, path in sorted(fanout.run_files(root, conn, x["sid"]).items()):

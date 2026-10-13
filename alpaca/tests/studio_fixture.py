@@ -17,9 +17,10 @@ stamp the record writes, every transcript time and every file time sits at a cho
     auth            the fixture's own web login, user:code (fictional; the server reads it as files-auth)
     workspaces.json the host registry the fixture server reads (ALPACA_WORKSPACES): this project and
                     one fictional neighbour on a closed port
-    stubs/          system.json (host load) and vcs.json (git view), the two host-derived reads the
-                    capture answers from files (the vcs stub is gitview.snapshot of the fixture's own
-                    git history, with the fixture path replaced)
+    stubs/          system.json (host load), vcs.json (git view) and vitals.json (the connection
+                    label and the health bar), the host-derived reads the capture answers from files
+                    (the vcs stub is gitview.snapshot of the fixture's own git history, with the
+                    fixture path replaced)
     home/, claude/  HOME and CLAUDE_CONFIG_DIR for the fixture server and any CLI run on the fixture
     env.json        the environment a fixture server needs (paths above), for studio_shots.py
 
@@ -503,22 +504,22 @@ def _stubs(root, E, fixed_clock, clock):
     text = json.dumps(snap, indent=1, sort_keys=True).replace(real, FAKE_ROOT).replace(root, FAKE_ROOT)
     with open(os.path.join(root, ".studio-fixture", "stubs", "vcs.json"), "w", encoding="utf-8") as fh:
         fh.write(text + "\n")
-    # The connection label reads /health.json; the stub reports a fresh page and full capture, so the
-    # label is "Live" whichever of the first route and the first health read lands last.
-    health = {"state": "fresh", "detail": "analytics fold and status board match current inputs",
-              "checked_at": E, "refreshed_at": E, "status": "ok", "status_scope": "projection_and_collection",
-              "acceptance": {"status": "unavailable", "checked_at": _iso(E)},
-              "transport": {"status": "live", "started_at": E},
-              "projection": {"state": "fresh", "detail": "analytics fold and status board match current inputs",
-                             "checked_at": E, "refreshed_at": E},
-              "observability": {"status": "ok", "collector": {"status": "running", "age_seconds": 4, "liveness": "alive"},
-                                "sources": [], "backlog": {"bytes": 0, "preservation_jobs": 0, "observations": 0},
-                                "consumers": [], "issues": [],
-                                "coverage": {"expected": 3, "registered": 3, "readable": 3, "missing_children": [],
-                                             "unknown_children": [], "complete": True, "basis": "fixture"}},
-              "server": {"failures": {}, "since": E, "scope": "current_process", "persistent_log": "supervisor_stderr"}}
-    with open(os.path.join(root, ".studio-fixture", "stubs", "health.json"), "w", encoding="utf-8") as fh:
-        json.dump(health, fh, indent=1)
+    # The connection label and the health bar under Arthur read /hub/vitals.json (t-590). The stub
+    # reports a fresh page and full capture, so the label is "Live" whichever of the first route and
+    # the first vitals read lands last. The score comes from alpaca/healthscore.py on those facts: its
+    # hub speed times real requests, host state like the CPU load, so the live answer would differ
+    # between two captures.
+    from alpaca import healthscore
+    capture = {"status": "ok", "collector": {"status": "fresh", "age_seconds": 4, "liveness": "alive"},
+               "backlog": {"bytes": 0, "preservation_jobs": 0, "observations": 0},
+               "coverage": {"expected": 3, "registered": 3, "readable": 3, "missing_children": 0,
+                            "unknown_children": 0, "complete": True}, "issues": {"open": 0}}
+    projection = {"state": "fresh", "detail": "analytics fold and status board match current inputs",
+                  "checked_at": E, "refreshed_at": E}
+    score = healthscore.score({"page": projection, "speed": [], "collector": capture["collector"], "backlog": 0,
+                               "issues": [], "issues_open": 0, "failures": {}, "missing_children": 0}, E)
+    with open(os.path.join(root, ".studio-fixture", "stubs", "vitals.json"), "w", encoding="utf-8") as fh:
+        json.dump({"projection": projection, "observability": capture, "score": score}, fh, indent=1)
     gib = 1024 ** 3
     system = {
         "ts": _iso(E), "host": "atlas-build-01", "uptime_s": 9 * 86400 + 4 * 3600, "sample_s": 0.5,

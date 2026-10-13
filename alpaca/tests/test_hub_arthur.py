@@ -272,6 +272,17 @@ def png_size(path):
     return int.from_bytes(head[16:20], "big"), int.from_bytes(head[20:24], "big")
 
 
+def webp_size(path):
+    """(width, height) of a lossless WebP (the gaze atlas ships as one, t-595) read from its header."""
+    head = path.read_bytes()[:32]
+    assert head[:4] == b"RIFF" and head[8:12] == b"WEBP", path
+    if head[12:16] == b"VP8X":
+        return int.from_bytes(head[24:27], "little") + 1, int.from_bytes(head[27:30], "little") + 1
+    assert head[12:16] == b"VP8L" and head[20] == 0x2F, path
+    bits = int.from_bytes(head[21:25], "little")
+    return (bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1
+
+
 def test_the_record_signals_of_package_2(record, monkeypatch):
     from alpaca import hub
     root, conn = record
@@ -425,7 +436,7 @@ def test_vendored_package_2_runtime_and_manifest():
     # brief 2f: the package's manifest ships as it is; its new actions still name the full-size sheets
     raw = manifest(raw=True)["actions"]
     assert all(raw[name]["image"].startswith("new-sheets/") and "frameRects" in raw[name] for name in NEW_ACTIONS)
-    assert "manifest: stripsManifest(window.ArthurAssets)" in (WEB / "arthur.js").read_text(encoding="utf-8")
+    assert "manifest: stripsManifest(window.ArthurAssets," in (WEB / "arthur.js").read_text(encoding="utf-8")
     m = manifest()
     actions = m["actions"]
     assert len(actions) == 32 and set(NEW_ACTIONS) <= set(actions)
@@ -437,7 +448,7 @@ def test_vendored_package_2_runtime_and_manifest():
         if name in NEW_ACTIONS:
             assert action["frames"] == [0, 1, 2, 3, 4, 5] and action["label"] and action["trigger"], name
         assert not {"frameRects", "sourceSize", "destinationRect"} & set(action), name
-    assert png_size(VENDOR / "assets" / m["atlas"]["image"]) == (m["atlas"]["width"], m["atlas"]["height"])
+    assert webp_size(VENDOR / "assets" / m["atlas"]["image"]) == (m["atlas"]["width"], m["atlas"]["height"])
     # each new action keeps the package's timing and loop flag
     assert actions["checklist"]["durationsMs"] == [200, 180, 180, 180, 180, 320] and actions["checklist"]["loop"] is False
     assert actions["telescope"]["loop"] is True and actions["sleeping"]["loop"] is False
@@ -488,7 +499,10 @@ def test_every_arthur_asset_is_served_and_revalidates(project):
         for name in names:
             status, headers, body = get(name)
             assert status == 200, name
+            # kept for a day only under a versioned URL (?v=); unversioned it revalidates (t-595)
             assert headers["Cache-Control"] == "no-cache", name
+            if not name.endswith(".css"):
+                assert get(name + "?v=x")[1]["Cache-Control"] == "max-age=86400", name
             assert headers["ETag"] == '"%s"' % hashlib.sha256((WEB / name).read_bytes()).hexdigest(), name
         status, headers, body = get(names[-1], headers["ETag"])
         assert status == 304 and body == b"" and headers["ETag"]
@@ -518,3 +532,164 @@ console.log(JSON.stringify(['Reconnecting','Offline','Stale','Preparing','Live -
     assert dict(got) == {"Reconnecting": True, "Offline": True, "Stale": False, "Preparing": False,
                          "Live - capture gaps": False, "Page error": False, "Status unknown": False,
                          "Live (no error)": False}
+
+
+def test_a_failed_quiet_refresh_neither_starts_nor_clears_the_offline_wait():
+    # brief L4, 2a: while the server is gone the health check writes "Offline" every 10 s and the 15 s refresh
+    # writes "Stale" in between; "Stale" must not clear the 30 s wait, or Arthur never goes offline on a timer page
+    got = node("""
+import {connectionStep} from './arthur.js';
+const row=(cls,label)=>({classList:{contains:c=>c===cls},querySelector:()=>({textContent:label})});
+console.log(JSON.stringify(['Reconnecting','Offline','Stale','Preparing','Live - capture gaps','Page error']
+  .map(l=>[l,connectionStep(row('error',l))]).concat([['Live',connectionStep(row('','Live'))]])));""")
+    assert dict(got) == {"Reconnecting": "start", "Offline": "start", "Stale": "hold", "Preparing": "clear",
+                         "Live - capture gaps": "clear", "Page error": "clear", "Live": "clear"}
+
+
+def test_avatar_loads_the_idle_strip_first_and_keeps_its_frame_while_another_loads():
+    # t-595: only the idle strip loads before the avatar is ready; a strip the player reaches loads on first
+    # use and the canvas keeps the frame it shows until that image decodes; the atlas waits for the cursor
+    got = node("""
+import {createRequire} from 'module';
+import {stripsManifest} from './arthur.js';
+const req = createRequire(import.meta.url), vendor = %s;
+const raw = req(vendor + '/assets/avatar-manifest.js');
+const Geometry = req(vendor + '/arthur-geometry.js');
+const m = stripsManifest(raw, 'abc');
+const wanted = [], pending = {}, draws = [];
+const sizeOf = src => { const image = new URL(src).pathname.replace('/assets/', '') + new URL(src).search;
+  const a = Object.values(m.actions).find(a => a.image === image);
+  return a ? Object.values(Geometry.sourceSize(a, m.width, m.height)) : [m.atlas.width, m.atlas.height]; };
+class Img {
+  set src(v) { wanted.push(v); [this.naturalWidth, this.naturalHeight] = sizeOf(v); this.href = v; pending[v] = () => this.onload(); }
+  removeAttribute() {}
+}
+const el = () => ({style: {}, setAttribute() {}, appendChild() {}, remove() {}, getBoundingClientRect: () => ({left: 0, top: 0, width: 1, height: 1}),
+  getContext: () => ({clearRect() {}, drawImage: image => draws.push(image.href)})});
+const target = {addEventListener() {}, removeEventListener() {}};
+const doc = {hidden: false, baseURI: 'http://x/', createElement: el, ...target, documentElement: target};
+const win = {Image: Img, matchMedia: () => ({matches: false, ...target}), ...target, requestAnimationFrame: () => 1, cancelAnimationFrame() {},
+  CustomEvent: class { constructor(name, o) { this.type = name; this.detail = o.detail; } }};
+doc.defaultView = win;
+globalThis.document = doc;
+globalThis.ArthurCore = req(vendor + '/arthur-core.js'); globalThis.ArthurGeometry = Geometry;
+const Avatar = req(vendor + '/arthur-avatar.js');
+const tick = () => new Promise(r => setTimeout(r, 0));
+const made = Avatar.create({ownerDocument: doc, appendChild() {}, dispatchEvent() {}}, {assetBaseURL: 'http://x/assets/', manifest: m});
+await tick();
+const out = {created: [...wanted]};
+pending[wanted[0]]();
+const avatar = await made;
+out.first = [...draws];
+avatar.setAction('greeting');
+await tick();
+out.asked = [...wanted];
+out.during = [...draws];
+pending[wanted[1]]();
+await tick();
+out.after = [...draws];
+avatar.setAction('greeting');
+await tick();
+out.again = [...wanted];
+console.log(JSON.stringify(out));
+""" % json.dumps(str(VENDOR)))
+    idle, greeting = "http://x/assets/strips/idle.png?v=abc", "http://x/assets/strips/greeting.png?v=abc"
+    assert got["created"] == [idle]
+    assert got["first"] == [idle]
+    assert got["asked"] == [idle, greeting]
+    assert got["during"] == [idle]
+    assert got["after"] == [idle, greeting]
+    assert got["again"] == [idle, greeting]
+
+
+def test_hub_page_versions_arthur_and_the_vendor_files_are_kept_for_a_day(project):
+    # t-595: the page links Arthur's scripts with a content version and carries it for the artwork
+    from alpaca import serve
+    page = serve.hub_page(str(project))
+    version = serve.arthur_version()
+    assert re.fullmatch(r"[0-9a-f]{12}", version)
+    assert '<meta name="arthur-version" content="%s">' % version in page
+    for name in ("assets/avatar-manifest.js", "arthur-core.js", "arthur-geometry.js", "arthur-avatar.js"):
+        assert 'src="/hub/assets/vendor/arthur/%s?v=%s"' % (name, version) in page, name
+
+
+def test_session_asks_are_the_recent_sessions_title_and_latest_ask(project):
+    # t-595: the cockpit's Parallel sessions panel reads this instead of the whole /data.json
+    from alpaca import serve
+    live = serve.Live(project)
+    sessions = [{"sid": "s%02d" % i, "title": "T%d" % i, "last": "2026-10-%02dT00:00:00+00:00" % (i % 28 + 1),
+                 "human_prompts": [{"ts": "a", "text": "first"}, {"ts": "b", "text": "x" * 900}], "tokens": {"input": 9}}
+                for i in range(60)]
+    live.data_json, live.data_rev = json.dumps({"sessions": sessions}), "r1"
+    body, etag = live.session_asks()
+    rows = json.loads(body)["sessions"]
+    assert len(rows) == serve.SESSION_ASKS
+    assert [r["sid"] for r in rows[:2]] == ["s27", "s55"]       # the newest first (two share the last day)
+    assert set(rows[0]) == {"sid", "title", "human_prompts"}
+    assert [a["ts"] for a in rows[0]["human_prompts"]] == ["b"] and len(rows[0]["human_prompts"][0]["text"]) == serve.SESSION_ASK_CHARS
+    assert len(body) < 40000
+    assert live.session_asks() == (body, etag)
+    live.data_json, live.data_rev = json.dumps({"sessions": sessions[:1]}), "r2"
+    assert len(json.loads(live.session_asks()[0])["sessions"]) == 1
+
+
+def test_fonts_and_thinking_orbs_are_versioned_where_hub_css_and_orb_js_name_them():
+    # t-595: a vendor file is kept for a day only under a content-versioned URL, so the stylesheet and the module
+    # that name it carry the version and a changed file has a new URL
+    import hashlib
+    from alpaca import serve
+    css = serve.vendor_links("hub.css", (WEB / "hub.css").read_bytes()).decode()
+    font = hashlib.sha256((WEB / "vendor" / "plex-sans.woff2").read_bytes()).hexdigest()[:12]
+    assert "url('/hub/assets/vendor/plex-sans.woff2?v=%s')" % font in css
+    assert not re.search(r"url\('[^']*woff2'\)", css)
+    orb = serve.vendor_links("orb.js", (WEB / "orb.js").read_bytes()).decode()
+    tag = hashlib.sha256((WEB / "vendor" / "thinking-orbs.js").read_bytes()).hexdigest()[:12]
+    assert "from './vendor/thinking-orbs.js?v=%s';" % tag in orb
+    assert serve.vendor_links("vendor/thinking-orbs.js", b"x") == b"x"
+
+
+def test_session_asks_always_include_the_live_sessions(project):
+    # t-595: a live session is never cut by the window, however old its last record is
+    from alpaca import serve
+    live = serve.Live(project)
+    sessions = [{"sid": "s%02d" % i, "title": "T%d" % i, "last": "2026-10-%02dT00:00:00+00:00" % (i % 28 + 1),
+                 "human_prompts": [{"ts": "b", "text": "ask %d" % i}]} for i in range(60)]
+    sessions.append({"sid": "quiet", "title": "Quiet", "last": "2020-01-01T00:00:00+00:00", "human_prompts": []})
+    live.data_json, live.data_rev = json.dumps({"sessions": sessions}), "r1"
+    live.board_json, live.board_rev = json.dumps({"pulse": {"now": {"sessions": {"work": [{"sid": "quiet"}]}}}}), "b1"
+    rows = json.loads(live.session_asks()[0])["sessions"]
+    assert len(rows) == serve.SESSION_ASKS + 1 and "quiet" in [r["sid"] for r in rows]
+
+
+def test_cockpit_reads_keep_only_what_the_panels_draw(project):
+    # t-595: slim reads of /board/data.json, /hub/mission.json and /hub/research.json for the cockpit
+    from alpaca import serve
+    live = serve.Live(project)
+    live.board_json = json.dumps({"pulse": {"now": {"sessions": {"work": [
+        {"sid": "a", "last_beat": "t", "last_tool": "Bash", "claims": ["t-1"], "lapsed": [], "turns": 5, "operator": "x", "beats": [1] * 99}]}}},
+        "messages": ["x"] * 50})
+    body = json.loads(live.live_work()[0])
+    work = body["pulse"]["now"]["sessions"]["work"]
+    assert set(work[0]) == {"sid", "active", "last_beat", "last_tool", "claims", "lapsed"} and "messages" not in body
+    full = {"title": "M", "groups": [{"id": "g", "title": "G", "state": "x", "extra": 1}], "edges": [{"a": 1}],
+            "nodes": [{"id": "n", "group": "g", "state": "ok", "purpose": "p" * 99, "tasks": [{"id": "t-1", "status": "done", "title": "long"}]}],
+            "development": {"tasks": [{"id": "t-1", "status": "done", "title": "long"}],
+                            "operations": [{"op": "o", "groups": [{"id": "g", "nodes": [{"id": "t-1", "evidence": "valid", "state": "done", "after": [1]}]}]}]}}
+    slim = serve.mission_compact(full)
+    assert slim["nodes"] == [{"id": "n", "group": "g", "state": "ok", "tasks": [{"id": "t-1", "status": "done"}]}]
+    assert slim["groups"] == [{"id": "g", "title": "G"}] and slim["title"] == "M"
+    assert slim["development"]["operations"][0]["groups"][0]["nodes"] == [{"id": "t-1", "evidence": "valid", "state": "done"}]
+    runs = [{"run": "r%d" % i, "state": "running" if i == 0 else "stopped"} for i in range(7)]
+    got = serve.research_compact({"runs": runs, "sources": [1]})
+    assert [r["run"] for r in got["runs"]] == ["r0", "r1", "r2", "r3"] and got["recorded"] == 7
+
+
+def test_the_gaze_atlas_holds_only_the_gaze_rows_and_the_manifest_follows():
+    # t-595: the shipped atlas is cut to the rows of the 16 gaze frames (decoding the full sheet stalled Chrome's
+    # main thread); stripsManifest moves the frames up by the cut, so each still points at its own pixels
+    raw, m = manifest(raw=True), manifest()
+    top = min(f["y"] for f in raw["gaze"]["frames"])
+    assert [f["y"] for f in m["gaze"]["frames"]] == [f["y"] - top for f in raw["gaze"]["frames"]]
+    assert m["atlas"]["height"] == max(f["y"] + f["height"] for f in m["gaze"]["frames"]) < raw["atlas"]["height"]
+    assert webp_size(VENDOR / "assets" / m["atlas"]["image"]) == (m["atlas"]["width"], m["atlas"]["height"])
+    assert all(f["y"] >= 0 and f["x"] + f["width"] <= m["atlas"]["width"] for f in m["gaze"]["frames"])

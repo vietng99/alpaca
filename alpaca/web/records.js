@@ -1,6 +1,7 @@
 // Records: the project's official records and its wiki, read-only. Data:
 // /hub/records.json (alpaca/hub.py records: operations, decisions, sealed proofs), and on the Wiki
-// tab /hub/wiki-status.json and /hub/wiki-briefing.json (alpaca/hub.py wiki_status, wiki_briefing).
+// tab /hub/wiki-status.json and /hub/wiki-briefing.json (alpaca/hub.py wiki_status, wiki_briefing), and
+// with the vault open /hub/graph.json (alpaca/hub.py evidence_graph, drawn by evgraph.js).
 // Nothing here writes: every link opens an existing reader (the task record, the Library reader, the
 // finished operation on the Roadmap). All dynamic text is escaped; colors come from theme.css.
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -70,7 +71,10 @@ function briefing(b, subject, c) {
   const marker = lines.shift() || '';
   const gapAt = lines.findIndex(l => l.startsWith('Gaps:'));
   const items = gapAt < 0 ? lines : lines.slice(0, gapAt), gaps = gapAt < 0 ? [] : lines.slice(gapAt);
-  return `<section class="panel rec-panel"><div class="panel-head"><div><h2>Briefing: ${esc(subject)}</h2><p>${esc(marker)}</p></div><span class="row-sub">${num(b.items)} sourced items${b.truncated ? ', cut to fit' : ''}</span></div>
+  // the briefing is kept between reads: say when its inputs were read, and that a newer one is being built
+  const asOf = b.built_at ? new Date(b.built_at * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : '';
+  const note = (asOf ? ', as of ' + asOf : '') + (b.refreshing ? ', refreshing' : '');
+  return `<section class="panel rec-panel"><div class="panel-head"><div><h2>Briefing: ${esc(subject)}</h2><p>${esc(marker)}</p></div><span class="row-sub">${num(b.items)} sourced items${b.truncated ? ', cut to fit' : ''}${esc(note)}</span></div>
     <div class="panel-body"><ul class="rec-brief">${items.map(l => `<li>${esc(l.replace(/^- /, ''))}</li>`).join('')}</ul>${gaps.length ? `<p class="rec-gaps">${esc(gaps.join(' '))}</p>` : ''}</div></section>`;
 }
 
@@ -79,9 +83,23 @@ function briefing(b, subject, c) {
 export function renderRecords(c) {
   const {section, data} = c;
   if (section === 'wiki') {
+    // Search mode reads one briefing; Open vault shows everything as the evidence graph (evgraph.js,
+    // mounted into #evidence-graph by the hub once this markup is on the page).
+    if (c.vault) {
+      const g = c.graph;
+      const body = !g ? '' : g.error ? `<div class="notice"><div><h3>The vault could not be read</h3><p>${esc(g.error)}</p></div></div>`
+        : `${g.wiki && !g.wiki.available ? `<p class="route-hint">Wiki claims are not shown: ${esc(g.wiki.reason || 'the wiki is unavailable')}.</p>` : ''}<div class="rec-vault-stage"><div id="evidence-graph" class="eg-host"></div></div>`;
+      return tabs(section, data && data.counts, c.href) +
+        `<div class="toolbar"><p class="row-sub">Every operation, task, sealed proof, the evidence it cites, decision and wiki claim. Pulses run from operations (left) toward the wiki (right).</p><a class="button rec-vault-switch" href="${esc(c.href('records', {section: 'wiki'}))}">Close vault</a></div>` + body;
+    }
+    // Search mode: the briefing search, the wiki's summary, and right below it the vault seal (t-602):
+    // ventry.js plays the seal in this box and opens the vault when its dial is pressed; the card inside
+    // is the plain way in (reduced motion, no script, keyboard)
+    const vaultHref = c.href('records', {section: 'wiki', vault: 'open'});
+    const door = `<div class="rec-seal" data-href="${esc(vaultHref)}"><a class="rec-door rec-vault-switch" href="${esc(vaultHref)}"><span class="rec-door-wheel" aria-hidden="true"></span><span class="rec-door-text"><strong class="rec-door-title">Open vault</strong><span>Every operation, task, decision, sealed proof, piece of evidence and wiki claim in one graph: 15 colour-coded columns, or the whole record as a 3D brain.</span></span><span class="rec-door-go" aria-hidden="true">&rarr;</span></a></div>`;
     return tabs(section, data && data.counts, c.href) +
       `<div class="toolbar">${c.search('Briefing for op-12 or t-345', c.subject || '', 'subject')}</div>` +
-      wikiStatus(c.wiki, c) + briefing(c.brief, c.subject, c);
+      wikiStatus(c.wiki, c) + door + briefing(c.brief, c.subject, c);
   }
   const body = section === 'decisions' ? decisions(data.items, c) : section === 'proofs' ? proofs(data.items, c) : operations(data.items, c);
   const more = data.next_offset != null ? `<p class="route-hint">Showing ${num(data.items.length)} of ${num(data.total)}. Search to narrow the list.</p>` : '';

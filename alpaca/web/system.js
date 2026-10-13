@@ -183,7 +183,7 @@ function inner() {
 
 export function systemPanel() {
   injectStyle();
-  return `<section class="panel visual-panel" id="sys-panel" aria-live="off">${inner()}</section>`;
+  return `<section class="panel visual-panel" id="sys-panel" aria-live="off" data-key="sys-panel" data-morph-keep>${inner()}</section>`;
 }
 
 function paint() {

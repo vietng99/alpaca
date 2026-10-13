@@ -9,7 +9,7 @@ import uuid
 from alpaca import cli
 from .config import load_config
 from .build import build_release
-from .receipts import BuildReceipt, CheckReceipt, PublishReceipt, load_receipt, record_receipt
+from .receipts import BuildReceipt, CheckReceipt, PublishReceipt, TagReceipt, load_receipt, record_receipt
 
 AGENT_MARKERS = ('CLAUDECODE', 'CLAUDE_CODE_SESSION_ID', 'CODEX_THREAD_ID', 'CODEX_SANDBOX')
 
@@ -71,6 +71,23 @@ def command(args):
                               'report': receipt.report, 'pr_url': receipt.pr_url,
                               'error': receipt.error}))
             return 0 if receipt.status in ('PASS', 'DRY_RUN') else 2
+        if args.release_verb == 'tag':
+            from .tag import tag_release
+            published = load_receipt(root, args.receipt, PublishReceipt)
+            expect = None
+            if args.execute:
+                if not args.expect:
+                    raise ValueError('--execute needs --expect DRY_RUN_RECEIPT from a reviewed dry run')
+                reviewed = load_receipt(root, args.expect, TagReceipt)
+                if reviewed.status != 'DRY_RUN' or reviewed.publish.get('attempt') != published.attempt:
+                    raise ValueError('--expect must be a dry-run tag receipt for this publish receipt')
+                expect = reviewed.plan
+            receipt = tag_release(root, config, published, args.version, args.notes, dry_run=not args.execute,
+                                  expect=expect, latest=not args.not_latest)
+            path = record_receipt(root, args.session or 'cli', receipt)
+            print(json.dumps({'receipt': str(path), 'status': receipt.status, 'plan': receipt.plan,
+                              'release_url': receipt.release_url, 'error': receipt.error}))
+            return 0 if receipt.status in ('PASS', 'DRY_RUN') else 2
         return 64
     except (ValueError, OSError, subprocess.SubprocessError) as exc:
         print(json.dumps({'status': 'BLOCKED', 'error': str(exc)}))
@@ -98,6 +115,15 @@ def parser(sub):
     mode.add_argument('--execute', action='store_true', help='push sync branch and create or update its PR')
     mode.add_argument('--dry-run', action='store_true', help='write a report without remote changes (default)')
     publish.add_argument('--expect', help='the reviewed dry-run publish receipt; required with --execute')
+    tag = verbs.add_parser('tag', help='after the owner merges the sync PR, tag it vX.Y.Z and create its release page')
+    tag.add_argument('receipt', help='recorded executed publish receipt path')
+    tag.add_argument('--version', required=True, help='the released X.Y.Z; must match VERSION in the merged tree')
+    tag.add_argument('--notes', required=True, help='Markdown file with the release notes')
+    tag.add_argument('--not-latest', action='store_true', help='do not mark this release as the latest')
+    tag_mode = tag.add_mutually_exclusive_group()
+    tag_mode.add_argument('--execute', action='store_true', help='create the tag and the release page')
+    tag_mode.add_argument('--dry-run', action='store_true', help='check and record the plan without remote changes (default)')
+    tag.add_argument('--expect', help='the reviewed dry-run tag receipt; required with --execute')
 
 
 cli.register_parser('release', parser)

@@ -13,9 +13,10 @@
 //     frame and the rings and beams stand still; any CSS animation or transition still running is then
 //     finished (finite) or paused at its start (infinite) before the shot;
 //   - randomness: Math.random is a seeded generator (the sign-in globe's stars, relay glyphs);
-//   - host state: /hub/system.json (live CPU and memory), /hub/vcs.json (git) and /health.json (the
-//     connection label, whose first paint otherwise races the first route) are answered from the
-//     fixture's stub files over the DevTools Fetch domain; everything else is the real server.
+//   - host state: /hub/system.json (live CPU and memory), /hub/vcs.json (git) and /hub/vitals.json (the
+//     connection label, whose first paint otherwise races the first route, and the health bar, whose hub
+//     speed times real requests) are answered from the fixture's stub files over the DevTools Fetch
+//     domain; everything else is the real server.
 // A view is shot once it is ready (its own condition), no request has been in flight for 600 ms, the
 // fonts are loaded and two shots 250 ms apart are byte-identical. Masked areas (MASKS) are recorded per
 // image; compare.mjs skips them.
@@ -58,6 +59,7 @@ export const VIEWS = [
   ['records-decisions', '/hub/#records?section=decisions', HUB_READY + ` && !!document.querySelector('.rec-decision, #main .empty')`],
   ['records-proofs', '/hub/#records?section=proofs', HUB_READY + ` && !!document.querySelector('.rec-table, #main .empty')`],
   ['records-wiki', '/hub/#records?section=wiki&op=op-001', HUB_READY + ` && !!document.querySelector('.rec-panel, #main .notice')`],
+  ['records-vault', '/hub/#records?section=wiki&vault=open&item=op-001', HUB_READY + ` && !!document.querySelector('#evidence-graph canvas') && !!document.querySelector('.eg-facts')`],
   ['sessions', '/hub/#sessions', HUB_READY + ` && !!document.querySelector('#analytics-index tbody tr')`],
   ['sessions-range', '/hub/#sessions?from=2026-03-16&to=2026-03-17', HUB_READY + ` && !!document.querySelector('#analytics-index')`],
   ['vcs', '/hub/#vcs', HUB_READY],
@@ -65,7 +67,7 @@ export const VIEWS = [
 // Areas left out of the comparison: the version label (it names the release number, which a release
 // bump changes without any change to the look).
 export const MASKS = ['#alpaca-version'];
-const STUBS = {'/hub/system.json': 'system.json', '/hub/vcs.json': 'vcs.json', '/health.json': 'health.json'};
+const STUBS = {'/hub/system.json': 'system.json', '/hub/vcs.json': 'vcs.json', '/hub/vitals.json': 'vitals.json'};
 
 const only = arg('views') ? arg('views').split(',') : null;
 const themes = (arg('themes') || 'light,dark').split(',');

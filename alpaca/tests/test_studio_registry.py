@@ -19,8 +19,8 @@ WEB = Path(__file__).resolve().parents[1] / "web"
 REGISTRY = json.loads((WEB / "pages.json").read_text(encoding="utf-8"))
 # hub.html:8-21 before the registry: the cascade order a stylesheet must keep
 LINKS_BEFORE = ["hub.css", "analytics.css", "burn.css", "inflight.css", "vcs.css", "cockpit.css", "roadmap.css",
-                "mission.css", "runlog.css", "live.css", "research.css", "records.css", "beam.css",
-                "vendor/arthur/arthur-avatar.css", "theme.css"]
+                "mission.css", "runlog.css", "live.css", "research.css", "records.css", "evgraph.css", "ventry.css",
+                "beam.css", "tips.css", "vendor/arthur/arthur-avatar.css", "theme.css"]
 # license and provenance notes kept next to the vendored files, never served
 NOTES = {"vendor/README.md", "vendor/OFL.txt", "vendor/world-atlas-LICENSE.txt"}
 # the pages themselves: the Studio at /hub/ (serve.hub_page), the sign-in page and the workspace hub at

@@ -569,6 +569,35 @@ def run_once(root, *, max_records=1000, consumers=True, source_batch=200, event_
                     warm=False)
 
 
+def _collector(conn, now):
+    collector = json.loads(db.meta_get(conn,'obs:collector','{}'))
+    age = max(0,(_time(now)-_time(collector['heartbeat'])).total_seconds()) if collector.get('heartbeat') else None
+    collector.update(age_seconds=age,status='fresh' if age is not None and age<120 else 'stale' if age is not None else 'unknown')
+    # Heartbeat freshness is not process liveness. kill(0) alone risks PID reuse;
+    # supervision owns liveness, this record reports only observed collection activity.
+    collector['liveness'] = 'unknown'
+    if collector.get('mode')=='watch' and collector.get('process_identity'):
+        collector['liveness'] = 'alive' if _process_identity(collector.get('pid'))==collector['process_identity'] else 'stopped'
+    return collector
+
+
+def _consumer_lag(conn):
+    consumers = [dict(r) for r in conn.execute('SELECT * FROM obs_consumer_checkpoint')] if _table(conn,'obs_consumer_checkpoint') else []
+    head = conn.execute('SELECT COALESCE(MAX(id),0) FROM events').fetchone()[0]
+    for consumer in consumers:
+        consumer['event_lag'] = max(0,head-consumer['event_id']) if consumer['consumer']!='source-snapshot-requests' else None
+    observation_head = conn.execute('SELECT COALESCE(MAX(id),0) FROM obs_observation').fetchone()[0] if _table(conn,'obs_observation') else 0
+    acknowledged = next((c['observation_id'] for c in consumers if c['consumer']=='source-snapshot-requests'),0)
+    observation_lag = max(0,observation_head-acknowledged)
+    pending = conn.execute("SELECT COUNT(*) FROM obs_projection_job WHERE status!='done'").fetchone()[0] if _table(conn,'obs_projection_job') else 0
+    consumer_lag = pending or observation_lag or any(c.get('event_lag') or c.get('failures') for c in consumers)
+    return consumers, {'preservation_jobs':pending,'observations':observation_lag}, consumer_lag
+
+
+def _overall(collector, issues, backlog, consumers, consumer_lag, complete):
+    return 'ok' if collector['status']=='fresh' and not issues and not backlog and consumers and not consumer_lag and complete else 'degraded'
+
+
 def status(root, now=None):
     conn = db.connect_readonly(root)
     try:
@@ -585,25 +614,51 @@ def status(root, now=None):
                 size = None
             source['backlog_bytes'] = max(0,size-cursor.get('byte_offset',0)) if size is not None else None
             backlog += source['backlog_bytes'] or 0
-        collector = json.loads(db.meta_get(conn,'obs:collector','{}'))
-        age = max(0,(_time(now)-_time(collector['heartbeat'])).total_seconds()) if collector.get('heartbeat') else None
-        collector.update(age_seconds=age,status='fresh' if age is not None and age<120 else 'stale' if age is not None else 'unknown')
-        # Heartbeat freshness is not process liveness. kill(0) alone risks PID reuse;
-        # supervision owns liveness, this record reports only observed collection activity.
-        collector['liveness'] = 'unknown'
-        if collector.get('mode')=='watch' and collector.get('process_identity'):
-            collector['liveness'] = 'alive' if _process_identity(collector.get('pid'))==collector['process_identity'] else 'stopped'
+        collector = _collector(conn, now)
         issues = [dict(r) for r in conn.execute('SELECT * FROM obs_issue WHERE resolved_at IS NULL ORDER BY last_seen DESC LIMIT 100')] if _table(conn,'obs_issue') else []
-        consumers = [dict(r) for r in conn.execute('SELECT * FROM obs_consumer_checkpoint')] if _table(conn,'obs_consumer_checkpoint') else []
-        head = conn.execute('SELECT COALESCE(MAX(id),0) FROM events').fetchone()[0]
-        for consumer in consumers:
-            consumer['event_lag'] = max(0,head-consumer['event_id']) if consumer['consumer']!='source-snapshot-requests' else None
-        observation_head = conn.execute('SELECT COALESCE(MAX(id),0) FROM obs_observation').fetchone()[0] if _table(conn,'obs_observation') else 0
-        acknowledged = next((c['observation_id'] for c in consumers if c['consumer']=='source-snapshot-requests'),0)
-        observation_lag = max(0,observation_head-acknowledged)
-        pending = conn.execute("SELECT COUNT(*) FROM obs_projection_job WHERE status!='done'").fetchone()[0] if _table(conn,'obs_projection_job') else 0
-        consumer_lag = pending or observation_lag or any(c.get('event_lag') or c.get('failures') for c in consumers)
-        return {'status':'ok' if collector['status']=='fresh' and not issues and not backlog and consumers and not consumer_lag and cov['complete'] else 'degraded',
-                'collector':collector,'sources':sources,'backlog':{'bytes':backlog,'preservation_jobs':pending,'observations':observation_lag},'consumers':consumers,'issues':issues,'coverage':cov}
+        consumers, lag, consumer_lag = _consumer_lag(conn)
+        return {'status':_overall(collector, issues, backlog, consumers, consumer_lag, cov['complete']),
+                'collector':collector,'sources':sources,'backlog':{'bytes':backlog,**lag},'consumers':consumers,'issues':issues,'coverage':cov}
+    finally:
+        conn.close()
+
+
+def summary(root, now=None):
+    """status() in counts, not lists (t-590): the hub polls it every 10 s, and on a busy record the
+    per-source list is thousands of rows. One stat per source answers both readability and backlog;
+    the open issues come as their count and the last_seen of the newest 100 (status keeps 100)."""
+    conn = db.connect_readonly(root)
+    try:
+        expected = registered = readable = backlog = 0
+        missing, unknown = set(), set()
+        if _table(conn, 'obs_source'):
+            offsets = dict(conn.execute('SELECT source_id, byte_offset FROM obs_cursor').fetchall()) if _table(conn,'obs_cursor') else {}
+            for source_id, session, parent, locator, required, closed, capabilities in conn.execute(
+                    'SELECT source_id, session, parent_session, locator, required, closed, capabilities FROM obs_source'):
+                try:
+                    info = os.stat(locator) if locator else None
+                except OSError:
+                    info = None
+                if info is not None:
+                    backlog += max(0, info.st_size-offsets.get(source_id, 0))
+                if not required:
+                    continue
+                expected += 1
+                registered += bool(locator)
+                ok = info is not None and stat.S_ISREG(info.st_mode) and os.access(locator, os.R_OK)
+                readable += ok
+                if parent and not ok:
+                    missing.add(session)
+                if not closed or not json.loads(capabilities).get('child_inventory_complete', False):
+                    unknown.add(session)
+        complete = bool(expected) and readable == expected and not unknown
+        collector = _collector(conn, now)
+        seen = [r[0] for r in conn.execute('SELECT last_seen FROM obs_issue WHERE resolved_at IS NULL ORDER BY last_seen DESC LIMIT 100')] if _table(conn,'obs_issue') else []
+        consumers, lag, consumer_lag = _consumer_lag(conn)
+        return {'status':_overall(collector, seen, backlog, consumers, consumer_lag, complete),
+                'collector':collector,'backlog':{'bytes':backlog,**lag},
+                'issues':{'open':conn.execute('SELECT COUNT(*) FROM obs_issue WHERE resolved_at IS NULL').fetchone()[0] if seen else 0,'last_seen':seen},
+                'coverage':{'expected':expected,'registered':registered,'readable':readable,'missing_children':len(missing),
+                            'unknown_children':len(unknown),'complete':complete}}
     finally:
         conn.close()

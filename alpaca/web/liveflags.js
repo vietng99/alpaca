@@ -30,11 +30,37 @@ export function autoRefresh(route,dirty,params={}){if(route==='sessions'&&params
 export function createDirty(){const dirty=Object.fromEntries(FLAGS.map(flag=>[flag,false])),gen=Object.fromEntries(FLAGS.map(flag=>[flag,0]));return {dirty,mark(flags){for(const flag of flags){dirty[flag]=true;gen[flag]=(gen[flag]||0)+1;}},seen(flag){return gen[flag]||0;},settle(flag,seen){if((gen[flag]||0)===seen)dirty[flag]=false;}};}
 
 // Transport, page freshness and capture coverage must remain distinguishable.
+// Poll delay while the analytics index refreshes: 2 s, doubling per consecutive poll, capped at 30 s.
+export function refreshDelay(tries){return Math.min(30000,2000*2**Math.min(Math.max(tries,0),4));}
+// The token board comes back flagged "refreshing" while the server rebuilds it. poll is {tries, stamp}: the
+// build time of the last board drawn. Returns whether to draw it (a flagged board is drawn only when its
+// build time moved), how long to wait before asking again (null once it is not flagged) and the next poll.
+export function burnPoll(data,poll){
+  const stamp=data&&data.generated||'',refreshing=!!(data&&data.refreshing);
+  return {draw:!(refreshing&&poll.stamp===stamp),delay:refreshing?refreshDelay(poll.tries):null,
+    poll:{tries:refreshing?poll.tries+1:0,stamp}};
+}
 export function connectionHealth(h) {
   const page=h.projection?.state||'unknown',capture=h.observability||{};
   const gaps=capture.status!=='ok';
   const label=page==='fresh'?(gaps?'Live - capture gaps':'Live'):({stale:'Stale',starting:'Preparing',error:'Page error'}[page]||'Status unknown');
-  const missing=capture.coverage?.missing_children?.length||0;
+  // /hub/vitals.json counts the missing child sources; /health.json lists them (t-590).
+  const gap=capture.coverage?.missing_children,missing=Array.isArray(gap)?gap.length:(gap||0);
   const backlog=capture.backlog?.bytes;
   return {label,error:page!=='fresh'||gaps,title:`Page ${page}; capture ${capture.status||'unavailable'}; collector ${capture.collector?.status||'unknown'}${backlog==null?'':'; '+Intl.NumberFormat().format(backlog)+' bytes pending'}${missing?'; '+missing+' missing child sources':''}`};
+}
+// The health bar under Arthur (t-590): the label, fill width, band, screen reader text and tooltip for
+// the score in /hub/vitals.json (alpaca/healthscore.py). The tooltip names every lost point, one line
+// per loss with its reason, then what is counted but not scored. A failed poll keeps the last score
+// and says since when (opts.since, epoch ms); a 404 (opts.old) is a server older than the score.
+const hhmm=ms=>{const d=new Date(ms);return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');};
+export function healthMeter(s,opts={}){
+  if(!s||typeof s.value!=='number'){const why=opts.old?'this server has no health score yet (older version)':'the server did not answer';
+    return {value:0,text:'Health --/1000',width:'0%',band:'unknown',stale:false,valuetext:'Health unknown: '+why,title:'Health unknown: '+why};}
+  const max=s.max||1000,value=Math.max(0,Math.min(max,Math.round(s.value))),band=s.band||'unknown';
+  const lost=(s.parts||[]).flatMap(p=>p.losses?p.losses.map(l=>`-${l.points} ${p.label}: ${l.reason}`)
+    :p.points<p.max?[`-${p.max-p.points} ${p.label}: ${(p.reasons||[]).join('; ')}`]:[]);
+  const old=opts.since?`, not updated since ${hhmm(opts.since)}`:'';
+  return {value,text:`Health ${value}/${max}`,width:`${value/max*100}%`,band,stale:!!opts.since,valuetext:`${value} of ${max}, ${band}${old}`,
+    title:[`Health ${value}/${max} (${band}${old})`,...(lost.length?lost:['No points lost']),...(s.notes||[]).map(n=>'Not scored: '+n)].join('\n')};
 }

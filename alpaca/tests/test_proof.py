@@ -527,6 +527,148 @@ def test_done_refuses_when_the_evidence_and_its_kept_copy_are_both_gone(project,
     assert db.rows(conn, "tasks", "id=?", ("t-001",))[0]["status"] != "done"
 
 
+def test_cached_done_gate_reuses_an_unchanged_task_and_catches_a_changed_file(project, monkeypatch):
+    """t-578: the cached gate does not hash a task whose seal, events and files are as they were,
+    and runs the whole gate again when the report or an evidence file changes, even when the
+    rewrite keeps the size and restores the mtime."""
+    conn = _setup(project)
+    ptr = proofkit.seal_for(project, "t-001")
+    proof._GATE_CACHE.clear()
+    calls = []
+    real = proof.done_gate
+    monkeypatch.setattr(proof, "done_gate", lambda *a, **k: calls.append(1) or real(*a, **k))
+    seals, refs = proof.seal_index(conn), proof.event_refs(conn)
+    assert proof.done_gate_cached(conn, project, "t-001", ptr, seals, refs) == (True, [])
+    assert proof.done_gate_cached(conn, project, "t-001", ptr, seals, refs) == (True, [])
+    assert len(calls) == 1
+    report = _report(project)
+    before = os.stat(report)
+    with open(report, "r+b") as fh:                    # same size, mtime put back
+        first = fh.read(1)
+        fh.seek(0)
+        fh.write(b"X" if first != b"X" else b"Y")
+    os.utime(report, ns=(before.st_atime_ns, before.st_mtime_ns))
+    ok, problems = proof.done_gate_cached(conn, project, "t-001", ptr, seals, refs)
+    assert not ok and any("changed since it was sealed" in p for p in problems), problems
+    assert len(calls) == 2
+
+
+def test_cached_done_gate_catches_changed_evidence_and_new_events(project, monkeypatch):
+    conn = _setup(project)
+    ptr = proofkit.seal_for(project, "t-001")
+    proof._GATE_CACHE.clear()
+    seals, refs = proof.seal_index(conn), proof.event_refs(conn)
+    assert proof.done_gate_cached(conn, project, "t-001", ptr, seals, refs)[0]
+    util.write_text(proofkit.evidence_path(project, "t-001"), "a different run entirely\n")
+    util.write_text(proofkit.kept_path(project, "t-001"), "a different run entirely\n")
+    ok, problems = proof.done_gate_cached(conn, project, "t-001", ptr, seals, refs)
+    assert not ok and any("was altered" in p for p in problems), problems
+    # an event appended about the task ends the remembered answer even with every file as it was
+    proof._GATE_CACHE.clear()
+    os.remove(proofkit.evidence_path(project, "t-001"))
+    os.remove(proofkit.kept_path(project, "t-001"))
+    assert not proof.done_gate_cached(conn, project, "t-001", ptr, seals, refs)[0]
+    calls = []
+    real = proof.done_gate
+    monkeypatch.setattr(proof, "done_gate", lambda *a, **k: calls.append(1) or real(*a, **k))
+    db.append_event(conn, session="s", actor="a", kind="note", ref="t-001", data={})
+    proof.done_gate_cached(conn, project, "t-001", ptr, seals, proof.event_refs(conn))
+    assert calls == [1]
+
+
+def _cached_and_fresh(conn, project, ptr, ident="t-001"):
+    seals, refs = proof.seal_index(conn), proof.event_refs(conn)
+    cached = proof.done_gate_cached(conn, project, ident, ptr, seals, refs)
+    fresh = proof.done_gate(conn, project, ident, ptr, seals)
+    return cached, fresh
+
+
+def _rewrite_same_size(path, new_first=b"Z"):
+    with open(path, "r+b") as fh:
+        fh.write(new_first)
+
+
+def test_cached_gate_follows_a_symlinked_evidence_file(project):
+    """A `local:` evidence file that is a symlink inside the root seals fine (resolve_evidence
+    follows links inside the root) but is never kept (paths.open_checked opens with O_NOFOLLOW, so
+    keep_evidence records kept=None). An edit of the link's target must end the cached 'valid':
+    the stamp covers the target (stat) as well as the link (lstat)."""
+    conn = _setup(project)
+    real = os.path.join(project, "proofwork", "real.txt")
+    util.write_text(real, "run output for t-001\nexit 0\n")
+    link = os.path.join(project, "proofwork", "link.txt")
+    os.symlink("real.txt", link)
+    ptr = proofkit.seal_for(project, "t-001", conn=conn,
+                            evidence=["local:proofwork/link.txt - the run output"])
+    item = proof.latest_seal(conn, "t-001")["data"]["evidence"][0]
+    assert item.get("kept") is None, item          # no kept copy for a link
+    proof._GATE_CACHE.clear()
+    cached, fresh = _cached_and_fresh(conn, project, ptr)
+    assert cached[0] and fresh[0]
+    util.write_text(real, "a forged run output\nexit 0\n")   # tamper the evidence after sealing
+    cached, fresh = _cached_and_fresh(conn, project, ptr)
+    assert not fresh[0], fresh                      # task move / proof check: invalid
+    assert cached == fresh, "STALE: cached %r, uncached %r" % (cached, fresh)
+
+
+def test_cached_gate_follows_a_report_swapped_for_a_link(project):
+    """Swap the sealed report for a symlink to an identical copy (the gate re-runs once, still
+    valid), then edit the copy. The edit must end the cached answer, though the link itself never
+    moves."""
+    conn = _setup(project)
+    ptr = proofkit.seal_for(project, "t-001", conn=conn)
+    report = proofkit.report_file(project, "t-001", conn=conn)
+    proof._GATE_CACHE.clear()
+    assert _cached_and_fresh(conn, project, ptr)[0][0]
+    copy = os.path.join(project, "elsewhere.md")
+    with open(report, "rb") as fh:
+        body = fh.read()
+    with open(copy, "wb") as fh:
+        fh.write(body)
+    os.remove(report)
+    os.symlink(os.path.relpath(copy, os.path.dirname(report)), report)
+    cached, fresh = _cached_and_fresh(conn, project, ptr)
+    assert cached[0] and fresh[0]                   # identical bytes: still valid, cache refilled
+    _rewrite_same_size(copy, b"#")
+    with open(copy, "ab") as fh:
+        fh.write(b"\nI added a claim after sealing.\n")
+    cached, fresh = _cached_and_fresh(conn, project, ptr)
+    assert not fresh[0], fresh
+    assert cached == fresh, "STALE: cached %r, uncached %r" % (cached, fresh)
+
+
+def test_cached_gate_follows_a_kept_copy_swapped_for_a_link(project):
+    """Same idea through the kept copy: original evidence edited (a note, still valid), kept copy
+    swapped for a symlink to an identical file, then that file is edited."""
+    conn = _setup(project)
+    ptr = proofkit.seal_for(project, "t-001", conn=conn)
+    kept = proofkit.kept_path(project, "t-001", conn=conn)
+    proof._GATE_CACHE.clear()
+    util.write_text(proofkit.evidence_path(project, "t-001"), "the work moved on\n")
+    assert _cached_and_fresh(conn, project, ptr)[0][0]          # original moved on, kept copy holds it
+    side = os.path.join(project, "side.txt")
+    with open(kept, "rb") as fh:
+        body = fh.read()
+    with open(side, "wb") as fh:
+        fh.write(body)
+    os.remove(kept)
+    os.symlink(side, kept)
+    cached, fresh = _cached_and_fresh(conn, project, ptr)
+    assert cached == fresh
+    util.write_text(side, "forged kept copy\n")
+    cached, fresh = _cached_and_fresh(conn, project, ptr)
+    assert not fresh[0], fresh
+    assert cached == fresh, "STALE: cached %r, uncached %r" % (cached, fresh)
+
+
+def test_cached_gate_is_not_used_for_receipt_and_job_evidence(project):
+    """The profile decides which file a `receipt:` or `job:` pointer names, so the gate's files
+    cannot be listed and the cache stands aside."""
+    conn = _setup(project)
+    ev = {"data": {"evidence": [{"kind": "receipt", "pointer": "receipt:r-1", "sha256": "x"}]}}
+    assert proof._gate_files(conn, project, "t-001", ev) is None
+
+
 def test_done_refuses_a_sealed_report_whose_evidence_and_kept_copy_both_changed(project):
     conn = _setup(project)
     ptr = proofkit.seal_for(project, "t-001")

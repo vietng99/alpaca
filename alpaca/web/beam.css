@@ -1,16 +1,24 @@
-/* Border beam: an animated glow that rides the border of a card. Ported to plain CSS from
+/* Border beam: a light comet that rides the border of a live card. Ported to plain CSS from
    border-beam (MIT, Jakub Antalik, https://github.com/Jakubantalik/Libraries.dev,
    packages/border-beam, commit 9f59769a7f2adecff9aec4a53bd5d4d2817c11e2): the "md" rotate
-   variant's conic window over a ring mask, its white highlight and its inner perimeter glow.
-   The hub has no React or build step, so the per-instance generated CSS became two classes that
-   share one registered angle:
+   variant's conic comet (palette sweep plus white highlight) seen through a ring.
+   The hub has no React or build step, and the first port animated a registered angle under a
+   conic mask with a hue-rotate filter, which restyled and repainted the whole card every frame.
+   Now every frame is compositor-only. The host carries a ring (beam.js BEAM_RING, one span with
+   one child):
 
-     .beam              live work (roadmap and operation-map cards in progress, in-flight cards)
-     .beam.beam-alert   red: needs attention, a warning, or an owner decision
+     .beam-ring       absolute, clipped to a 1.5px ring by a static mask, never animated
+     .beam-ring > i   a square conic gradient, drawn once, turned with transform: rotate()
+
+   and two classes pick the look:
+
+     .beam              live work (roadmap and operation-map cards in progress, in-flight headers)
+     .beam.beam-alert   red, a still ring with no animation: needs attention, a warning, or an
+                        owner decision
 
    The host keeps its own border; the ring sits on it (inset -1px, wider on the left where a card
    carries a status stripe: set --beam-left; add .beam-inside on a host that clips its overflow).
-   Reduced motion keeps a still, visible ring.
+   beam.js pauses a ring that is off screen. Reduced motion keeps a still, visible ring.
 
    Upstream license (border-beam):
 
@@ -35,110 +43,64 @@
    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
    SOFTWARE. */
-@property --beam-angle { syntax: "<angle>"; initial-value: 0deg; inherits: true; }
-@property --beam-on { syntax: "<number>"; initial-value: 0; inherits: true; }
 
 .beam {
   --beam-c1: rgb(255, 50, 100); --beam-c2: rgb(40, 140, 255); --beam-c3: rgb(50, 200, 80);
   --beam-c4: rgb(100, 70, 255); --beam-c5: rgb(255, 120, 40); --beam-c6: rgb(180, 40, 240);
-  --beam-hi: rgba(0, 0, 0, .55); --beam-glow: rgba(0, 0, 0, .12);
-  --beam-stroke: .9; --beam-inner: .32; --beam-hue: 28deg; --beam-speed: 3.2s; --beam-left: 1px;
+  --beam-hi: rgba(0, 0, 0, .55);
+  --beam-stroke: .9; --beam-speed: 3.2s; --beam-left: 1px; --beam-red: rgb(235, 40, 60);
   position: relative;
   isolation: isolate;
-  animation: beam-spin var(--beam-speed) linear infinite, beam-fade-in .6s ease forwards;
 }
-.beam-alert {
-  --beam-c1: rgb(255, 40, 60); --beam-c2: rgb(235, 30, 90); --beam-c3: rgb(255, 90, 50);
-  --beam-c4: rgb(200, 20, 40); --beam-c5: rgb(255, 70, 70); --beam-c6: rgb(240, 40, 120);
-  --beam-hue: 8deg; --beam-speed: 2.4s; --beam-stroke: 1; --beam-inner: .4;
-}
-:root[data-theme="dark"] .beam { --beam-hi: rgba(255, 255, 255, .75); --beam-glow: rgba(255, 255, 255, .22); --beam-stroke: 1; --beam-inner: .42; }
+:root[data-theme="dark"] .beam { --beam-hi: rgba(255, 255, 255, .75); --beam-stroke: 1; }
 
-/* The ring: a comet of the palette plus the white (light theme: ink) highlight, cut to the border
-   by the content-box exclusion and windowed by the rotating conic mask. */
-.beam::after {
-  content: "";
+/* The ring: the border box minus the content box, cut once by a static mask. */
+.beam-ring {
   position: absolute;
   inset: -1px -1px -1px calc(-1 * var(--beam-left));
   border-radius: inherit;
   padding: 1.5px;
-  background:
-    conic-gradient(from var(--beam-angle), transparent 0%, transparent 54%,
-      color-mix(in srgb, var(--beam-hi) 20%, transparent) 58%, var(--beam-hi) 66%,
-      color-mix(in srgb, var(--beam-hi) 20%, transparent) 74%, transparent 78%, transparent 100%),
-    conic-gradient(from var(--beam-angle), transparent 0%, transparent 46%,
-      var(--beam-c4) 52%, var(--beam-c2) 58%, var(--beam-c3) 63%, var(--beam-c5) 68%,
-      var(--beam-c1) 73%, var(--beam-c6) 78%, transparent 86%, transparent 100%),
-    radial-gradient(ellipse 70px 40px at 33% -7.4%, var(--beam-c1), transparent),
-    radial-gradient(ellipse 60px 35px at 12% -5%, var(--beam-c2), transparent),
-    radial-gradient(ellipse 40px 70px at 2.1% 68.3%, var(--beam-c3), transparent),
-    radial-gradient(ellipse 180px 32px at 74.4% 100%, var(--beam-c4), transparent),
-    radial-gradient(ellipse 74px 32px at 93.9% 0%, var(--beam-c5), transparent),
-    radial-gradient(ellipse 52px 48px at 100% 27.1%, var(--beam-c6), transparent);
-  -webkit-mask:
-    conic-gradient(from var(--beam-angle), transparent 0%, transparent 30%,
-      rgba(255, 255, 255, .1) 36%, rgba(255, 255, 255, .35) 44%, #fff 52%, #fff 80%,
-      rgba(255, 255, 255, .35) 86%, rgba(255, 255, 255, .1) 92%, transparent 95%, transparent 100%),
-    linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: source-in, xor;
-  mask:
-    conic-gradient(from var(--beam-angle), transparent 0%, transparent 30%,
-      rgba(255, 255, 255, .1) 36%, rgba(255, 255, 255, .35) 44%, #fff 52%, #fff 80%,
-      rgba(255, 255, 255, .35) 86%, rgba(255, 255, 255, .1) 92%, transparent 95%, transparent 100%),
-    linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  mask-composite: intersect, exclude;
-  opacity: calc(var(--beam-on) * var(--beam-stroke));
+  overflow: hidden;
+  container-type: size;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  opacity: var(--beam-stroke);
   pointer-events: none;
   z-index: 2;
-  animation: beam-hue 12s ease-in-out infinite;
+  animation: beam-fade-in .6s ease backwards;
+}
+/* The comet: a square wide enough to cover the ring whatever its shape, turning about its centre. */
+.beam-ring > i {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: calc(100cqw + 100cqh); height: calc(100cqw + 100cqh);
+  transform: translate(-50%, -50%) rotate(0deg);
+  will-change: transform;
+  background:
+    conic-gradient(transparent 0%, transparent 54%,
+      color-mix(in srgb, var(--beam-hi) 20%, transparent) 58%, var(--beam-hi) 66%,
+      color-mix(in srgb, var(--beam-hi) 20%, transparent) 74%, transparent 78%, transparent 100%),
+    conic-gradient(transparent 0%, transparent 40%,
+      color-mix(in srgb, var(--beam-c4) 35%, transparent) 46%, var(--beam-c4) 52%, var(--beam-c2) 58%,
+      var(--beam-c3) 63%, var(--beam-c5) 68%, var(--beam-c1) 73%, var(--beam-c6) 78%,
+      color-mix(in srgb, var(--beam-c6) 35%, transparent) 83%, transparent 90%, transparent 100%);
+  animation: beam-spin var(--beam-speed) linear infinite;
 }
 
-/* The inner perimeter glow that follows the beam, faded toward the middle of the card. */
-.beam::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background:
-    radial-gradient(ellipse 63px 36px at 33% -7.4%, color-mix(in srgb, var(--beam-c1) 45%, transparent), transparent),
-    radial-gradient(ellipse 54px 32px at 12% -5%, color-mix(in srgb, var(--beam-c2) 45%, transparent), transparent),
-    radial-gradient(ellipse 36px 63px at 2.1% 68.3%, color-mix(in srgb, var(--beam-c3) 45%, transparent), transparent),
-    radial-gradient(ellipse 162px 29px at 74.4% 100%, color-mix(in srgb, var(--beam-c4) 45%, transparent), transparent),
-    radial-gradient(ellipse 67px 29px at 93.9% 0%, color-mix(in srgb, var(--beam-c5) 45%, transparent), transparent),
-    radial-gradient(ellipse 47px 43px at 100% 27.1%, color-mix(in srgb, var(--beam-c6) 45%, transparent), transparent);
-  box-shadow: inset 0 0 9px 1px var(--beam-glow);
-  -webkit-mask-image:
-    conic-gradient(from var(--beam-angle), transparent 0%, transparent 30%,
-      rgba(255, 255, 255, .1) 36%, rgba(255, 255, 255, .35) 44%, #fff 52%, #fff 80%,
-      rgba(255, 255, 255, .35) 86%, rgba(255, 255, 255, .1) 92%, transparent 95%, transparent 100%),
-    linear-gradient(#fff, transparent 28px, transparent calc(100% - 28px), #fff),
-    linear-gradient(to right, #fff, transparent 28px, transparent calc(100% - 28px), #fff);
-  -webkit-mask-composite: source-in, source-over;
-  mask-image:
-    conic-gradient(from var(--beam-angle), transparent 0%, transparent 30%,
-      rgba(255, 255, 255, .1) 36%, rgba(255, 255, 255, .35) 44%, #fff 52%, #fff 80%,
-      rgba(255, 255, 255, .35) 86%, rgba(255, 255, 255, .1) 92%, transparent 95%, transparent 100%),
-    linear-gradient(#fff, transparent 28px, transparent calc(100% - 28px), #fff),
-    linear-gradient(to right, #fff, transparent 28px, transparent calc(100% - 28px), #fff);
-  mask-composite: intersect, add;
-  opacity: calc(var(--beam-on) * var(--beam-inner));
-  pointer-events: none;
-  z-index: -1;
-  animation: beam-hue 12s ease-in-out infinite;
-}
+/* Alert: a still red ring, nothing turns. */
+.beam-alert .beam-ring { background: var(--beam-red); opacity: .85; animation: none; }
+.beam-alert .beam-ring > i { display: none; }
 
 /* A host that clips its overflow (.panel) keeps the ring just inside its border. */
-.beam.beam-inside::after { inset: 0; }
+.beam.beam-inside > .beam-ring { inset: 0; }
 
-@keyframes beam-spin { to { --beam-angle: 360deg; } }
-@keyframes beam-fade-in { to { --beam-on: 1; } }
-@keyframes beam-hue {
-  0%, 100% { filter: hue-rotate(calc(-1 * var(--beam-hue))) saturate(1.3); }
-  50% { filter: hue-rotate(var(--beam-hue)) saturate(1.3); }
-}
+@keyframes beam-spin { to { transform: translate(-50%, -50%) rotate(360deg); } }
+@keyframes beam-fade-in { from { opacity: 0; } }
 
 /* Reduced motion: a still ring at a fixed angle, still clearly marked. */
 @media (prefers-reduced-motion: reduce) {
-  .beam { animation: none; --beam-on: 1; --beam-angle: 200deg; }
-  .beam::before, .beam::after { animation: none; }
+  .beam-ring { animation: none; }
+  .beam-ring > i { animation: none; transform: translate(-50%, -50%) rotate(200deg); }
 }

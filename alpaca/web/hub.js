@@ -1,4 +1,4 @@
-import {renderMission,bindMission,rememberMission} from './mission.js';
+import {renderMission,bindMission,rememberMission,patchedMission,missionMoved} from './mission.js';
 import {renderResearchPage,bindResearch} from './research.js';
 import {icon, hydrate} from './icons.js';
 import {orb} from './orb.js';
@@ -6,17 +6,19 @@ import {loader,routeLoader} from './loader.js';
 import {updatePulse,startPulse} from './pulse.js';
 import {updateArthur,startArthur,noteBurnBoard} from './arthur.js';
 import {documentNavigation, proofOverview} from './document.js';
-import {renderRoadmap, renderPhaseMap, bindRoadmap, rememberRoadmap, taskPlanDetail} from './roadmap.js';
+import {renderRoadmap, renderPhaseMap, bindRoadmap, rememberRoadmap, patchedRoadmap, taskPlanDetail} from './roadmap.js';
 import {renderAnalytics, analyticsIndex, renderCrew} from './analytics.js';
 import {sessionList, dayRange, AGENT_CHOICES, SORT_CHOICES} from './sessionlist.js';
 import {renderBurn} from './burn.js';
 import {renderInflight, loadEarlier, inflightCount, inflightButton} from './inflight.js';
-import {renderVcs,bindVcs,captureVcs} from './vcs.js';
+import {renderVcs,bindVcs,captureVcs,statusCell,backlogNote,overallNote} from './vcs.js';
 import {renderRecords} from './records.js';
-import {renderCockpit, renderCockpitExtras, renderWorkCards, renderWorkTimeline, segmented, dayChart, runVisuals, collectionVisuals, categoryBars, eventSummary, liveTimeline, laneOf, todayKey, SPANS, clock, startClocks, setStageNames, profileProblems, STATE_LABELS} from './cockpit.js';
+import {mountGraph} from './evgraph.js';
+import {installTips} from './tips.js';
+import {renderCockpit, cockpitTaskIds, renderCockpitExtras, renderWorkCards, renderWorkTimeline, segmented, dayChart, runVisuals, collectionVisuals, categoryBars, eventSummary, liveTimeline, laneOf, todayKey, SPANS, clock, startClocks, setStageNames, profileProblems, STATE_LABELS} from './cockpit.js';
 import {createLive} from './live.js';
-import {patch as patchHtml, render as renderHtml} from './morph.js';
-import {changedFlags, dependsOn, autoRefresh, needs, createDirty, connectionHealth, routeAlias, ROUTE_NEEDS, FLAGS} from './liveflags.js';
+import {patch as patchHtml, render as renderHtml, forget as forgetHtml} from './morph.js';
+import {changedFlags, dependsOn, autoRefresh, needs, createDirty, connectionHealth, healthMeter, refreshDelay, burnPoll, routeAlias, ROUTE_NEEDS, FLAGS} from './liveflags.js';
 import {PAGES,PAGE} from './pages.js';
 import {runsOverview, runDashboard, renderScan, renderFindings, renderLogLines, jumpToLine, renderReview, reviewLines, renderContract} from './runlog.js';
 const $ = (q, root=document) => root.querySelector(q);
@@ -62,16 +64,55 @@ let handoff=(()=>{try{return window.caches?caches.open(HANDOFF).catch(()=>null):
 async function fromHandoff(url){if(!handoff)return null;try{const cache=await handoff;const r=cache&&await cache.match(url);if(!r)return null;await cache.delete(url);if(Date.now()-Number(r.headers.get('X-Handoff-At')||0)>HANDOFF_MAX_AGE_MS)return null;return await r.json();}catch{return null;}}
 function dropHandoff(){if(!handoff)return;handoff=null;try{caches.delete(HANDOFF).catch(()=>{});}catch{}}
 const apiReads=new Map();
-async function api(path, params={}){const qs=new URLSearchParams(Object.entries(params).filter(([,v])=>v!==null&&v!==undefined&&v!==''));const url=path+(qs.size?'?'+qs:'');const shared=path==='/hub/research.json'||path==='/hub/mission.json';if(shared&&apiReads.has(url))return apiReads.get(url);const read=(async()=>{const parked=await fromHandoff(url);if(parked)return parked;const r=await fetch(url,{credentials:'same-origin'});if(!r.ok){let reason;try{reason=(await r.json()).error;}catch{}const error=Error(reason||`The server returned ${r.status}. ${r.status===401?'Sign in and refresh this page.':'Please try again.'}`);error.status=r.status;throw error;}const value=await r.json();if(r.headers.get('X-Alpaca-Analytics-State')==='refreshing')value.refreshing=true;return value;})().finally(()=>{if(shared)apiReads.delete(url);});if(shared)apiReads.set(url,read);return read;}
+async function api(path, params={}){const qs=new URLSearchParams(Object.entries(params).filter(([,v])=>v!==null&&v!==undefined&&v!==''));const url=path+(qs.size?'?'+qs:'');const shared=path==='/hub/research.json'||path==='/hub/mission.json'||path==='/hub/burn.json';if(shared&&apiReads.has(url))return apiReads.get(url);const read=(async()=>{const parked=await fromHandoff(url);if(parked)return parked;const r=await fetch(url,{credentials:'same-origin'});if(!r.ok){let reason;try{reason=(await r.json()).error;}catch{}const error=Error(reason||`The server returned ${r.status}. ${r.status===401?'Sign in and refresh this page.':'Please try again.'}`);error.status=r.status;throw error;}const value=await r.json();if(r.headers.get('X-Alpaca-Analytics-State')==='refreshing')value.refreshing=true;const tag=r.headers.get('ETag');if(tag&&value&&typeof value==='object')Object.defineProperty(value,'etag',{value:tag});return value;})().finally(()=>{if(shared)apiReads.delete(url);});if(shared)apiReads.set(url,read);return read;}
 let overviewRead=null;
-async function loadOverview(force=false){if(overviewRead)return overviewRead;if(!state.overview||force||flags.dirty.overview){const seen=flags.seen('overview');overviewRead=(async()=>{try{state.overview=await api('/hub/overview.json');flags.settle('overview',seen);for(const p of slotPages())ROUTE_NEEDS[p.id]=(p.needs||[]).filter(f=>FLAGS.includes(f));setStageNames(state.overview?.profile?.stage_names||{});return state.overview;}finally{overviewRead=null;}})();return overviewRead;}return state.overview;}
+async function loadOverview(force=false){if(overviewRead)return overviewRead;if(!state.overview||force||flags.dirty.overview){const seen=flags.seen('overview');overviewRead=(async()=>{try{state.overview=await api('/hub/overview.json');applyTaskText(state.overview);flags.settle('overview',seen);for(const p of slotPages())ROUTE_NEEDS[p.id]=(p.needs||[]).filter(f=>FLAGS.includes(f));setStageNames(state.overview?.profile?.stage_names||{});return state.overview;}finally{overviewRead=null;}})();return overviewRead;}return state.overview;}
+// t-591: /hub/overview.json carries each task without its text (report, history, contract, description, purpose,
+// last_completion, reason) but with a text_rev, a hash of that text, and with the text itself for the tasks the
+// cockpit and overview pages draw. A view that shows more awaits needTaskText(ids) (no ids: every task). The text
+// is kept by (id, text_rev), so a change to it, whatever caused it, reads again from /hub/tasks.json.
+const TASK_TEXT=['report','history','contract','description','purpose','last_completion','reason'],taskText=new Map(),textReads=new Map();
+let textSeq=0;
+const pickText=t=>Object.fromEntries(TASK_TEXT.map(k=>[k,t[k]]));
+// A task shows the newest text cached for its id, whatever its rev: when the rev moved it keeps the previous text
+// until the read for the new rev lands, never an empty card.
+const putText=t=>{const c=taskText.get(t.id);if(c)Object.assign(t,c.text);};
+// text_rev stays off the task's own keys, so the work page search (JSON.stringify(t)) cannot match a hash
+function applyTaskText(o){for(const t of o.tasks||[]){const rev=t.text_rev;Object.defineProperty(t,'text_rev',{value:rev,enumerable:false,configurable:true});if(t.text){taskText.set(t.id,{rev,seq:++textSeq,text:t.text});delete t.text;}putText(t);}}
+// Reads are shared per (id, text_rev): a read for an older rev is not reused for a newer one. A response is kept
+// only when no later read stored a newer one for that id. A rev that moved while reading gets one more read.
+async function needTaskText(ids){
+ for(let pass=0;pass<2;pass++){
+  const o=state.overview;if(!o)return;
+  const want=ids?o.tasks.filter(t=>ids.includes(t.id)):o.tasks,missing=want.filter(t=>taskText.get(t.id)?.rev!==t.text_rev);
+  if(!missing.length)return;
+  const key=t=>t.id+'|'+t.text_rev,ask=missing.filter(t=>!textReads.has(key(t)));
+  if(ask.length){
+   const seq=++textSeq,read=api('/hub/tasks.json',{ids:ask.length>60?'':ask.map(t=>t.id).join(',')}).then(d=>{for(const f of d.tasks)if((taskText.get(f.id)?.seq||0)<seq)taskText.set(f.id,{rev:f.text_rev,seq,text:pickText(f)});}).finally(()=>{for(const t of ask)textReads.delete(key(t));});
+   for(const t of ask)textReads.set(key(t),read);
+  }
+  await Promise.all([...new Set(missing.map(t=>textReads.get(key(t))))]);
+  for(const t of state.overview.tasks)putText(t);
+ }
+}
+// A list view draws without the text when its read fails, and reads again on its next render.
+async function tryTaskText(ids){try{await needTaskText(ids);}catch{}}
+async function loadMessages(){state.messages=(await api('/hub/messages.json')).messages;return state.messages;}
 async function loadRuns(force=false){if(!state.runs||force||flags.dirty.runs){const seen=flags.seen('runs');state.runs=await api('/hub/runs.json');flags.settle('runs',seen);}return state.runs;}
+// The cockpit's Parallel sessions panel reads only a title and the latest ask of the recent sessions, so it takes
+// this small view instead of the whole /data.json (t-595). It settles the sessions flag as loadSessions does and
+// drops the Sessions page's copy when the flag was set, so that page still reads /data.json fresh.
+async function loadSessionAsks(){const seen=flags.seen('sessions'),stale=flags.dirty.sessions;const value=await api('/hub/session-asks.json');if(stale)state.sessions=null;flags.settle('sessions',seen);return value;}
 async function loadSessions(force=false){if(!state.sessions||force||flags.dirty.sessions){const seen=flags.seen('sessions');state.sessions=await api('/data.json');flags.settle('sessions',seen);}return state.sessions;}
-function mount(html){state.mounts++;state.mountY=window.scrollY;rememberMission($('#main'));rememberRoadmap($('#main'));$('#main').innerHTML=html;hydrate($('#main'));bindRoadmap($('#main'));bindMission($('#main'));}
+// A full mount. `view` names what is on screen (viewTag), so a live refresh of that same view can patch it in place.
+function mount(html,view=''){state.mounts++;state.mountY=window.scrollY;state.shown=view;rememberMission($('#main'));rememberRoadmap($('#main'));renderHtml($('#main'),html);hydrate($('#main'));bindRoadmap($('#main'));bindMission($('#main'));}
+const viewTag=()=>state.route+'?'+state.params;
+// A live refresh patches the view where it stands when the reader is still on it (no other page mounted since).
+const onScreen=automatic=>automatic&&state.shown===viewTag();
 function toast(message){const e=$('#toast');e.textContent=message;e.style.display='block';setTimeout(()=>e.style.display='none',3500);}
 function updateChrome(){const o=state.overview;updatePulse(o);updateArthur(o);if(o?.project?.name)$('#crumb-project').textContent=o.project.name;const v=o?.alpaca?.version;if(v){$('#alpaca-version').textContent='Alpaca '+v;$('#alpaca-version').title=o.alpaca.channel==='dev'?'Development build'+(o.alpaca.commit?' at commit '+o.alpaca.commit:''):'Release build';}const nav=visiblePages().map(({id,label,icon:symbol,divider})=>`${divider?'<div class="nav-divider"></div>':''}<a class="nav-link ${id===state.route?'active':''}" href="#${id}" ${id===state.route?'aria-current="page"':''}>${icon(symbol)}<span>${esc(label)}</span>${id==='inflight'&&o&&inflightCount(o.tasks)?`<span class="nav-count nav-inflight" title="Tasks in flight">${orb('working',20,'Tasks in flight')}${inflightCount(o.tasks)}</span>`:''}${id==='live'&&o?.active_jobs?.length?`<span class="nav-count nav-live">${o.active_jobs.length}</span>`:''}${id==='work'&&o?`<span class="nav-count">${o.tasks.filter(t=>!['done','cancelled','canceled'].includes(t.status)).length}</span>`:''}</a>`).join('');if(nav!==state.nav){state.nav=nav;$('#navigation').innerHTML=nav;}$('#crumb').textContent=visiblePages().find(p=>p.id===state.route)?.label||'Overview';}
 function verifiedNote(o){const blocked=(o.items||[]).filter(x=>x.status!=='PASS');if(!blocked.length)return '';return `<div class="notice">${icon('alert')}<div><h3>${blocked.length} acceptance outcomes need current evidence</h3><p>Recorded completions are preserved. Current checks identify expired, missing, or changed evidence before work can resume.</p></div>${link('work','Review evidence',{tab:'outcomes'})}</div>`;}
-function eventRows(items,full=false){return items.map(e=>`<div class="activity-item"${full?` id="event-${esc(e.id)}"`:''}><span class="event-symbol">${icon(/msg/.test(e.kind)?'messages':/task|check|proof/.test(e.kind)?'work':/run|receipt|job/.test(e.kind)?'runs':'activity')}</span><div class="event-text"><h3>${esc(e.kind==='run'&&e.ref?stageName(e.ref)+': ':'')}${esc(eventSummary(e))}</h3><div class="event-meta"><span>${esc(human(e.kind))}</span>${e.ref?`<a href="${esc(href('work',{q:e.ref}))}">${esc(e.ref)}</a>`:''}${e.session?`<a href="${esc(href('sessions',{sid:e.session}))}">${esc(short(e.actor||e.session,26))}</a>`:''}</div>${full?`<details><summary>View recorded context</summary><pre class="raw-data">${esc(JSON.stringify(e.data,null,2))}</pre></details>`:''}</div>${full?`<span class="event-time"><time datetime="${esc(e.ts)}">${esc(clock(e.ts))}</time><small>${esc(relative(e.ts))}</small></span>`:`<span class="event-time">${esc(relative(e.ts))}</span>`}</div>`).join('');}
+function eventRows(items,full=false){return items.map(e=>`<div class="activity-item"${full?` id="event-${esc(e.id)}"`:''}><span class="event-symbol">${icon(/msg/.test(e.kind)?'messages':/task|check|proof/.test(e.kind)?'work':/run|receipt|job/.test(e.kind)?'runs':'activity')}</span><div class="event-text"><h3>${esc(e.kind==='run'&&e.ref?stageName(e.ref)+': ':'')}${esc(eventSummary(e))}${repeatNote(e)}</h3><div class="event-meta"><span>${esc(human(e.kind))}</span>${e.ref?`<a href="${esc(href('work',{q:e.ref}))}">${esc(e.ref)}</a>`:''}${e.session?`<a href="${esc(href('sessions',{sid:e.session}))}">${esc(short(e.actor||e.session,26))}</a>`:''}</div>${full?`<details><summary>View recorded context</summary><pre class="raw-data">${esc(JSON.stringify(e.data,null,2))}</pre></details>`:''}</div>${full?`<span class="event-time"><time datetime="${esc(e.ts)}">${esc(clock(e.ts))}</time><small>${esc(relative(e.ts))}</small></span>`:`<span class="event-time">${esc(relative(e.ts))}</span>`}</div>`).join('');}
 function docMini(doc){return `<a class="doc-mini" href="${esc(href('library',{path:doc.path}))}"><span class="doc-icon">${icon('file')}</span><span><strong>${esc(short(doc.title,90))}</strong><small>${esc(human(doc.category))} &middot; ${esc(date(doc.mtime))}${doc.sealed?' &middot; Sealed proof':''}</small></span></a>`;}
 // Cockpit cards a domain profile supplies (alpaca/profile.py `web` cards), loaded once per module.
 // A card module exports render(o, runs) and may export bind(); a broken card is left out.
@@ -100,24 +141,96 @@ async function inflightView(ticket,automatic=false){
 // status and cited briefings (#records?section=wiki&op=op-12), all read-only.
 async function recordsView(ticket,automatic=false){
  const p=state.params,section=['ops','decisions','proofs','wiki'].includes(p.get('section'))?p.get('section'):'ops';
+ const vault=section==='wiki'&&p.get('vault')==='open';
+ if(automatic&&vault&&$('#evidence-graph'))return false; // an open vault keeps its selection and zoom
+ if(automatic&&section==='wiki'&&!vault&&$('.rec-seal.is-sealed'))return false; // the seal in place keeps playing (t-602)
  const subject=(p.get('subject')||p.get('op')||p.get('task')||'').trim();
  const soft=promise=>promise.catch(error=>({error:error.message||String(error)}));
- const [data,wiki,brief]=await Promise.all([api('/hub/records.json',{section:section==='wiki'?'ops':section,q:p.get('q'),limit:200}),
-  section==='wiki'?soft(api('/hub/wiki-status.json')):null,
-  section==='wiki'&&subject?soft(api('/hub/wiki-briefing.json',/^t-/.test(subject)?{task:subject}:{op:subject})):null]);
+ const [data,wiki,brief,graph]=await Promise.all([api('/hub/records.json',{section:section==='wiki'?'ops':section,q:p.get('q'),limit:200}),
+  section==='wiki'&&!vault?soft(api('/hub/wiki-status.json')):null,
+  section==='wiki'&&!vault&&subject?soft(api('/hub/wiki-briefing.json',/^t-/.test(subject)?{task:subject}:{op:subject})):null,
+  vault?soft(api('/hub/graph.json')):null]);
  if(ticket!==state.ticket)return;if(automatic&&readerEngaged())return false;
  mount(heading('Records','The official record of this project: operations, decisions and sealed proofs, and what the wiki knows. Read-only.','','RECORD')+
-  renderRecords({section,data,wiki,brief,subject,q:p.get('q'),href,date,badge,empty,search}));
+  renderRecords({section,data,wiki,brief,subject,vault,graph,q:p.get('q'),href,date,badge,empty,search}));
+ mountSeal($('.rec-seal'),data,wiki);
+ const host=$('#evidence-graph');
+ if(host&&graph&&!graph.error)mountGraph(host,graph,{href,api,item:p.get('item'),find:p.get('find'),
+  onState:({item})=>{const q=new URLSearchParams(state.params);if(item)q.set('item',item);else q.delete('item');state.params=q;history.replaceState(null,'',href('records',Object.fromEntries(q)));}});
+}
+// Worktree statuses (t-592): /hub/vcs-status.json is polled every 5 s while the page is visible and its rows are
+// patched into the Uncommitted cells, because the snapshot behind vcs.json is only rebuilt about once a minute.
+// The newest rows are kept so the timed re-render of the whole board does not bring an older count back.
+// The poll answers for the live worktrees only (main, most recent, largest, and those loaded on demand), plus the
+// overall line over every worktree; a row that leaves the live set keeps its last count and its age.
+function overlayVcsStatus(data){
+ const got=state.vcsStatus;if(!got||!data.worktrees)return;
+ data.worktrees=data.worktrees.map(w=>{const row=got.worktrees[w.path];return row&&(row.checked_at||0)>=(w.checked_at||0)?{...w,...row}:w;});
+ if(got.overall&&got.generated>(data.served_at||0))data.overall=got.overall;
+ if(got.generated>(data.served_at||0))data.served_at=got.generated;
+ data.hot_backlog=got.hot_backlog;
+}
+// The poll gives up on a fetch after 8 s and waits 5, 10, 20, then 40 s after errors; one success returns it to 5 s.
+// Write each cell from the newest rows: an older read never replaces a newer one, and an unchanged row still gets its
+// "checked N s ago" label recomputed (only that text node changes), so the label stays true between changes.
+function paintVcsStatus(board,got,now){
+ for(const cell of board.querySelectorAll('[data-wt-status]')){
+  const row=got.worktrees[cell.dataset.wtStatus];if(!row)continue;
+  const seen=Number((cell.dataset.checked||'0|').split('|')[0]);
+  if((row.checked_at||0)<seen)continue;
+  forgetHtml(cell);patchHtml(cell,statusCell(row,now));cell.dataset.checked=(row.checked_at||0)+'|'+(row.status_error||'');
+ }
+}
+// The label also moves on a 5 s client tick, so a poll that backs off or fails does not leave it frozen.
+setInterval(()=>{const board=$('#vcs-board');if(state.route==='vcs'&&board&&state.vcsStatus&&document.visibilityState==='visible')paintVcsStatus(board,state.vcsStatus,state.vcsStatus.generated+(Date.now()-state.vcsStatusAt)/1000);},5000);
+let vcsStatusWait=5000;
+async function vcsStatusTick(){
+ const board=$('#vcs-board');
+ if(state.route!=='vcs'||!board||document.visibilityState!=='visible')return setTimeout(vcsStatusTick,vcsStatusWait);
+ const ticket=state.ticket,stop=new AbortController(),timer=setTimeout(()=>stop.abort(),8000);
+ try{
+  const r=await fetch('/hub/vcs-status.json',{credentials:'same-origin',signal:stop.signal});
+  if(!r.ok)throw Error(String(r.status));
+  const got=await r.json();
+  vcsStatusWait=5000;
+  if(ticket!==state.ticket||got.error)return;
+  got.worktrees={...(state.vcsStatus?.worktrees||{}),...got.worktrees};
+  state.vcsStatus=got;
+  state.vcsStatusAt=Date.now();paintVcsStatus(board,got,got.generated);
+  const note=board.querySelector('[data-wt-backlog]');if(note)patchHtml(note,backlogNote(got.hot_backlog));
+  const line=board.querySelector('[data-wt-overall]');if(line&&got.overall)patchHtml(line,overallNote(got.overall));
+ }catch{vcsStatusWait=Math.min(vcsStatusWait*2,40000);}finally{clearTimeout(timer);setTimeout(vcsStatusTick,vcsStatusWait);}
+}
+setTimeout(vcsStatusTick,5000);
+// "Load status" on a worktree outside the live set: read now by /hub/vcs-tree.json, then kept with the polled rows
+// so a re-render shows it; the server keeps it live for 2 minutes, and the poll carries it while it does.
+async function loadVcsTree(path){
+ const r=await fetch('/hub/vcs-tree.json?path='+encodeURIComponent(path),{credentials:'same-origin'});
+ const row=await r.json();if(!r.ok||row.error)throw Error(row.error||String(r.status));
+ if(!state.vcsStatus){state.vcsStatus={generated:row.generated,worktrees:{},hot_backlog:0};state.vcsStatusAt=Date.now();}
+ state.vcsStatus.worktrees={...state.vcsStatus.worktrees,[path]:{uncommitted:row.uncommitted,oldest_change:row.oldest_change,checked_at:row.checked_at,status_error:row.status_error}};
+ return row;
+}
+// The vault seal in place on the Wiki page (ventry.js, t-602): it waits for its dial, plays the release and
+// then opens the vault; the record's and the wiki's counts are its telemetry. Reduced motion keeps the card.
+function mountSeal(box,data,wiki){
+ if(!box||matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+ const c=(data&&data.counts)||{},corpus=(wiki&&wiki.corpus)||{},serving=wiki&&wiki.available&&!wiki.error;
+ const lines=[['OPERATIONS',String(c.ops??0)],['DECISIONS',String(c.decisions??0)],['SEALED PROOFS',String(c.proofs??0)],
+  ['WIKI',serving?`${Number(corpus.documents||0).toLocaleString('en-US')} DOCS / ${Number(corpus.edges||0).toLocaleString('en-US')} LINKS`:'NOT SERVING',serving?'':'is-warn']];
+ box.classList.add('is-sealed');
+ import('./ventry.js').then(m=>m.playEntry(box,{lines},{inline:true,onOpen:()=>{location.hash=box.dataset.href.replace(/^[^#]*/,'');}})).catch(()=>box.classList.remove('is-sealed'));
 }
 // Version control: a read-only picture of the repository; #vcs?days=N picks the graph window.
 async function vcsView(ticket,automatic=false){
  const days=[1,7,30,90].includes(Number(state.params.get('days')))?Number(state.params.get('days')):7;
  const data=await api('/hub/vcs.json',{days});if(ticket!==state.ticket)return;
+ overlayVcsStatus(data);
  const board=$('#vcs-board'),view=automatic&&board?captureVcs(board):{};
  const body=renderVcs(data,{days,href,windowHref:k=>href('vcs',{days:k}),view});
- if(automatic&&board){patchHtml(board,body);bindVcs(board,data,view);return;}
+ if(automatic&&board){patchHtml(board,body);bindVcs(board,data,view,{loadTree:loadVcsTree});return;}
  mount(heading('Version control','Explore branch history, inspect commits and review local work.','','REPOSITORY')+`<div id="vcs-board">${body}</div>`);
- bindVcs($('#vcs-board'),data,view);
+ bindVcs($('#vcs-board'),data,view,{loadTree:loadVcsTree});
 }
 function cockpitExtras(){return state.cockpitExtras||=(Object.fromEntries(['mission','research','board','sessions'].map(key=>[key,{value:null,loading:true,error:false,pending:null}])));}
 function paintCockpitExtras(ticket){
@@ -127,29 +240,45 @@ function paintCockpitExtras(ticket){
  for(const [key,html] of Object.entries(parts)){const slot=$(`[data-cockpit-extra="${key}"]`);if(!slot)continue;rememberMission(slot);patchHtml(slot,html);hydrate(slot);bindMission(slot);}
  window.scrollTo(0,y);
 }
-function refreshCockpitExtras(ticket){
- const extras=cockpitExtras(),readers={mission:()=>api('/hub/mission.json'),research:()=>api('/hub/research.json'),board:()=>api('/board/data.json'),sessions:()=>loadSessions()};
+// only: the panels to read again (all of them by default). A panel that already shows a value keeps it
+// while the read is in flight, so a quiet refresh never flashes "Refreshing".
+function refreshCockpitExtras(ticket,only=null){
+ const extras=cockpitExtras(),readers={mission:()=>api('/hub/mission.json',{view:'compact'}),research:()=>api('/hub/research.json',{view:'compact'}),board:()=>api('/hub/live-work.json'),sessions:()=>loadSessionAsks()};
  for(const [key,read] of Object.entries(readers)){
+  if(only&&!only.includes(key))continue;
   const extra=extras[key];
-  if(!extra.pending){extra.loading=true;extra.error=false;extra.pending=Promise.resolve().then(read).then(value=>{extra.value=value;extra.loading=false;},()=>{extra.error=true;extra.loading=false;}).finally(()=>{extra.pending=null;});}
+  if(!extra.pending){extra.loading=extra.value===null;extra.error=false;extra.pending=Promise.resolve().then(read).then(value=>{extra.value=value;extra.loading=false;},()=>{extra.error=true;extra.loading=false;}).finally(()=>{extra.pending=null;});}
   extra.pending.then(()=>paintCockpitExtras(ticket));
  }
 }
+// The four panels that load beside the cockpit, as the guard below sees them: always still loading, so the
+// guard compares the record's own cards and never the panels' separate data.
+const EXTRAS_AT_REST=Object.fromEntries(['mission','research','board','sessions'].map(key=>[key,{value:null,loading:true,error:false,pending:null}]));
 async function cockpit(ticket,automatic=false){
- const focusedAction=document.activeElement?.dataset?.action;
- // Supplemental panels never delay the core work record or navigation.
- const [o,r,h]=await Promise.all([loadOverview(),loadRuns(),api('/hub/history.json',{limit:6,kind:'progress'})]);
- if(ticket!==state.ticket)return;if(automatic&&readerEngaged())return false;
- const cards=await loadCards(o);if(ticket!==state.ticket)return;
- const html=renderCockpit(o,r,h,{paused:Boolean(state.cockpitPaused),cards,extras:cockpitExtras()});
- // A live refresh re-renders only when the record changed (the host panel updates itself, and
- // "Nm ago" labels tick every minute), and at least every 5 minutes so those labels stay current.
- const same=html.replace(/<section[^>]*id="sys-panel"[\s\S]*?<\/section>/,'').replace(/\b\d+[smhd] ago\b|just now/g,'');
- if(automatic&&same===state.cockpitSame&&$('.mx-panel')&&Date.now()-(state.cockpitAt||0)<300000)return;state.cockpitSame=same;state.cockpitAt=Date.now();
- mount(html);
- refreshCockpitExtras(ticket);
- if(focusedAction?.startsWith('cockpit-'))$(`[data-action="${CSS.escape(focusedAction)}"]`)?.focus();
- const button=$('[data-action="cockpit-present"]');if(button){button.setAttribute('aria-pressed',String(document.body.classList.contains('presentation')));button.querySelector('span').textContent=document.body.classList.contains('presentation')?'Exit focus view':'Focus view';}
+  const focusedAction=document.activeElement?.dataset?.action;
+  // Supplemental panels never delay the core work record or navigation.
+  const [o,r,h]=await Promise.all([loadOverview(),loadRuns(),api('/hub/history.json',{limit:6,kind:'progress'})]);
+  if(ticket!==state.ticket)return;if(automatic&&readerEngaged())return false;
+  await tryTaskText(cockpitTaskIds(o));if(ticket!==state.ticket)return;
+  const cards=await loadCards(o);if(ticket!==state.ticket)return;
+  const options={paused:Boolean(state.cockpitPaused),cards,presenting:document.body.classList.contains('presentation')};
+  // A live refresh changes the page only when the record behind it changed (the host panel updates itself,
+  // the extra panels read their own data, and "Nm ago" labels tick every minute), and at least every
+  // 60 s (a patch, with the extra panels read again) so those labels and the sessions panel stay current. What is compared is the cockpit drawn from the record with
+  // the extra panels at rest; a changed record is patched into the page in place.
+  const same=renderCockpit(o,r,h,{...options,extras:EXTRAS_AT_REST}).replace(/<section[^>]*id="sys-panel"[\s\S]*?<\/section>/,'').replace(/\b\d+[smhd] ago\b|just now/g,'');
+  const patching=onScreen(automatic);
+  if(patching&&same===state.cockpitSame&&Date.now()-(state.cockpitAt||0)<60000){
+    // Nothing moved in the record: only the live sessions panel reads again, when the session data moved.
+    if(flags.dirty.sessions)refreshCockpitExtras(ticket,['board','sessions']);
+    return;
+  }
+  state.cockpitSame=same;state.cockpitAt=Date.now();
+  const html=renderCockpit(o,r,h,{...options,extras:cockpitExtras()});
+  if(patching)patchHtml($('#main'),html);else mount(html,viewTag());
+  refreshCockpitExtras(ticket);
+  if(focusedAction?.startsWith('cockpit-'))$(`[data-action="${CSS.escape(focusedAction)}"]`)?.focus();
+  const button=$('[data-action="cockpit-present"]');if(button){button.setAttribute('aria-pressed',String(document.body.classList.contains('presentation')));button.querySelector('span').textContent=document.body.classList.contains('presentation')?'Exit focus view':'Focus view';}
 }
 // Roadmap owns the plan: the pinned operation maps, then every workstream with its prerequisites.
 // Cockpit and Work & evidence link here instead of repeating it.
@@ -182,9 +311,13 @@ async function roadmapView(ticket,automatic=false){
  if(state.params.get('view')==='finished')return finishedView(ticket,automatic);
  const o=await loadOverview();if(ticket!==state.ticket)return;if(automatic&&readerEngaged())return false;
  const pinned=(o.ops||[]).filter(x=>x.pinned&&x.status!=='closed');
- mount(roadmapTabs('tasks',closedOps(o).length)+heading('Roadmap','Operations by phase, workstreams, and the prerequisites between tasks.',link('work','Open checklist',{},'button'),'PLAN')+
+ const html=roadmapTabs('tasks',closedOps(o).length)+heading('Roadmap','Operations by phase, workstreams, and the prerequisites between tasks.',link('work','Open checklist',{},'button'),'PLAN')+
   (pinned.length?pinned.map(x=>renderPhaseMap(o,x.id)).join(''):'<p class="route-hint">Pin an operation with <code>bin/alpaca op pin OP</code> to show its phases here.</p>')+
-  renderRoadmap(o));
+  renderRoadmap(o);
+ // A live refresh patches the plan where it stands: identical markup writes nothing, and the arrows are
+ // routed again only when the cards moved.
+ if(onScreen(automatic)){if(patchHtml($('#main'),html))patchedRoadmap($('#main'));return;}
+ mount(html,viewTag());
 }
 // The research page (operator-surface.md section 7): the run list, or one run with ?run=<id>.
 // It re-reads /hub/research.json on every render, so the 15 s refresh and a pushed board
@@ -197,9 +330,13 @@ async function researchView(ticket,automatic=false){
 async function missionView(ticket,automatic=false){
  const data=await api('/hub/mission.json',{at:state.params.get('at')});if(ticket!==state.ticket)return;if(automatic&&readerEngaged())return false;
  const group=state.params.get('group');const node=state.missionEntry===location.hash?null:state.params.get('node')||(group?data.nodes.find(n=>n.group===group)?.id:null);state.missionEntry=location.hash;
- mount(roadmapTabs('mission')+renderMission(data,{node}));
+ const root=$('#main [data-mm-root]');
+ if(onScreen(automatic)&&root&&!missionMoved($('#main'),data))return;
+ const html=roadmapTabs('mission')+renderMission(data,{node});
+ if(onScreen(automatic)&&root){patchHtml($('#main'),html);patchedMission($('#main'));return;}
+ mount(html,viewTag());
 }
-async function overview(ticket,automatic=false){const [o,h,docs,r]=await Promise.all([loadOverview(),api('/hub/history.json',{limit:5}),api('/hub/documents.json',{limit:4}),loadRuns()]);if(ticket!==state.ticket)return;if(automatic&&readerEngaged())return false;const active=o.tasks.filter(t=>!['done','cancelled','canceled'].includes(t.status));const done=o.tasks.filter(t=>t.status==='done');const lastRun=r.items?.[0];
+async function overview(ticket,automatic=false){const [o,h,docs,r]=await Promise.all([loadOverview(),api('/hub/history.json',{limit:5}),api('/hub/documents.json',{limit:4}),loadRuns()]);if(ticket!==state.ticket)return;if(automatic&&readerEngaged())return false;const active=o.tasks.filter(t=>!['done','cancelled','canceled'].includes(t.status));const done=o.tasks.filter(t=>t.status==='done');const lastRun=r.items?.[0];await tryTaskText(active.filter(t=>t.status==='doing'||t.claimant).slice(0,2).map(t=>t.id));if(ticket!==state.ticket)return;
 mount(heading('A clear view of the work.','Follow progress, understand decisions, and trace every result to its evidence.',link('activity','Explore activity',{},'button'),'OPERATIONS OVERVIEW')+
 profileProblems(o)+verifiedNote(o)+`<div class="metrics">${metric('Work in progress',count(active.length),`${count(o.tasks.length)} tasks across ${count(o.ops.length)} operations`,'work')}${o.items.length?metric('Current acceptance',`${count(o.counts.items_pass)}<small>/ ${count(o.items.length)}</small>`,'Passing with current evidence','check'):''}${metric('Completed tasks',count(done.length),'Recorded work and linked proof','file')}${metric('Open operations',count(o.ops.filter(op=>op.status!=='closed').length),`${count(o.ops.length)} recorded in total`,'roadmap')}${metric('Completed this week',count(done.filter(t=>Date.now()-Date.parse(t.completed_at)<7*864e5).length),'Tasks recorded complete in the last 7 days','check')}${profileOn('runs')?metric('Active runs',count(o.active_jobs?.length),lastRun?`Last result: ${esc(stageName(lastRun.stage))} &middot; ${esc(human(lastRun.verdict))}`:'No run receipt recorded','runs'):''}</div>
 <div class="duo">${panel('Work in focus',active.filter(t=>t.status==='doing'||t.claimant).slice(0,2).map(t=>`<div class="workstream"><span class="eyebrow">CURRENT ASSIGNMENT / ${esc(t.id)}</span><button class="workstream-title" style="text-align:left;padding:8px 0 0" data-task="${esc(t.id)}">${esc(t.title)}</button><small>${esc(t.reason||'Open the task for its scope, report, and evidence.')}</small></div>`).join('')+o.ops.filter(op=>op.status!=='closed').slice(-4).reverse().map(op=>{const pct=op.tasks_total?Math.round(op.tasks_done/op.tasks_total*100):0;return `<div class="workstream"><div class="workstream-top"><div><a class="workstream-title" href="${esc(href('work',{op:op.id}))}">${esc(op.title)}</a><small>${esc(op.id)} &middot; ${esc(short(op.done_when||'Open the work record for scope and next actions',130))}</small></div>${badge(op.status==='open'?'active':op.status)}</div><div class="progress-track"><span style="width:${pct}%"></span></div><div class="progress-caption"><span>${op.tasks_done} of ${op.tasks_total} tasks recorded complete</span><span>${pct}%</span></div></div>`;}).join('')||empty('No open operations','Work will appear here when an operation is recorded.','work'),link('work','All work'))}
@@ -211,6 +348,8 @@ function taskRows(tasks){return tasks.map(t=>`<tr><td><span class="mono">${Strin
 function outcomeRows(items){return items.map(x=>`<tr><td><span class="task-number">${String(x.number||Number(x.id.replace(/\D/g,''))).padStart(2,'0')}</span></td><td><button class="row-title" data-outcome="${esc(x.id)}">${esc(x.title)}</button><span class="row-sub">${esc(x.id)} / ${esc(stageName(x.stage))}</span></td><td>${badge(x.status)}</td><td>${badge(x.recorded_status)}<span class="row-sub">${esc(date(x.recorded_completed_at))}</span>${x.recorded_completed_session?link('sessions',short(x.recorded_completed_session,20),{sid:x.recorded_completed_session}):''}</td><td><span class="row-sub">${esc(short(x.reason||'Open for method, result and proof',140))}</span></td></tr>`).join('');}
 async function work(ticket){
  const o=await loadOverview();if(ticket!==state.ticket)return;const p=state.params,tab=p.get('tab')||'tasks',q=(p.get('q')||'').toLowerCase(),status=p.get('status')||'',op=p.get('op')||'',stage=p.get('stage')||'',layout=p.get('layout')||(tab==='tasks'?'checklist':'timeline');
+ // the cards, timeline, table and the search read the task text; the checklist and roadmap layouts without a search do not
+ if(tab==='tasks'&&(q||!['checklist','roadmap'].includes(layout))){await tryTaskText();if(ticket!==state.ticket)return;}
  const scope=(tab==='outcomes'?o.items:o.tasks).filter(t=>(!op||t.op===op)&&(!stage||t.stage===stage));
  const items=scope.filter(t=>(!q||JSON.stringify(t).toLowerCase().includes(q))&&(!status||String(t.status).toLowerCase()===status));
  const visuals=`<div class="page-visuals">${segmented(scope,'status',{label:tab==='outcomes'?'Current outcome checks':'Task completion',route:'work',params:{tab,...(op?{op}:{}),...(stage?{stage}:{})}})}${tab==='outcomes'?segmented(scope,'recorded_status',{label:'Last recorded outcome results'}):dayChart(scope.filter(t=>t.status==='done'),{field:'completed_at',label:'Recorded completions',subtitle:'Dated task completions in this operation scope'})}</div>`;
@@ -222,8 +361,9 @@ function proofPath(value){if(typeof value==='object')value=value.path||value.ref
 function evidenceLinks(values){if(!values?.length)return '<p class="muted">No evidence reference is recorded.</p>';return values.map(v=>{const path=proofPath(v);const receipt=profileOn('runs')&&path.match(/\/(?:receipts|logs)\/([a-f0-9]{32})\.(?:json|log)$/);if(receipt)return `<a class="proof-link" href="${esc(href('runs',{receipt:receipt[1]}))}">${icon('runs')}<span>Open receipt ${esc(receipt[1].slice(0,12))} and captured output</span>${icon('arrow')}</a>`;const readable=/\.(md|html?|txt|log|json|csv)$/i.test(path);return readable?`<a class="proof-link" href="${esc(href('library',{path}))}">${icon('file')}<span>${esc(path)}</span>${icon('external')}</a>`:`<div class="proof-link">${icon('file')}<span>${esc(path)}</span></div>`;}).join('');}
 function showInspector(title,html,label='WORK RECORD',reader=false){$('#inspector').classList.toggle('reader',reader);$('#inspector-label').textContent=label;$('#inspector-content').innerHTML=`<h2 id="inspector-title" class="detail-title">${esc(title)}</h2>${html}`;hydrate($('#inspector'));if(!$('#inspector').open)$('#inspector').showModal();}
 function taskContract(t){const c=t.contract;const cmd=`bin/alpaca task contract ${t.id} --input "..." --expected "..." --done-bar "..." --fail-case "..."`;if(!c)return `<section class="detail-section"><h3>Contract</h3><p class="inline-warning">No input, expected output, done bar or fail case is recorded for this task yet.</p><code class="ct-cmd">${esc(cmd)}</code></section>`;const card=(n,title,list,cls='')=>`<section class="ct-card ${cls}"><h3><span class="ct-n">${n}</span>${title}</h3>${list.length?`<ul class="ct-list">${list.map(x=>`<li><b>&middot;</b><div>${esc(x)}</div></li>`).join('')}</ul>`:'<p class="ct-note">Not stated.</p>'}</section>`;const st=c.stage&&(state.overview.stages||[]).find(s=>s.stage===c.stage);return `<section class="detail-section"><h3>Contract</h3><div class="ct"><div class="ct-head"><strong>${esc(t.id)}</strong><span>recorded ${esc(date(c.at))} by ${esc(c.by||'unknown')}${c.source?' &middot; from '+esc(c.source):''}</span>${c.stage?`<span>stage <b>${esc(stageName(c.stage))}</b>${st?.receipt_id?(profileOn('runs')?` &middot; <a class="text-link" href="${esc(href('runs',{receipt:st.receipt_id}))}">latest run contract ${badge(st.status)}</a>`:` &middot; latest run ${badge(st.status)}`):' &middot; no run yet'}</span>`:''}</div><div class="ct-grid ct-grid-task">${card(1,'Input',c.input||[])}${card(2,'Expected output',c.expected||[])}${card(3,'Done bar',c.done_bar||[])}${card(4,'Fail cases',c.fail_cases||[])}</div></div></section>`;}
-function inspectTask(id){
- const t=state.overview.tasks.find(t=>t.id===id);if(!t)return;const op=state.overview.ops.find(x=>x.id===t.op),r=t.report;
+async function inspectTask(id){
+ try{await needTaskText([id]);}catch(err){toast(err.message);return;}
+ const base=state.overview.tasks.find(t=>t.id===id);if(!base)return;const t={...base,...taskText.get(id)?.text},op=state.overview.ops.find(x=>x.id===t.op),r=t.report;
  const paragraph=(title,body,cls='')=>`<section class="detail-section ${cls}"><h3>${title}</h3><div class="record-prose markdown">${markdown(body||'Not recorded.',r?.path||'')}</div></section>`;
  showInspector(`${String(t.number||Number(t.id.replace(/\D/g,''))).padStart(2,'0')}. ${t.title}`,`<dl class="detail-grid"><dt>Task</dt><dd class="mono">${esc(t.id)}</dd><dt>State</dt><dd>${badge(t.status)}</dd>${t.description?`<dt>Full statement</dt><dd>${esc(t.description)}</dd>`:''}<dt>Operation</dt><dd>${esc(op?.title||t.op)}</dd><dt>Created</dt><dd>${esc(date(t.created_at))}</dd><dt>Last updated</dt><dd>${esc(date(t.updated_at))}</dd><dt>Completed</dt><dd>${esc(date(t.completed_at))}</dd><dt>Completing session</dt><dd>${t.completed_session?link('sessions',t.completed_session,{sid:t.completed_session}):'Not recorded'}</dd><dt>Assigned worker</dt><dd>${esc(t.claimant||'Unassigned')}</dd><dt>Assigned session</dt><dd>${t.assigned_session?link('sessions',t.assigned_session,{sid:t.assigned_session}):'Not recorded'}</dd></dl>${t.status==='doing'?`<p class="inflight-row">${inflightButton(t.id,'button primary')}</p>`:''}${taskPlanDetail(state.overview,t.id)}${taskContract(t)}${paragraph('Purpose and source',t.purpose||t.reason||op?.done_when)}${t.source?paragraph('Recorded source reference',t.source):''}${t.status!=='done'&&t.last_completion?'<p class="inline-warning">This task was reopened. The linked report describes earlier work; it does not establish a new completion.</p>':''}${r?.summary?paragraph('At a glance',r.summary):''}${paragraph('What was done',r?.what)}${paragraph('How it was done',r?.how,'record-method')}${paragraph('Result',r?.result)}${r?.truncated?'<p class="inline-warning">These are bounded report excerpts. Read the full report for the complete method and result.</p>':''}<section class="detail-section"><h3>Work report and proof</h3>${evidenceLinks(t.proof?[t.proof]:[])}${r?.sealed?`<p class="row-sub">Seal recorded ${esc(date(r.sealed_at))}. Current proof verification has not been run by this view.</p>`:''}</section>${t.history?.length?`<section class="detail-section"><h3>Work history</h3><ol class="record-lifecycle">${t.history.map(e=>`<li><time>${esc(date(e.at))}</time><span>${esc(e.to?'Moved to '+human(e.to):human(e.kind))}${e.session?`<br>${link('sessions',short(e.session,34),{sid:e.session})}`:''}</span></li>`).join('')}</ol></section>`:''}<div class="link-row">${link('activity','Task history',{ref:t.id})}${link('messages','Related messages',{q:t.id})}</div>`);
 }
@@ -233,12 +373,16 @@ function inspectOutcome(id){
 }
 // The Activity list as a vertical timeline: clock time left of the line, a dot per event in its
 // lane's color, a day marker where the date changes, and a live Now marker at the head.
+// t-606: a run of identical failure notes arrives folded into one item (hub.history); say how many.
+function repeatNote(e){return e.repeat>1?` <small class="event-repeat">${esc(`repeated ${count(e.repeat)} times${e.sessions>1?` across ${count(e.sessions)} sessions`:''}${e.variants>1?`, ${count(e.variants)} different messages`:''}, since ${relative(e.first_ts)}`)}</small>`:'';}
+// An automatic refresh joins the newest page to the loaded one; a fold that continues across the seam stays one row.
+function joinFolded(fresh,old){const a=fresh[fresh.length-1],b=old[0];if(!a||!b||!a.fold||a.fold!==b.fold)return [...fresh,...old];const sessions=Math.max(a.sessions||1,b.sessions||1),variants=Math.max(a.variants||1,b.variants||1);return [...fresh.slice(0,-1),{...a,repeat:(a.repeat||1)+(b.repeat||1),first_ts:b.first_ts||b.ts,sessions,variants},...old.slice(1)];}
 function timelineRows(items,head=true){
  const day=v=>new Date(v).toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'}),today=day(Date.now());
  let last='';
  return (head?`<div class="vtl-now"><time data-live-clock>${esc(clock(Date.now()))}</time><span class="vtl-node"></span><strong>Now</strong></div>`:'')+items.map(e=>{
   const d=day(e.ts),mark=d!==last?`<div class="vtl-day"><span></span><strong>${esc(d===today?'Today, '+d:d)}</strong></div>`:'';last=d;
-  return mark+`<div class="vtl-item lt-${laneOf(e)}" id="event-${esc(e.id)}"><time class="vtl-time" datetime="${esc(e.ts)}">${esc(clock(e.ts))}<small>${esc(relative(e.ts))}</small></time><span class="vtl-node" aria-hidden="true"></span><div class="event-text"><h3>${esc(e.kind==='run'&&e.ref?stageName(e.ref)+': ':'')}${esc(eventSummary(e))}</h3><div class="event-meta"><span>${esc(human(e.kind))}</span>${e.ref?`<a href="${esc(href('work',{q:e.ref}))}">${esc(e.ref)}</a>`:''}${e.session?`<a href="${esc(href('sessions',{sid:e.session}))}">${esc(short(e.actor||e.session,26))}</a>`:''}</div><details><summary>View recorded context</summary><pre class="raw-data">${esc(JSON.stringify(e.data,null,2))}</pre></details></div></div>`;
+  return mark+`<div class="vtl-item lt-${laneOf(e)}" id="event-${esc(e.id)}"><time class="vtl-time" datetime="${esc(e.ts)}">${esc(clock(e.ts))}<small>${esc(relative(e.ts))}</small></time><span class="vtl-node" aria-hidden="true"></span><div class="event-text"><h3>${esc(e.kind==='run'&&e.ref?stageName(e.ref)+': ':'')}${esc(eventSummary(e))}${repeatNote(e)}</h3><div class="event-meta"><span>${esc(human(e.kind))}</span>${e.ref?`<a href="${esc(href('work',{q:e.ref}))}">${esc(e.ref)}</a>`:''}${e.session?`<a href="${esc(href('sessions',{sid:e.session}))}">${esc(short(e.actor||e.session,26))}</a>`:''}</div><details><summary>View recorded context</summary><pre class="raw-data">${esc(JSON.stringify(e.data,null,2))}</pre></details></div></div>`;
  }).join('');
 }
 // Activity: task, op and run progress by default (subagent and session bookkeeping stay in the
@@ -250,7 +394,7 @@ async function activity(ticket,more=false,automatic=false){
  const data=await api('/hub/history.json',{q:p.get('q'),kind,session:p.get('session'),ref:p.get('ref'),limit:day?1000:more?50:100,before:more?state.history?.next_before:null,day,calendar:day?1:null});
  if(ticket!==state.ticket)return;if(automatic&&readerEngaged())return false;
  const old=state.history,top=old?.items[0]?.id??-1;
- state.history=more?{...data,items:[...old.items,...data.items]}:automatic&&old&&!day?{...old,total:data.total,items:[...data.items.filter(e=>e.id>top),...old.items]}:data;
+ state.history=more?{...data,items:[...old.items,...data.items]}:automatic&&old&&!day?{...old,total:data.total,items:joinFolded(data.items.filter(e=>e.id>top),old.items)}:data;
  const h=state.history,keep=Object.fromEntries([...p].filter(([k])=>!['view','day','path'].includes(k)));
  const link=extra=>href('activity',{...keep,...(extra.view==='days'?{view:'days'}:{}),...(extra.day?{day:extra.day}:{})});
  mount(heading('Activity','Task, op and run progress from the project record, on a live clock. Open an event to inspect its original context.')+
@@ -259,7 +403,7 @@ async function activity(ticket,more=false,automatic=false){
   `<section class="panel timeline vtl">${h.items.length?timelineRows(h.items,!day):empty('No matching events','Try another term or switch to all recorded events.','activity')}${h.has_more?'<div class="pagination"><button class="button" data-action="history-more">Load earlier events</button></div>':'<div class="panel-foot">Beginning of the matching record.</div>'}</section>`);
  startClocks();
 }
-async function messages(ticket){const o=await loadOverview();if(ticket!==state.ticket)return;const p=state.params;const q=(p.get('q')||'').toLowerCase(),kind=p.get('kind')||'',to=p.get('to')||'';const list=o.messages.filter(m=>(!q||JSON.stringify(m).toLowerCase().includes(q))&&(!kind||m.kind===kind)&&(!to||m.to===to));mount(heading('Messages','Reports, decisions, and handoffs left in the shared record for people and agents.')+collectionVisuals(list,'kind','Message types in the filtered record')+`<div class="toolbar">${search('Search messages or task references...',p.get('q'))}${select('kind',[['','All message types'],...Array.from(new Set(o.messages.map(m=>m.kind))).sort().map(k=>[k,human(k)])],kind,'Message type')}${select('to',[['','All recipients'],...Array.from(new Set(o.messages.map(m=>m.to).filter(Boolean))).sort().map(k=>[k,k])],to,'Recipient')}<span class="toolbar-end">${list.length} messages</span></div>${list.map(m=>`<article class="message-card"><div class="message-header"><span class="avatar">${esc((m.sender||m.session||'A').slice(0,2).toUpperCase())}</span><strong>${esc(m.sender||short(m.session,30)||'Agent')}</strong><span>to ${esc(m.to||'workspace')}</span>${m.kind==='question'?orb('listening',20,'Waiting for an answer'):''}${badge(m.kind)}<time>${esc(date(m.ts))}</time></div><div class="message-body-preview">${esc(short(m.body,650))}</div>${String(m.body||'').length>650?`<details class="message-expand"><summary>Read full message</summary><div class="message-body">${esc(m.body)}</div></details>`:''}<div class="message-footer">${m.ref?link('activity',m.ref,{ref:m.ref}):''}${m.session?link('sessions','Open session',{sid:m.session}):''}</div></article>`).join('')||empty('No matching messages','Agent reports and handoffs appear here when they are recorded.','messages')}`);}
+async function messages(ticket){const [o,all]=await Promise.all([loadOverview(),loadMessages()]);if(ticket!==state.ticket)return;const p=state.params;const q=(p.get('q')||'').toLowerCase(),kind=p.get('kind')||'',to=p.get('to')||'';const list=all.filter(m=>(!q||JSON.stringify(m).toLowerCase().includes(q))&&(!kind||m.kind===kind)&&(!to||m.to===to));mount(heading('Messages','Reports, decisions, and handoffs left in the shared record for people and agents.')+collectionVisuals(list,'kind','Message types in the filtered record')+`<div class="toolbar">${search('Search messages or task references...',p.get('q'))}${select('kind',[['','All message types'],...Array.from(new Set(all.map(m=>m.kind))).sort().map(k=>[k,human(k)])],kind,'Message type')}${select('to',[['','All recipients'],...Array.from(new Set(all.map(m=>m.to).filter(Boolean))).sort().map(k=>[k,k])],to,'Recipient')}<span class="toolbar-end">${list.length} messages</span></div>${list.map(m=>`<article class="message-card"><div class="message-header"><span class="avatar">${esc((m.sender||m.session||'A').slice(0,2).toUpperCase())}</span><strong>${esc(m.sender||short(m.session,30)||'Agent')}</strong><span>to ${esc(m.to||'workspace')}</span>${m.kind==='question'?orb('listening',20,'Waiting for an answer'):''}${badge(m.kind)}<time>${esc(date(m.ts))}</time></div><div class="message-body-preview">${esc(short(m.body,650))}</div>${String(m.body||'').length>650?`<details class="message-expand"><summary>Read full message</summary><div class="message-body">${esc(m.body)}</div></details>`:''}<div class="message-footer">${m.ref?link('activity',m.ref,{ref:m.ref}):''}${m.session?link('sessions','Open session',{sid:m.session}):''}</div></article>`).join('')||empty('No matching messages','Agent reports and handoffs appear here when they are recorded.','messages')}`);}
 async function library(ticket,more=false){const p=state.params;const seen=flags.seen('library');const data=await api('/hub/documents.json',{q:p.get('q'),category:p.get('category')||'reports',ext:p.get('ext'),offset:more?state.documents?.next_offset:0});if(ticket!==state.ticket)return;flags.settle('library',seen);state.documents=more?{...data,items:[...state.documents.items,...data.items]}:data;const d=state.documents,category=p.get('category')||'reports';
  // Library sections: one tab per collection, so runbooks and proofs each have a place of their own.
  const sections=[['reports','Reports & knowledge'],['proofs','Sealed work & proof'],['runbooks','Runbooks'],['decisions','Decisions & plans'],['tools','Tool documentation'],['all','All documents']];
@@ -311,22 +455,36 @@ async function sessions(ticket,automatic=false){
    }
    if(ticket!==state.ticket)return;
    const filtered=sessionList(index,q,p.get('agent')||'',p.get('sort')||'newest',days);
-   (inPlace?patchHtml:renderHtml)($('#analytics-index'),analyticsIndex(filtered));
-   if(index.refreshing){flags.mark(['analytics']);setTimeout(()=>{if(ticket===state.ticket&&state.route==='sessions')applyLive();},2000);}
+   // While the server rebuilds the index the same body comes back until the fold moves: draw it only
+   // when its revision (ETag) changed, and poll with a growing delay (2, 4, 8 ... 30 s), not every 2 s.
+   if(!inPlace)indexPoll={tries:0,etag:null};
+   const unchanged=inPlace&&index.refreshing&&index.etag&&index.etag===indexPoll.etag;
+   if(!unchanged)(inPlace?patchHtml:renderHtml)($('#analytics-index'),analyticsIndex(filtered));
+   indexPoll.etag=index.etag||null;
+   if(index.refreshing){flags.mark(['analytics']);const delay=refreshDelay(indexPoll.tries++);setTimeout(()=>{if(ticket===state.ticket&&state.route==='sessions')applyLive();},delay);}
+   else indexPoll.tries=0;
    await board;if(!index.refreshing)flags.settle('analytics',seen);return;
   }
-  const [d,a,family]=await Promise.all([api('/hub/session.json',{sid,child:p.get('child'),around:view==='conversation'?p.get('around'):null}),api('/hub/analytics.json',{sid,child:p.get('child')}),view==='crew'?api('/hub/analytics-children.json',{sid}):null]);
+  const [d,a,family]=await Promise.all([api('/hub/session.json',{sid,child:p.get('child'),around:view==='conversation'?p.get('around'):null}),api('/hub/analytics.json',{sid,child:p.get('child')}),view==='crew'?api('/hub/analytics-children.json',{sid}):null,view==='report'&&state.overview?Promise.all([tryTaskText(),loadMessages()]):null]);
   if(ticket!==state.ticket)return;state.detail=d;state.analytics=a;state.family=family;if(inPlace)patchHtml($('#session-detail'),sessionDetailHtml(d,selected,true));else renderSessionDetail(d,selected);flags.settle('analytics',seen);
  }catch(e){if(ticket!==state.ticket)return;if(inPlace)throw e;$(sid?'#session-detail':'#analytics-index').innerHTML=sid&&e.status===404?`<div class="panel-body">${empty('No captured session is registered','The work record names '+sid+', but no session or conversation source is available for that identifier. Completion provenance remains in the task history.','sessions')}<div class="link-row">${link('activity','Read recorded activity',{session:sid})}${link('work','Back to work and evidence')}</div></div>`:errorView(e);}
 }
 // The token and cost board above the session index (burn.js, /hub/burn.json). It loads beside the
 // index, never before it, and a failure here leaves the index alone. A day range replaces
 // the window: the browser sends its local midnights as epoch seconds; a window chip drops the range.
-async function burnBoard(ticket,inPlace,days){
+let indexPoll={tries:0,etag:null},burnPollState={tries:0,stamp:null},burnTimer=0;
+async function burnBoard(ticket,inPlace,days,retry=false){
  const p=state.params,win=['24h','7d','all'].includes(p.get('window'))?p.get('window'):'24h',q=p.get('q');
  try{const data=await api('/hub/burn.json',days?{start:days.start/1000,end:days.end/1000}:{window:win});if(ticket!==state.ticket)return;const el=$('#burn-board');if(!el)return;
-  (inPlace?patchHtml:renderHtml)(el,renderBurn(data,{href:sid=>href('sessions',{sid}),childLink:(sid,child)=>href('sessions',{sid,child,view:'conversation'}),windowHref:w=>href('sessions',{...(q?{q}:{}),window:w}),rangeLabel:days?(days.from===days.to?days.from:days.from+' to '+days.to):''}));noteBurnBoard(data);}
- catch(e){if(ticket!==state.ticket||inPlace)return;const el=$('#burn-board');if(el)el.innerHTML=`<div class="error-box"><h2>The token and cost board could not be loaded</h2><p>${esc(e.message||e)}</p><button class="button" data-action="retry">Try again</button></div>`;}
+  clearTimeout(burnTimer);if(!inPlace&&!retry)burnPollState={tries:0,stamp:null};const bp=burnPoll(data,burnPollState);burnPollState=bp.poll;
+  if(bp.draw)(inPlace?patchHtml:renderHtml)(el,renderBurn(data,{href:sid=>href('sessions',{sid}),childLink:(sid,child)=>href('sessions',{sid,child,view:'conversation'}),windowHref:w=>href('sessions',{...(q?{q}:{}),window:w}),rangeLabel:days?(days.from===days.to?days.from:days.from+' to '+days.to):''}));
+  if(bp.draw)noteBurnBoard(data);
+  // A board served while the server rebuilds it is asked for again with the index's growing delay (2, 4, 8 ... 30 s).
+  if(bp.delay!==null)burnTimer=setTimeout(()=>{if(ticket===state.ticket&&state.route==='sessions')burnBoard(ticket,true,days,true);},bp.delay);}
+ catch(e){if(ticket!==state.ticket)return;
+  // A poll that failed leaves the board it drew (still marked as updating) and asks again with the next delay, 30 s at most.
+  if(inPlace&&retry){clearTimeout(burnTimer);burnTimer=setTimeout(()=>{if(ticket===state.ticket&&state.route==='sessions')burnBoard(ticket,true,days,true);},refreshDelay(burnPollState.tries++));return;}
+  if(inPlace)return;const el=$('#burn-board');if(el)el.innerHTML=`<div class="error-box"><h2>The token and cost board could not be loaded</h2><p>${esc(e.message||e)}</p><button class="button" data-action="retry">Try again</button></div>`;}
 }
 function renderSessionDetail(d,summary){renderHtml($('#session-detail'),sessionDetailHtml(d,summary));}
 // keepLedger: a live patch of the same tab keeps the response-ledger search, filters and page.
@@ -337,7 +495,7 @@ function sessionDetailHtml(d,summary,keepLedger=false){
  if(['analysis','cost','context','actions'].includes(tab)){content=renderAnalytics(a,tab,{keepLedger});}
  else if(tab==='crew'){content=renderCrew(state.family);}
  else if(tab==='report'){
-  const tasks=(state.overview?.tasks||[]).filter(t=>t.assigned_session===sid||t.completed_session===sid||t.history?.some(e=>e.session===sid)),msgs=(state.overview?.messages||[]).filter(m=>m.session===sid);
+  const tasks=(state.overview?.tasks||[]).filter(t=>t.assigned_session===sid||t.completed_session===sid||t.history?.some(e=>e.session===sid)),msgs=(state.messages||[]).filter(m=>m.session===sid);
   content=`<div class="conversation"><section class="detail-section"><h3>Recorded work</h3>${tasks.length?`<div class="table-wrap"><table class="data-table"><tbody>${taskRows(tasks)}</tbody></table></div>`:'<p class="muted">No task assignment, completion or lifecycle event is recorded for this session.</p>'}</section><section class="detail-section"><h3>Reports and handoffs</h3>${msgs.length?msgs.map(m=>`<article class="message-card"><div class="message-header">${badge(m.kind)}${esc(date(m.ts))}</div><p class="message-body">${esc(m.body)}</p></article>`).join(''):'<p class="muted">No session messages are recorded.</p>'}</section>${link('activity','Full session work history',{session:sid})}</div>`;
  }else{
   content=`<div class="conversation">${p.has('around')?`<div class="conversation-focus">Opened around transcript line ${esc(p.get('around'))}. Usage is measured per model response; a response can contain multiple visible blocks. <a href="${esc(href('sessions',{sid,...(child?{child}:{}),view:'cost'}))}">Back to costs and tokens</a></div>`:''}${d.has_more?'<div class="pagination"><button class="button" data-action="session-earlier">Load earlier conversation</button></div>':''}${d.messages.length?d.messages.map(messageTurn).join(''):empty('No conversation is captured',coverage.reason||'Only the session registration is available.','messages')}${d.has_later?'<div class="pagination"><button class="button" data-action="session-later">Load later conversation</button></div>':''}<div class="capture-note">${esc(coverage.reason)} ${d.messages.length} of ${d.total}${coverage.total_is_exact?'':'+'} captured entries displayed.</div></div>`;
@@ -356,7 +514,7 @@ function changeFilter(key,value){const p=new URLSearchParams(state.params);for(c
 // The built-in page views (registry renderer 'builtin'), each called as view(ticket,automatic): a quiet
 // refresh passes automatic only to a page whose registry `quiet` is set, the 15 s timer to every `timer` page.
 const VIEWS={cockpit,inflight:inflightView,vcs:vcsView,records:recordsView,roadmap:roadmapView,research:researchView,overview,work,runs,live,activity:(t,automatic)=>activity(t,false,automatic),messages,library,sessions};
-async function route(force=false,quiet=false){const moved=routeAlias(location.hash);if(moved)history.replaceState(null,'',moved);const focused=document.activeElement?.dataset?.filter;const caret=document.activeElement?.selectionStart;const ticket=++state.ticket;clearInterval(state.timer);state.timer=null;state.log=null;stopLive();stopSlot();const [rawName,query='']=location.hash.slice(1).split('?');const name=rawName==='lib'?'library':rawName|| (location.pathname.startsWith('/analytics')?'sessions':'cockpit');if((!PAGE[name]||PAGE[name].gate==='profile')&&!state.overview){try{await loadOverview();}catch{}}state.route=visiblePages().some(p=>p.id===name)?name:'cockpit';if(state.route!=='cockpit')document.body.classList.remove('presentation');state.params=new URLSearchParams(query);if(state.route!=='roadmap'||state.params.get('view')!=='mission')state.missionEntry=null;$('#sidebar').classList.remove('open');$('#menu').setAttribute('aria-expanded','false');if($('#inspector').open)$('#inspector').close();if($('#command').open)$('#command').close();updateChrome();document.title=`${visiblePages().find(p=>p.id===state.route).label} | Alpaca Operations Studio`;if(!quiet)mount(routeLoader(state.route==='roadmap'&&state.params.get('view')==='mission'?'mission':state.route));try{if(force){state.overview=null;state.runs=null;state.sessions=null;}await loadOverview();if(ticket!==state.ticket)return;updateChrome();const shown=await (VIEWS[state.route]||slotView)(ticket,quiet&&pageOf(state.route).quiet===true);if(ticket!==state.ticket)return;if(!focused&&!quiet)window.scrollTo(0,0);if(focused){const input=$(`[data-filter="${CSS.escape(focused)}"]`);if(input){input.focus();if(input.type==='search'&&caret!==null)input.setSelectionRange(caret,caret);}}if(!(quiet&&shown===false)){liveOrb(false);}if(!(quiet&&shown===false))showClock();$('#connection').classList.remove('error');$('#connection span').textContent='Live';}catch(e){if(ticket!==state.ticket)return;if(quiet)return liveFailed();mount(errorView(e));$('#connection').classList.add('error');$('#connection span').textContent='Offline';}}
+async function route(force=false,quiet=false){const moved=routeAlias(location.hash);if(moved)history.replaceState(null,'',moved);const focused=document.activeElement?.dataset?.filter;const caret=document.activeElement?.selectionStart;const ticket=++state.ticket;clearInterval(state.timer);state.timer=null;state.log=null;stopLive();stopSlot();const [rawName,query='']=location.hash.slice(1).split('?');const name=rawName==='lib'?'library':rawName|| (location.pathname.startsWith('/analytics')?'sessions':'cockpit');if((!PAGE[name]||PAGE[name].gate==='profile')&&!state.overview){try{await loadOverview();}catch{}}state.route=visiblePages().some(p=>p.id===name)?name:'cockpit';if(state.route!=='cockpit')document.body.classList.remove('presentation');state.params=new URLSearchParams(query);if(state.route!=='roadmap'||state.params.get('view')!=='mission')state.missionEntry=null;$('#sidebar').classList.remove('open');$('#menu').setAttribute('aria-expanded','false');if($('#inspector').open)$('#inspector').close();if($('#command').open)$('#command').close();updateChrome();document.title=`${visiblePages().find(p=>p.id===state.route).label} | Alpaca Operations Studio`;const filtering=state.filtering;state.filtering=false;if(!quiet&&!filtering)mount(routeLoader(state.route==='roadmap'&&state.params.get('view')==='mission'?'mission':state.route));try{if(force){state.overview=null;state.runs=null;state.sessions=null;}await loadOverview();if(ticket!==state.ticket)return;updateChrome();const shown=await (VIEWS[state.route]||slotView)(ticket,quiet&&pageOf(state.route).quiet===true);if(ticket!==state.ticket)return;if(!focused&&!quiet)window.scrollTo(0,0);if(focused){const input=$(`[data-filter="${CSS.escape(focused)}"]`);if(input){input.focus();if(input.type==='search'&&caret!==null)input.setSelectionRange(caret,caret);}}if(!(quiet&&shown===false)){liveOrb(false);}if(!(quiet&&shown===false))showClock();$('#connection').classList.remove('error');$('#connection span').textContent='Live';}catch(e){if(ticket!==state.ticket)return;if(quiet)return liveFailed();mount(errorView(e));$('#connection').classList.add('error');$('#connection span').textContent='Offline';}}
 // A quiet refresh that fails keeps the page on screen. The connection label says so, and the caches
 // the page reads are marked stale again, so the next revision or idle moment retries.
 // The topbar shows the current date and time, ticking. 'New activity available' holds that spot
@@ -368,8 +526,15 @@ function showClock(){delete $('#checked-at').dataset.notice;paintClock();}
 function newActivity(){const e=$('#checked-at');e.dataset.notice='1';e.innerHTML=`<span class="clock-notice">New activity available</span><span class="clock-time">${clockTime(new Date())}</span>`;}
 paintClock();setInterval(paintClock,15000);
 function liveFailed(){flags.mark(needs(state.route,liveParams()));$('#connection').classList.add('error');$('#connection span').textContent='Stale';newActivity();return false;}
+// A filter box asks the server once typing stops: SEARCH_IDLE_MS after the last key in a search box
+// (450 ms for a date), or at once on Enter. A value equal to the address's current one asks nothing,
+// and the page keeps its content on screen while the new result loads (state.filtering skips the
+// loading skeleton route() would mount).
+const SEARCH_IDLE_MS=900;
 let filterTimer;
-document.addEventListener('input',event=>{const target=event.target;if(target.matches('input[data-filter]')){clearTimeout(filterTimer);filterTimer=setTimeout(()=>changeFilter(target.dataset.filter,target.value),450);}if(target.id==='log-search'&&state.log){state.log.query=target.value;renderLog();}if(target.id==='command-query')renderCommands(target.value);});
+function applyFilter(target){clearTimeout(filterTimer);const key=target.dataset.filter,value=target.value.trim();if((state.params.get(key.split(',')[0])||'')===value)return;const before=location.hash;state.filtering=true;changeFilter(key,value);if(location.hash===before)state.filtering=false;}
+document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.matches?.('input[data-filter]')){e.preventDefault();applyFilter(e.target);}});
+document.addEventListener('input',event=>{const target=event.target;if(target.matches('input[data-filter]')){clearTimeout(filterTimer);filterTimer=setTimeout(()=>applyFilter(target),target.type==='search'?SEARCH_IDLE_MS:450);}if(target.id==='log-search'&&state.log){state.log.query=target.value;renderLog();}if(target.id==='command-query')renderCommands(target.value);});
 document.addEventListener('change',event=>{if(event.target.matches('[data-session-switch]')){location.hash=href('sessions',{sid:event.target.value});return;}if(event.target.matches('select[data-filter]'))changeFilter(event.target.dataset.filter,event.target.value);});
 document.addEventListener('click',event=>{const e=event.target.closest('[data-line],[data-sev]');if(!e||!state.log||!e.closest('#main'))return;event.preventDefault();event.stopPropagation();if(e.dataset.sev&&state.log.scan)renderFindings(state.log.scan,e.dataset.sev);else if(e.dataset.line)jumpToLine(state.log,+e.dataset.line);},true);
 document.addEventListener('click',async event=>{const e=event.target.closest('button,a');if(!e)return;if(e.matches('a.skip')){event.preventDefault();$('#main').focus();return;}if(e.dataset.close){$('#'+e.dataset.close).close();if(e.dataset.close==='inspector'&&state.params.has('path')){state.params.delete('path');history.replaceState(null,'',href(state.route,Object.fromEntries(state.params)));}return;}if(e.dataset.ifEarlier){e.disabled=true;try{await loadEarlier(api,e.dataset.ifEarlier,e.dataset.before);patchHtml($('#inflight-board'),renderInflight(state.inflight,{focus:state.params.get('task'),href}));}catch(err){e.disabled=false;toast(err.message);}return;}if(e.dataset.task){inspectTask(e.dataset.task);return;}if(e.dataset.outcome){inspectOutcome(e.dataset.outcome);return;}if(e.dataset.clear){changeFilter(e.dataset.clear,'');return;}if(e.dataset.timelineEvent){const row=document.getElementById('event-'+e.dataset.timelineEvent);if(row){row.scrollIntoView({block:'center',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});row.classList.remove('event-flash');void row.offsetWidth;row.classList.add('event-flash');}return;}const action=e.dataset.action;if(!action)return;try{if(action==='cockpit-pause'){state.cockpitPaused=!state.cockpitPaused;return cockpit(state.ticket);}if(action==='cockpit-present'){const on=document.body.classList.toggle('presentation');e.setAttribute('aria-pressed',String(on));e.querySelector('span').textContent=on?'Exit focus view':'Focus view';return;}if(action==='retry')return route(true);if(action==='history-more'){e.disabled=true;await activity(state.ticket,true);}if(action==='documents-more'){e.disabled=true;await library(state.ticket,true);}if(action==='session-earlier'){e.disabled=true;const d=state.detail;const next=await api('/hub/session.json',{sid:d.session.sid,child:state.params.get('child'),before:d.next_before});if(state.detail!==d)return;state.detail={...next,messages:[...next.messages,...d.messages],has_later:d.has_later,next_after:d.next_after};const summary=state.sessions.sessions.find(s=>s.sid===d.session.sid)||d.session;renderSessionDetail(state.detail,summary);}if(action==='session-later'){e.disabled=true;const d=state.detail;const next=await api('/hub/session.json',{sid:d.session.sid,child:state.params.get('child'),after:d.next_after});if(state.detail!==d)return;state.detail={...next,messages:[...d.messages,...next.messages],has_more:d.has_more,next_before:d.next_before};renderSessionDetail(state.detail,state.sessions.sessions.find(s=>s.sid===d.session.sid)||d.session);}if(action==='log-follow'&&state.log){state.log.following=!state.log.following;renderLog();}if(action==='log-more')await fetchLog();if(action==='log-start'&&state.log){state.log.offset=0;state.log.text='';state.log.base=1;state.log.trimmed=false;await fetchLog(true);}if(action==='log-flagged'&&state.log){state.log.flagged=!state.log.flagged;renderLog();}if(action==='log-save'&&state.log)saveText(state.log.text,state.log.receipt+'.log');if(action==='download-document'&&state.document)saveText(state.document.text,state.document.path.split('/').pop());}catch(err){e.disabled=false;toast(err.message);}});
@@ -400,7 +565,7 @@ window.addEventListener('hashchange',()=>route());
 // it becomes a protocol-relative link, which the router and its shim leave alone.
 const routedPrefix=document.querySelector('script[data-prefix]')?.dataset.prefix;
 if(routedPrefix&&location.pathname.startsWith(routedPrefix+'/'))document.querySelectorAll('a[data-hub-home]').forEach(a=>a.setAttribute('href','//'+location.host+'/'));
-hydrate();startPulse();startArthur();Promise.resolve(route()).finally(dropHandoff);
+hydrate();installTips();startPulse();startArthur();Promise.resolve(route()).finally(dropHandoff);
 $('#inspector').addEventListener('cancel',()=>{if(state.params.has('path')){state.params.delete('path');history.replaceState(null,'',href(state.route,Object.fromEntries(state.params)));}});
 $('#command-results').addEventListener('click',e=>{if(e.target.closest('a'))$('#command').close();});
 
@@ -410,10 +575,13 @@ let liveOverviewBusy=false;
 const liveOrb=(on,mode='connecting')=>{const o=$('#live-orb');if(!o)return;o.hidden=!on;if(on&&o.getAttribute('state')!==mode)o.setAttribute('state',mode);};
 // The sidebar connection orb listens while the stream is live and reconnects while it is not.
 new MutationObserver(()=>{const c=$('#connection'),o=c?.querySelector('alpaca-orb');if(o){const want=c.classList.contains('error')?'connecting':'listening';if(o.getAttribute('state')!==want)o.setAttribute('state',want);}}).observe($('#connection'),{attributes:true,attributeFilter:['class']});
-setInterval(async()=>{if(readerEngaged()||!PAGE[state.route]?.timer||liveOverviewBusy)return;liveOverviewBusy=true;liveOrb(true);const ticket=state.ticket;const y=window.scrollY;try{await loadOverview(true);flags.mark(['runs']);if(ticket===state.ticket){const rendered=await VIEWS[state.route](ticket,true);if(rendered!==false&&ticket===state.ticket){updateChrome();window.scrollTo(0,y);showClock();}}}catch{if(ticket===state.ticket){$('#connection').classList.add('error');$('#connection span').textContent='Stale';}}finally{liveOrb(false);liveOverviewBusy=false;}},15000);
+setInterval(async()=>{if(readerEngaged()||!PAGE[state.route]?.timer||liveOverviewBusy)return;liveOverviewBusy=true;liveOrb(true);const ticket=state.ticket,mounts=state.mounts;try{await loadOverview(true);flags.mark(['runs']);if(ticket===state.ticket){const rendered=await VIEWS[state.route](ticket,true);if(rendered!==false&&ticket===state.ticket){updateChrome();if(state.mounts!==mounts)window.scrollTo(0,state.mountY);showClock();}}}catch{if(ticket===state.ticket){$('#connection').classList.add('error');$('#connection span').textContent='Stale';}}finally{liveOrb(false);liveOverviewBusy=false;}},15000);
 
 // HTTP connectivity, page freshness and source coverage are independent observations.
-async function refreshHealth(){try{const h=await api('/health.json');const e=$('#connection');const state=connectionHealth(h);e.classList.toggle('error',state.error);e.querySelector('span').textContent=state.label;e.title=state.title;}catch{const e=$('#connection');e.classList.add('error');e.querySelector('span').textContent='Offline';}}
+// The poll reads /hub/vitals.json, about 1 KB; /health.json keeps the full capture lists (t-590).
+let lastHealth=null;
+function healthBar(score,opts){const e=$('#health-meter'),m=healthMeter(score,opts);if(!e)return;e.dataset.band=m.band;e.toggleAttribute('data-stale',m.stale);e.setAttribute('aria-valuenow',m.value);e.setAttribute('aria-valuetext',m.valuetext);e.title=m.title;e.querySelector('.health-fill').style.width=m.width;e.querySelector('.health-label').textContent=m.text;}
+async function refreshHealth(){try{const h=await api('/hub/vitals.json');const e=$('#connection');const state=connectionHealth(h);e.classList.toggle('error',state.error);e.querySelector('span').textContent=state.label;e.title=state.title;lastHealth={score:h.score,at:Date.now()};healthBar(h.score);}catch(error){const e=$('#connection');e.classList.add('error');e.querySelector('span').textContent='Offline';if(error?.status===404)healthBar(null,{old:true});else healthBar(lastHealth?.score,{since:lastHealth?.at});}}
 refreshHealth();setInterval(refreshHealth,10000);
 // A proof or document section button scrolls the reader to that heading; the route stays.
 document.addEventListener('click',event=>{const button=event.target.closest('[data-document-section]');if(!button)return;const target=document.getElementById(button.dataset.documentSection);if(target){event.preventDefault();target.scrollIntoView({block:'start'});target.focus({preventScroll:true});}});

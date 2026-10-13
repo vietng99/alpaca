@@ -139,3 +139,8 @@
 
 .vc-back { display:block; margin-bottom:var(--sp-3); font-size:var(--fs-xs); }
 .vc-inspector { scroll-margin-top:var(--sp-12); }
+/* Worktree card: the overall line, the live groups (main, most recent, largest) and the on-demand fold. */
+.vc-overall { margin: 0 0 var(--sp-2); font-size: var(--fs-sm); }
+.vc-wt-group { margin: var(--sp-4) 0 var(--sp-2); padding: 0 var(--sp-5); font-size: var(--fs-xs); letter-spacing: .04em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+.vc-load { white-space: normal; height: auto; min-height: 32px; }
+@media (max-width: 600px) { .vc-wt-group { padding-left: var(--sp-3); padding-right: var(--sp-3); } }
