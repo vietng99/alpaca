@@ -252,8 +252,11 @@ def summarize(record, usage=None, links=None, now=None):
                         "record_tokens": record.get("totalTokens") if isinstance(record.get("totalTokens"), int) else None}}
 
 
-def child_links(root, conn, sid):
-    """{agent id: child identifier} for the children the session detail can open."""
+def child_links(root, conn, sid, strict=False):
+    """{agent id: child identifier} for the children the session detail can open.
+
+    A listing that cannot be read is {}; with `strict` it raises instead, so a caller that keeps
+    the result can tell a failure from a session with no children."""
     from alpaca.analytics import detail
     try:
         registered = transcripts.registered(conn, sid)
@@ -261,6 +264,8 @@ def child_links(root, conn, sid):
             registered = os.path.join(root, registered)
         found, _cut = detail._children(root, sid, registered or None)
     except Exception:
+        if strict:
+            raise
         return {}
     out = {}
     for ident, path in found.items():

@@ -17,7 +17,7 @@ DRIVER = HUB_DRIVER.split('let loads = 0;')[0] + r"""
 try {
   await send('Runtime.enable');
   await send('Page.enable');
-  await send('Page.addScriptToEvaluateOnNewDocument',{source:`window.__researchFetches=0;const originalFetch=window.fetch;window.fetch=function(url,...args){if(new URL(typeof url==='string'?url:url.url,location.href).pathname==='/hub/research.json')window.__researchFetches++;return originalFetch.call(this,url,...args);};`});
+  await send('Page.addScriptToEvaluateOnNewDocument',{source:`window.__researchFetches=0;const originalFetch=window.fetch;window.fetch=function(url,...args){const u=new URL(typeof url==='string'?url:url.url,location.href);if(u.pathname==='/hub/research.json'&&u.searchParams.get('view')==='compact')window.__researchFetches++;return originalFetch.call(this,url,...args);};`});
   await send('Page.navigate', {url: base+'/hub/#cockpit'});
   const core=await until(`!!document.querySelector('.cockpit-heading')`,2500);
   check('core renders before supplemental requests finish',core);
@@ -36,7 +36,7 @@ try {
   const researchBefore=await js('window.__researchFetches');
   check('panel read instrumentation is active',researchBefore===1,String(researchBefore));
   await js(`location.hash='#research';true`);await sleep(1200);
-  check('research navigation reuses the pending panel read',await js('window.__researchFetches')===researchBefore,await js(`JSON.stringify({before:${researchBefore??'null'},after:window.__researchFetches,title:document.title,loading:!!document.querySelector('#main .loading')})`));
+  check('research navigation does not read the cockpit panel (view=compact) again',await js('window.__researchFetches')===researchBefore,await js(`JSON.stringify({before:${researchBefore??'null'},after:window.__researchFetches,title:document.title,loading:!!document.querySelector('#main .loading')})`));
   await js(`location.hash='#roadmap';true`);
   check('navigation works while extras are pending', await until(`document.querySelector('#main h1')?.textContent==='Roadmap'`, 2500));
   await ctl('act=release');await sleep(500);
@@ -100,7 +100,7 @@ def test_core_navigation_survives_delayed_and_failed_supplemental_reads(project,
             if parsed.path == '/hub/overview.json':
                 ctl['overview'] += 1
                 overview.wait(12)
-            if parsed.path in ('/hub/research.json', '/hub/mission.json', '/board/data.json', '/data.json'):
+            if parsed.path in ('/hub/research.json', '/hub/mission.json', '/board/data.json', '/hub/live-work.json', '/data.json', '/hub/session-asks.json'):
                 extras.wait(12)
                 if parsed.path == '/hub/research.json':
                     return self._json({'error': 'fixture outage'}, 503) if ctl['fail'] else self._json({'runs': []})

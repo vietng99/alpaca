@@ -1,11 +1,12 @@
 """Plans express dependencies; neither list order nor a chat lease authorizes work."""
 import copy
 import json
+import os
 from pathlib import Path
 
 import pytest
 
-from alpaca import cli, db, work_record
+from alpaca import cli, db, proof, util, work_record
 from alpaca.tests import proofkit
 
 
@@ -342,3 +343,24 @@ def test_required_planning_policy_prevents_unmapped_cli_creation(record,capsys):
     assert '--group' in message and '--independent' in message and '--no-resources' in message
     assert len(db.rows(conn,'tasks'))==before
     assert cli.main(['task','add','op-001','Work','--title','Work','--group','build','--independent','--no-resources'])==0
+
+
+def test_project_sees_an_edited_symlinked_evidence_file(record):
+    root, conn = record
+    save(conn)
+    real = os.path.join(str(root), "proofwork", "real.txt")
+    util.write_text(real, "run output for t-001\nexit 0\n")
+    os.symlink("real.txt", os.path.join(str(root), "proofwork", "link.txt"))
+    pointer = proofkit.seal_for(str(root), "t-001", conn=conn,
+                                evidence=["local:proofwork/link.txt - the run output"])
+    db.patch(conn, "tasks", "id", "t-001", {"status": "done", "proof": pointer})
+    proof._GATE_CACHE.clear()
+    nodes = projected(root, conn)[1]
+    assert nodes["t-001"]["evidence"] == "valid" and nodes["t-002"]["state"] == "ready"
+    util.write_text(real, "forged output\nexit 0\n")
+    fresh = proof.done_gate(conn, str(root), "t-001", pointer)
+    assert not fresh[0], fresh
+    nodes = projected(root, conn)[1]
+    assert nodes["t-001"]["evidence"] == "invalid", "STALE: overview still says %s; done_gate says %r" % (
+        nodes["t-001"]["evidence"], fresh)
+    assert nodes["t-002"]["state"] == "waiting"

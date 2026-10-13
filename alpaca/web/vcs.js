@@ -5,6 +5,8 @@ const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt
 const grp = n => Number(n || 0).toLocaleString();
 const stamp = s => s ? new Date(s*1000).toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : 'Not recorded';
 const age = (s, now = Date.now() / 1000) => { if (!s) return '&ndash;'; const m = Math.max(0, Math.round((now - s) / 60)); return m < 60 ? m+' min' : m < 2880 ? Math.round(m/60)+' h' : Math.round(m/1440)+' d'; };
+// "checked 4 s ago": when git last read this worktree's status (t-592); `now` is the server's clock to dodge skew.
+const since = (s, now = Date.now() / 1000) => { if (!s) return 'not checked'; const n = Math.max(0, Math.round(now - s)); return 'checked ' + (n < 60 ? n+' s' : n < 3600 ? Math.round(n/60)+' min' : Math.round(n/3600)+' h') + ' ago'; };
 const LANE = ['var(--chart-input)','var(--chart-output)','var(--chart-write)','var(--chart-reason)','var(--chart-cache)','var(--accent)'];
 const ROW = 40, STEP = 14, PAD = 10;
 const WINDOWS = [[1,'1 day'],[7,'7 days'],[30,'30 days'],[90,'90 days']];
@@ -18,13 +20,44 @@ function rel(path, root) { return root && path.startsWith(root + '/') ? path.sli
 function sessionLink(s, href) { return s ? `<a class="text-link" href="${esc(href('sessions', {sid: s.sid}))}">${esc(s.sid.slice(0, 8))}</a><small>${esc(s.basis)}</small>` : '<span class="vc-muted">unknown</span>'; }
 const card = (title, sub, body) => `<section class="panel vc-card"><div class="vc-head"><h2>${title}</h2>${sub ? `<p>${sub}</p>` : ''}</div>${body}</section>`;
 
-function worktrees(d, href) {
-  const rows = d.worktrees.map(w => `<tr><td class="vc-path"><code>${esc(rel(w.path, d.root))}</code>${w.is_main ? ' <span class="vc-chip main">main tree</span>' : ''}${w.locked ? ' <span class="vc-chip warn" title="'+esc(w.locked)+'">locked</span>' : ''}${w.prunable ? ' <span class="vc-chip warn" title="'+esc(w.prunable)+'">prunable</span>' : ''}</td>
-    <td>${w.branch ? esc(w.branch) : '<span class="vc-chip">detached HEAD</span>'}</td><td class="num"><code>${esc(w.head_short)}</code><small>${age(w.head_time)} ago</small></td>
+// The Uncommitted cell of a worktree row: the count, its oldest change and when it was read. The status poll
+// patches these cells in place (data-wt-status), so scroll and open details stay.
+export function statusCell(w, now) {
+  const failed = w.status_error ? `<small class="vc-dirty">status could not be read (${esc(w.status_error)}); ${w.checked_at ? 'last read ' + since(w.checked_at, now).slice(8) : 'never read'}</small>` : '';
+  return `${w.uncommitted ? `<span class="vc-dirty">${grp(w.uncommitted)}</span><small>oldest ${age(w.oldest_change, now)}</small>` : w.uncommitted === null ? '&ndash;' : '0'}${failed || `<small class="vc-muted">${since(w.checked_at, now)}</small>`}`;
+}
+// Said when more worktrees are hot than one tick reads: their counts can be older than the 15 s the page aims for.
+export const backlogNote = n => n > 0 ? `${grp(n)} hot worktree${n === 1 ? '' : 's'} wait${n === 1 ? 's' : ''} for the next status read, so ${n === 1 ? 'its count' : 'their counts'} may be more than 15 s old.` : '';
+// The repository-level line over every worktree: snapshot fields, or the same counts from the rows of an older one.
+export function overallOf(d) {
+  if (d.overall) return d.overall;
+  const rows = d.worktrees || [], known = rows.filter(w => w.uncommitted != null);
+  return {worktrees: rows.length, uncommitted: known.reduce((n, w) => n + w.uncommitted, 0), loaded: known.length,
+          not_loaded: rows.length - known.length, dirty: known.filter(w => w.uncommitted).length, failed: rows.filter(w => w.status_error).length,
+          main: (rows.find(w => w.is_main) || rows[0] || {}).path};
+}
+export const overallNote = o => `${grp(o.worktrees)} worktree${o.worktrees === 1 ? '' : 's'} &middot; <strong>${grp(o.uncommitted)}</strong> uncommitted file${o.uncommitted === 1 ? '' : 's'} across the ${grp(o.loaded)} with a known status${o.not_loaded ? ` &middot; ${grp(o.not_loaded)} not loaded` : ''}${o.failed ? ` &middot; <span class="vc-dirty">${grp(o.failed)} could not be read</span>` : ''}`;
+const chips = w => `${w.is_main ? ' <span class="vc-chip main">main tree</span>' : ''}${w.locked ? ' <span class="vc-chip warn" title="'+esc(w.locked)+'">locked</span>' : ''}${w.prunable ? ' <span class="vc-chip warn" title="'+esc(w.prunable)+'">prunable</span>' : ''}`;
+const branchCell = w => w.branch ? esc(w.branch) : '<span class="vc-chip">detached HEAD</span>';
+const statusTd = (w, now) => `<td class="num" data-wt-status="${esc(w.path)}" data-checked="${esc(w.checked_at || 0)}|${esc(w.status_error || '')}">${w.uncommitted == null && !w.checked_at && !w.status_error ? '&ndash;<small class="vc-muted">not loaded</small>' : statusCell(w, now)}</td>`;
+function treeRows(d, href, rows) {
+  return rows.map(w => `<tr><td class="vc-path"><code>${esc(rel(w.path, d.root))}</code>${chips(w)}</td>
+    <td>${branchCell(w)}</td><td class="num"><code>${esc(w.head_short)}</code><small>${age(w.head_time)} ago</small></td>
     <td class="num">${w.ahead == null ? '&ndash;' : `<span class="${w.ahead ? 'vc-ahead' : ''}">+${w.ahead}</span> / <span class="${w.behind ? 'vc-behind' : ''}">-${w.behind}</span>`}</td>
-    <td class="num">${w.uncommitted ? `<span class="vc-dirty">${grp(w.uncommitted)}</span><small>oldest ${age(w.oldest_change)}</small>` : '0'}</td><td>${sessionLink(w.session, href)}</td></tr>`).join('');
-  return card('Worktrees', `Ahead and behind are compared with ${esc(d.main)}. Session attribution uses the active working directory or latest recorded file edit; its basis appears below the session.`,
-    `<div class="table-wrap"><table class="data-table vc-table"><thead><tr><th>Worktree</th><th>Branch</th><th>HEAD</th><th>Ahead / behind ${esc(d.main)}</th><th>Uncommitted</th><th>Session</th></tr></thead><tbody>${rows}</tbody></table></div>`);
+    ${statusTd(w, d.served_at)}<td>${sessionLink(w.session, href)}</td></tr>`).join('');
+}
+// The worktree card keeps live only the main tree, the 5 most recently active and the 5 largest worktrees (each
+// row's watch field says which); the rest sit in a closed fold and load one at a time on demand ("Load status").
+function worktrees(d, href) {
+  const o = overallOf(d), main = d.worktrees.find(w => w.path === o.main);
+  const recent = d.worktrees.filter(w => w !== main && w.watch === 'recent'), largest = d.worktrees.filter(w => w !== main && w.watch === 'largest');
+  const other = d.worktrees.filter(w => w !== main && w.watch !== 'recent' && w.watch !== 'largest');
+  const head = `<thead><tr><th>Worktree</th><th>Branch</th><th>HEAD</th><th>Ahead / behind ${esc(d.main)}</th><th>Uncommitted</th><th>Session</th></tr></thead>`;
+  const group = (title, rows) => rows.length ? `<h3 class="vc-wt-group">${title}</h3><div class="table-wrap"><table class="data-table vc-table">${head}<tbody>${treeRows(d, href, rows)}</tbody></table></div>` : '';
+  const rest = other.map(w => `<tr><td class="vc-path"><code>${esc(rel(w.path, d.root))}</code>${chips(w)}</td><td>${branchCell(w)}</td>${statusTd(w, d.served_at)}<td><button type="button" class="button vc-load" data-wt-load="${esc(w.path)}">Load status</button></td></tr>`).join('');
+  const fold = other.length ? `<details class="vc-disclosure" data-key="other-worktrees"><summary>Other worktrees (${grp(other.length)})</summary><p class="vc-muted vc-pad">Not read on their own: a count here is the last one known. Load status reads one now and keeps it live for 2 minutes.</p><div class="table-wrap"><table class="data-table vc-table"><thead><tr><th>Worktree</th><th>Branch</th><th>Uncommitted</th><th>Status</th></tr></thead><tbody>${rest}</tbody></table></div></details>` : '';
+  return card('Worktrees', `Live: the main tree, the 5 most recently active and the 5 largest worktrees; the others load on demand. Ahead and behind are compared with ${esc(d.main)}. Session attribution uses the active working directory or latest recorded file edit; its basis appears below the session.`,
+    `<p class="vc-pad vc-overall" data-wt-overall>${overallNote(o)}</p><p class="vc-muted vc-pad" data-wt-backlog>${backlogNote(d.hot_backlog)}</p>${group('Main tree', main ? [main] : [])}${group('Most recent', recent)}${group('Largest', largest)}${fold}`);
 }
 
 function graph(d, days, windowHref, view) {
@@ -102,18 +135,18 @@ function denials(d, href) {
 
 export function renderVcs(d, {days = 7, href, windowHref, view = {}}) {
   if (d.repository === false) return `<div class="empty">${orb('breathing',32)}<h3>No git repository</h3><p>${esc(d.root)} is not a git repository yet. Run git init there to see its branches, commits and local changes here.</p></div>`;
-  const dirty=d.worktrees.reduce((n,w)=>n+w.uncommitted,0), dirtyTrees=d.worktrees.filter(w=>w.uncommitted).length;
+  const o=overallOf(d), dirty=o.uncommitted, dirtyTrees=o.dirty;
   const attention=[
     [dirtyTrees,'worktrees with changes'],
     [d.worktrees.filter(w=>w.locked||w.prunable).length,'locked or prunable worktrees'],
     [d.remotes.tracking.filter(t=>t.gone||((t.ahead||0)>0&&(t.behind||0)>0)).length,'diverged or missing upstreams (last fetch)'],
     [d.activity.stash.length,'stash entries']
   ];
-  return `<div class="vc-context"><code>${esc(d.root)}</code><span class="vc-muted">Read-only &middot; Updated ${esc(stamp(d.generated))}</span></div>
+  return `<div class="vc-context"><code>${esc(d.root)}</code><span class="vc-muted">Read-only &middot; Updated ${esc(stamp(d.snapshot_at||d.generated))}${d.refreshing?' &middot; refreshing':''}</span></div>
     <nav class="vc-section-nav" aria-label="Repository sections"><a href="#vc-branches" data-vc-section="branches">Branches</a><a href="#vc-worktrees" data-vc-section="worktrees">Worktrees</a><a href="#vc-changes" data-vc-section="changes">Local changes</a><a href="#vc-activity" data-vc-section="activity">Activity</a><a href="#vc-remotes" data-vc-section="remotes">Remotes</a></nav>
     ${graph(d,days,windowHref,view)}
 
-    <div class="vc-overview" id="vc-branches">${branchOverview(d)}${card('Workspace signals', 'Counts across worktrees. Remote status reflects the last fetch.', `<div class="vc-signals">${attention.map(([n,l])=>`<div><strong>${grp(n)}</strong><span>${l}</span></div>`).join('')}</div><p class="vc-muted vc-pad">${grp(dirty)} changed-file entries across ${grp(d.worktrees.length)} worktrees. File details below cover the main checkout.</p>`)}</div>
+    <div class="vc-overview" id="vc-branches">${branchOverview(d)}${card('Workspace signals', 'Counts across worktrees. Remote status reflects the last fetch.', `<div class="vc-signals">${attention.map(([n,l])=>`<div><strong>${grp(n)}</strong><span>${l}</span></div>`).join('')}</div><p class="vc-muted vc-pad">${grp(dirty)} changed-file entries across the ${grp(o.loaded)} of ${grp(o.worktrees)} worktrees with a known status. File details below cover the main checkout.</p>`)}</div>
     ${disclosure('worktrees',`Worktrees (${grp(d.worktrees.length)})`,`${grp(dirtyTrees)} with local changes`,worktrees(d,href))}
     ${disclosure('changes','Local changes',`Main checkout: ${d.main}`,uncommitted(d,href),true)}
     ${disclosure('activity','Git activity',`${grp(d.activity.items.length)} captured events`,activity(d))}
@@ -129,7 +162,23 @@ export function captureVcs(root) {
   return {selected:state.selected,query:root.querySelector('[data-vc-search]')?.value||'',expanded:Boolean(state.expanded),match:state.match,
     anchor,offset:graph?graph.scrollTop%ROW:0,top:graph?.scrollTop||0,left:graph?.scrollLeft||0};
 }
-export function bindVcs(root,d,view={}) {
+// "Load status" of a worktree outside the live set: /hub/vcs-tree.json reads it now. The hub passes its own loader
+// (actions.loadTree) so the row also joins the status it keeps; alone, the board fetches it itself.
+async function fetchTree(path) {
+  const r=await fetch('/hub/vcs-tree.json?path='+encodeURIComponent(path),{credentials:'same-origin'});
+  const row=await r.json();if(!r.ok||row.error)throw Error(row.error||String(r.status));return row;
+}
+async function loadTree(root,button,actions) {
+  const path=button.dataset.wtLoad;button.disabled=true;button.textContent='Loading';
+  try{
+    const row=await (actions.loadTree||fetchTree)(path);
+    const cell=[...root.querySelectorAll('[data-wt-status]')].find(c=>c.dataset.wtStatus===path);
+    if(cell&&row){cell.innerHTML=statusCell(row,row.generated);cell.dataset.checked=(row.checked_at||0)+'|'+(row.status_error||'');}
+    button.textContent='Load again';
+  }catch{button.textContent='Could not load; try again';}
+  finally{button.disabled=false;}
+}
+export function bindVcs(root,d,view={},actions={}) {
   if(!root||d.repository===false)return;
   const state={...view,selected:view.selected||d.graph.commits[0]?.sha};boards.set(root,state);
   const graph=root.querySelector('.vc-graph'), search=root.querySelector('[data-vc-search]');
@@ -159,6 +208,7 @@ export function bindVcs(root,d,view={}) {
   root.oninput=e=>{if(e.target.matches('[data-vc-search]')){state.match=null;searchUpdate();}};
   root.onkeydown=e=>{if(e.key==='Enter'&&e.target.matches('[data-vc-search]')){e.preventDefault();root.querySelector('[data-vc-next]').click();}};
   root.onclick=e=>{
+    const load=e.target.closest('[data-wt-load]');if(load){e.preventDefault();loadTree(root,load,actions);return;}
     const button=e.target.closest('[data-vc-commit],[data-vc-expand],[data-vc-next],[data-vc-jump],[data-vc-section]');if(!button)return;
     if(button.hasAttribute('data-vc-section')){e.preventDefault();const target=root.querySelector('#vc-'+button.dataset.vcSection);if(target){if(target.tagName==='DETAILS')target.open=true;target.scrollIntoView({block:'start'});}return;}
     if(button.hasAttribute('data-vc-commit')){select(button.dataset.vcCommit);locate(button.dataset.vcCommit);if(matchMedia('(max-width:1200px)').matches)root.querySelector('[data-vc-inspector]')?.scrollIntoView({block:'start'});return;}

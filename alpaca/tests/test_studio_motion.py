@@ -30,7 +30,7 @@ CHECK_IDS = (re.findall(r"^check\('([^']+)'", SOURCE, re.M) + re.findall(r"^  \[
 MUTATIONS = dict(re.findall(r"^  '([a-z-]+)': \{check: '([^']+)'", SOURCE, re.M))
 # Run in the suite by default: a still CSS animation, a removed timer, a removed state rule, a snap
 # instead of an ease, and a lost live-path generation.
-DEFAULT_MUTATIONS = ["beams-still", "pulse-cycle-off", "arthur-no-offline", "shapeshift-snap", "lib-marks-all"]
+DEFAULT_MUTATIONS = ["beams-still", "beams-no-pause", "pulse-cycle-off", "arthur-no-offline", "shapeshift-snap", "lib-marks-all"]
 
 
 def _rows(kind):

@@ -661,3 +661,61 @@ def test_cached_capture_cannot_hide_new_malformed_source(tmp_path):
     assert failed['wiki']['status']=='failed'
     assert failed['wiki']['through_event']==first['wiki']['through_event']
     conn.close()
+
+
+def test_summary_counts_what_status_lists(tmp_path):
+    """t-590: the hub's vitals poll reads summary(); its counts and overall status match status()."""
+    path, _ = source(tmp_path, '{"type":"user"}\n')
+    child = tmp_path / 'child.jsonl'; child.write_text('{"type":"user"}\n' * 3)
+    obs.expect_source(str(tmp_path), 'kid', 'codex', locator=str(child), parent_session='s', native_id='kid',
+                      capabilities={'child_inventory_complete': True}, closed=True)
+    obs.expect_source(str(tmp_path), 'lost', 'codex', parent_session='s', native_id='lost')
+    obs.expect_source(str(tmp_path), 'gone', 'codex', locator=str(tmp_path / 'gone.jsonl'), parent_session='s')
+    obs.expect_source(str(tmp_path), 'extra', 'codex', locator=str(path), required=False)
+    conn = db.connect(str(tmp_path))
+    obs.issue(conn, 'source-unreadable', source_id='x', detail='PermissionError')
+    conn.close()
+    full, slim = obs.status(str(tmp_path)), obs.summary(str(tmp_path))
+    cov = full['coverage']
+    assert slim['coverage'] == {'expected': cov['expected'], 'registered': cov['registered'], 'readable': cov['readable'],
+                                'missing_children': len(cov['missing_children']),
+                                'unknown_children': len(cov['unknown_children']), 'complete': cov['complete']}
+    assert slim['coverage']['missing_children'] == 2 and slim['coverage']['readable'] == 2
+    assert slim['backlog'] == full['backlog'] and slim['backlog']['bytes'] > 0
+    assert slim['status'] == full['status'] and slim['collector'] == full['collector']
+    assert slim['issues'] == {'open': 1, 'last_seen': [i['last_seen'] for i in full['issues']]}
+    assert 'sources' not in slim
+
+
+def test_summary_of_an_empty_record(tmp_path):
+    db.connect(str(tmp_path)).close()
+    slim = obs.summary(str(tmp_path))
+    assert slim['status'] == 'degraded' and slim['issues'] == {'open': 0, 'last_seen': []}
+    assert slim['coverage'] == {'expected': 0, 'registered': 0, 'readable': 0, 'missing_children': 0,
+                                'unknown_children': 0, 'complete': False}
+
+
+def test_snapshot_job_for_a_gone_transcript_closes_without_new_events(tmp_path):
+    # t-606: 976 jobs for pruned subagent files retried every 15 minutes for days, each retry
+    # appending a drain-failed. After GONE_AFTER_FAILURES tries the job closes, quietly.
+    from alpaca.observability import consumers
+    conn = db.connect(str(tmp_path))
+    gone = tmp_path/'gone.jsonl'
+    obs.expect_source(str(tmp_path),'gone','codex',locator=str(gone))
+    consumers.queue_snapshot(conn,'gone',event_id=1)
+    for _ in range(consumers.GONE_AFTER_FAILURES):
+        conn.execute('UPDATE obs_projection_job SET next_attempt=NULL')
+        assert consumers.run_snapshot_jobs(str(tmp_path),conn) == {'completed':0,'failed':1}
+    events = len(rows(tmp_path,'events'))
+    conn.execute('UPDATE obs_projection_job SET next_attempt=NULL')
+    assert consumers.run_snapshot_jobs(str(tmp_path),conn) == {'completed':0,'failed':0,'gone':1}
+    job, = rows(tmp_path,'obs_projection_job')
+    assert job['status'] == 'done' and job['error'] == 'TranscriptGone'
+    assert consumers.run_snapshot_jobs(str(tmp_path),conn) == {'completed':0,'failed':0}
+    assert len(rows(tmp_path,'events')) == events
+    assert [i['code'] for i in rows(tmp_path,'obs_issue') if i['resolved_at'] is None] == ['transcript-gone']
+    # a source that comes back is queued again and preserved
+    gone.write_text('{"type":"user"}\n')
+    consumers.queue_snapshot(conn,'gone',event_id=2)
+    assert consumers.run_snapshot_jobs(str(tmp_path),conn) == {'completed':1,'failed':0}
+    conn.close()

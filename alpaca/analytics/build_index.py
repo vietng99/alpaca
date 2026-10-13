@@ -3,12 +3,34 @@ import glob, json, os, re
 import copy
 from collections import OrderedDict
 import threading
-from alpaca import db, determinism, paths, project, render, sessions_view, util
+from alpaca import db, determinism, paths, project, render, sessions_view, util, where
 from alpaca.analytics import parse_session as ps
-from alpaca.analytics import children, usage
+from alpaca.analytics import children, detail, metrics, usage
 
-_PARSE_CACHE = OrderedDict()
-_PARSE_LOCK = threading.RLock()
+# One entry per session, sized to the session list and not to a small LRU: a fold walks every
+# session in order, so any cache smaller than the list evicts each entry before it is reused. An
+# entry holds the pieces of metrics.analyze and ps.parse that collect() reads, keyed on
+# metrics.analysis_key plus the transcript path and the exact file list parse folds (see _stamp).
+# Everything else a row carries (record counts, class, subagents, children.revision) is cheap and
+# recomputed on every collect, so a cached entry can never go stale on those.
+#
+# What each cached piece reads, and what moves the key:
+#   analyze: transcript, pool file, children files (stat, first MAX_CHILDREN), session/event/message
+#     heads, manifest and operator meta, obs_source rows, rate cards, read bounds: all in
+#     detail.source_revision / ratecards.revision. Every subagent file past the child cap
+#     (subagent_files) and every source locator's readability (locators) are in it as well.
+#   parse: the transcript at tpath (revision stat of the primary, tpath in the stamp) and the
+#     agent-*.jsonl count (the parse file list in the stamp). Its `projects` figure also reads
+#     project markers on disk outside the session (where.attribute), which no key can cover, so
+#     collect() recomputes `projects` from the cached edited-file list on every fold (_projects).
+# The size bound counts serialized JSON characters, not memory: a measured 1321-session record
+# holds 5.4 MB of JSON as 16 MB of Python objects (ratio 2.95), so the cap below allows about
+# 3x its value in resident memory.
+MAX_ROWS = 8192
+MAX_ROW_JSON_BYTES = 128 * 1024 * 1024
+_ROWS = OrderedDict()
+_ROW_BYTES = 0
+_ROWS_LOCK = threading.RLock()
 
 def _sessions_dir(root):
     return os.path.join(paths.runtime_dir(root), "analytics", "sessions")
@@ -116,9 +138,89 @@ def _codex_session(root, sid, conn):
     return value
 
 
+def _projects(files, ids):
+    """parse's `projects` figure from its edited-file counts: the project owning each target now.
+
+    `ids` memoizes the project id per owning root for one collect, so a root is read once."""
+    found = {}
+    for target, count in files.items():
+        root = where.derive(target)
+        if root not in ids:
+            ids[root] = where.project_id(root)
+        if ids[root]:
+            found[ids[root]] = found.get(ids[root], 0) + count
+    return found
+
+
+def _stamp(key, tpath, available):
+    """The cached entry's identity: the analysis key, the parsed path and the files parse folds."""
+    files = ps.transcript_files(tpath)[1:] if available else []
+    return (key, tpath, available, files)
+
+
+def _entry(root, sid, key, tpath, available, force):
+    """The cached analysis (and parse) of one session at `key`, computed when missing or stale."""
+    identity = (key[0], sid)
+    stamp = _stamp(key, tpath, available)
+    with _ROWS_LOCK:
+        cached = None if force else _ROWS.get(identity)
+        if cached is not None and cached['stamp'] == stamp:
+            _ROWS.move_to_end(identity)
+            return identity, cached
+    analysis = metrics.analyze(root, sid)
+    entry = {'stamp': stamp, 'src': analysis['revision'], 'parsed': None, 'size': 0,
+             'analysis': {name: analysis[name] for name in ('summary', 'coverage', 'imported_usage')}}
+    entry['analysis']['turns'] = analysis['session']['turns']
+    entry['size'] = len(json.dumps(entry['analysis'], ensure_ascii=True))
+    with _ROWS_LOCK:
+        _drop(identity)
+        _ROWS[identity] = entry
+        _account(entry['size'])
+        _trim()
+    return identity, entry
+
+
+def _keep_parsed(identity, entry, parsed):
+    """Attach a fresh parse to its entry unless it is over the per-row bound or no longer cached."""
+    size = len(json.dumps(parsed))
+    if size > 1024 * 1024:
+        return
+    with _ROWS_LOCK:
+        if _ROWS.get(identity) is not entry or entry['parsed'] is not None:
+            return
+        entry['parsed'] = copy.deepcopy(parsed)
+        entry['size'] += size
+        _account(size)
+        _trim()
+
+
+def _account(delta):
+    global _ROW_BYTES
+    _ROW_BYTES += delta
+
+
+def _drop(identity):
+    prior = _ROWS.pop(identity, None)
+    if prior is not None:
+        _account(-prior['size'])
+
+
+def _trim():
+    # Callers hold _ROWS_LOCK. An empty table ends the loop whatever the counter says.
+    while _ROWS and (len(_ROWS) > MAX_ROWS or _ROW_BYTES > MAX_ROW_JSON_BYTES):
+        _account(-_ROWS.popitem(last=False)[1]['size'])
+
+
+def _prune(root, sessions):
+    """Forget the entries of sessions that are no longer listed for this root."""
+    real = os.path.realpath(root)
+    with _ROWS_LOCK:
+        for identity in [item for item in _ROWS if item[0] == real and item[1] not in sessions]:
+            _drop(identity)
+
+
 def collect(root, force=False, only=None):
     """Read classified sessions without migrations, cache files, or other writes."""
-    from alpaca.analytics import metrics
     conn = db.connect_readonly(root)
     try:
         result = []
@@ -130,31 +232,31 @@ def collect(root, force=False, only=None):
         families = children.discover(root, conn)
         folded = children.parents(families)
         sessions = ({r["sid"] for r in db.rows(conn, "sessions")} | set(sources)) - set(folded)
-        for sid in sorted(sessions):
-            if only is not None and sid != only:
-                continue
+        wanted = sorted(sessions) if only is None else [sid for sid in sorted(sessions) if sid == only]
+        # Every revision is read inside one batch: obs_source is scanned once, not twice per session.
+        with detail.revision_batch(root):
+            keys = {sid: metrics.analysis_key(root, sid) for sid in wanted}
+        if only is None:
+            _prune(root, sessions)
+        owners = {}
+        for sid in wanted:
             tpath = sources.get(sid)
             available = bool(tpath and os.path.isfile(tpath))
             d = _record_only(conn, sid)
-            analysis = metrics.analyze(root, sid)
-            src = analysis['revision']
-            key = (os.path.realpath(root), sid, json.dumps(src, sort_keys=True))
+            identity, entry = _entry(root, sid, keys[sid], tpath, available, force)
+            analysis, src = copy.deepcopy(entry['analysis']), copy.deepcopy(entry['src'])
             if available:
-                try:
-                    with _PARSE_LOCK:
-                        parsed = None if force else copy.deepcopy(_PARSE_CACHE.get(key))
-                    if parsed is None:
+                if entry['parsed'] is not None:
+                    d.update(copy.deepcopy(entry['parsed']))
+                else:
+                    try:
                         parsed = ps.parse(tpath, include_children=False)
-                        with _PARSE_LOCK:
-                            for stale in [item for item in _PARSE_CACHE if item[:2] == key[:2]]:
-                                del _PARSE_CACHE[stale]
-                            if len(json.dumps(parsed)) <= 1024 * 1024:
-                                _PARSE_CACHE[key] = copy.deepcopy(parsed)
-                            while len(_PARSE_CACHE) > 32:
-                                _PARSE_CACHE.popitem(last=False)
-                    d.update(parsed)
-                except (OSError, ValueError, TypeError) as exc:
-                    d['parse_error'] = '%s: %s' % (type(exc).__name__, exc)
+                        d.update(parsed)
+                        _keep_parsed(identity, entry, parsed)
+                    except (OSError, ValueError, TypeError) as exc:
+                        d['parse_error'] = '%s: %s' % (type(exc).__name__, exc)
+                if 'projects' in d:
+                    d['projects'] = _projects(d['files'], owners)
             d['sid'] = sid
             d['capture'] = 'registered-transcript' if available else 'explicit-record'
             d['_src'] = src
@@ -165,7 +267,7 @@ def collect(root, force=False, only=None):
                 'cache_write_5m': 'cache_creation_5m_tokens', 'cache_write_1h': 'cache_creation_1h_tokens'}.items()}
             d['usage_available'] = bool(coverage['usage_total_is_exact'] and all(value is not None for value in d['tokens'].values()))
             d['usage_incomplete'] = not d['usage_available']
-            d['visible_assistant_messages'] = analysis['session']['turns']
+            d['visible_assistant_messages'] = analysis['turns']
             d['coverage'] = coverage
             d['conversation_coverage'] = coverage
             if available:

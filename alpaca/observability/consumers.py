@@ -57,6 +57,11 @@ VIEW_BUDGET_S = 120.0
 #: this many seconds (`capture_runner.record`), so a batch retried at every backoff step leaves one
 #: `drain-failed` or `capture-deferred`.
 OUTCOME_QUIET_S = 3600.0
+#: t-606: a snapshot job whose registered transcript is still absent after this many failed tries
+#: (about five minutes of backoff) is closed as `TranscriptGone` instead of retried every 15 minutes
+#: for ever; each retry appended a `drain-failed` (73,618 of them for 976 pruned subagent files).
+#: A source that comes back is observed again and re-queued (`queue_snapshot`).
+GONE_AFTER_FAILURES = 5
 
 
 # Metadata only, bounded independently of transcript sizes. A fresh process
@@ -707,6 +712,15 @@ def snapshot_observations(root, conn, *, max_records=1000):
     return {'status':'queued','through_observation':records[-1]['id']}
 
 
+def _source_gone(root, conn, session):
+    """True when the session's registered transcript is not a file (none registered counts as gone)."""
+    from alpaca import transcripts
+    src = transcripts.registered(conn, session)
+    if src and not os.path.isabs(src):
+        src = os.path.join(root, src)
+    return not (src and os.path.isfile(src))
+
+
 def run_snapshot_jobs(root, conn, *, limit=8, stop_requested=None):
     """One unavailable source cannot prevent preservation of another session."""
     from alpaca import transcripts
@@ -744,6 +758,17 @@ def run_snapshot_jobs(root, conn, *, limit=8, stop_requested=None):
     for job in jobs:
         if stop_requested and stop_requested():
             break
+        if job['failures'] >= GONE_AFTER_FAILURES and _source_gone(root, conn, job['session']):
+            # Nothing is left to copy: close the job without a lane run, so no outcome event is
+            # appended. The gap stays visible as one `transcript-gone` issue for the session.
+            retained = os.path.isfile(transcripts.local_path(root, job['session']))
+            with db.transaction(conn):
+                conn.execute("UPDATE obs_projection_job SET status='done',next_attempt=NULL,error='TranscriptGone',updated_at=? WHERE job_key=?",(util.now_iso(),job['job_key']))
+                conn.execute('UPDATE obs_issue SET resolved_at=? WHERE issue_id=? AND resolved_at IS NULL',(util.now_iso(),_id(None,'snapshot-failed',job['job_key'])))
+                issue(conn,'transcript-gone',identity=job['session'],
+                      detail='registered transcript absent after %d tries; local copy %s' % (job['failures'],'retained' if retained else 'absent'))
+            result['gone'] = result.get('gone',0)+1
+            continue
         try:
             fact = _run_in_wiki_lane(root, job['session'], preserve, job['session'])
             if any(row.get('mode') in ('busy','missing','truncated') for row in fact.get('registry_children',[])):

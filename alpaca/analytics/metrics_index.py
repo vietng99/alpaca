@@ -15,7 +15,7 @@ import copy
 import json
 import threading
 
-from alpaca.analytics import metrics, ratecards
+from alpaca.analytics import detail, metrics, ratecards
 
 # Keep the measured project inventory (773 parents and 2741 children) across
 # complete rebuilds. Bound bytes too: compact coverage/cost metadata can vary.
@@ -90,6 +90,12 @@ def _families(root):
 
 
 def index(root, sessions, families=None, *, yield_control=None):
+    # One connection, one obs_source read and one rate-card read for the whole run (t-577).
+    with detail.revision_scope(root), detail.revision_batch(root):
+        return _index(root, sessions, families, yield_control=yield_control)
+
+
+def _index(root, sessions, families, *, yield_control):
     """One row per work session. t-143: a subagent is never a row of its own; each parent row
     carries `subagents` (its children's measurements) and `family` (main plus children), and the
     project totals cover main conversations and every readable subagent."""

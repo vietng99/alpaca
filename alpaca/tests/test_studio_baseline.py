@@ -23,7 +23,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 NODE = shutil.which("node")
 VIEWS = ["login", "hub", "cockpit", "overview", "roadmap", "roadmap-mission", "roadmap-finished", "roadmap-finished-op",
          "inflight", "research", "work",
-         "activity", "messages", "library", "records", "records-decisions", "records-proofs", "records-wiki",
+         "activity", "messages", "library", "records", "records-decisions", "records-proofs", "records-wiki", "records-vault",
          "sessions", "sessions-range", "vcs"]
 
 

@@ -177,13 +177,16 @@ def task_paths(task, contract_texts=()):
     return out
 
 
-def targets(call, root):
-    """Project files one call edits, writes or names in a command, relative to the project root."""
+def targets(call, root, resolved=False):
+    """Project files one call edits, writes or names in a command, relative to the project root.
+
+    `resolved` says root is already a real path, so a caller that resolves it once is not charged
+    a realpath per call."""
     raw = [call["path"]] if call.get("path") else []
     if call.get("cmd"):
         raw += [m for m in PATH_RE.findall(call["cmd"]) if not m.startswith("-")]
     out = set()
-    root = os.path.realpath(root) if root else ""
+    root = (root if resolved else os.path.realpath(root)) if root else ""
     for item in raw:
         item = item.strip("'\"")
         if not item:

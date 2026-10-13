@@ -163,6 +163,14 @@ class _EmptyStore(Exception):
     """A store file that holds no committed schema yet."""
 
 
+#: the header lines `_store_scan` looks for in each raw note, compiled once (651k pattern lookups
+#: per scan otherwise, t-575 server findings)
+_EVENT_LINE = re.compile(r'^event: (\d+)$', re.M)
+_SOURCE_REF_LINE = re.compile(r'^source_ref: ', re.M)
+_ROLE_TRANSCRIPT_LINE = re.compile(r'^role: transcript$', re.M)
+_SESSION_LINE = re.compile(r'^session: (.+)$', re.M)
+
+
 def _store_scan(cfg) -> dict:
     """Counts and captured event ids of the Rune2 store, read-only, without creating it."""
     counts = dict(documents=0, active_blocks=0, nodes=0, edges=0, answers=0, transcript_documents=0)
@@ -194,16 +202,16 @@ def _store_scan(cfg) -> dict:
                                     "WHERE b.status='active' AND b.ordinal=0 AND d.kind='raw'"):
                 # An event is captured by its own note. An Alpaca source (FR-9) names the same
                 # event but carries `source_ref:`, so it never makes its event count as captured.
-                match = re.search(r'^event: (\d+)$', row['text'], re.M)
+                match = _EVENT_LINE.search(row['text'])
                 if match:
-                    if re.search(r'^source_ref: ', row['text'], re.M):
+                    if _SOURCE_REF_LINE.search(row['text']):
                         sourced.add(int(match[1]))
                     else:
                         captured.add(int(match[1]))
                         captured_docs.setdefault(int(match[1]), row['doc_id'])
-                if re.search(r'^role: transcript$', row['text'], re.M):
+                if _ROLE_TRANSCRIPT_LINE.search(row['text']):
                     counts['transcript_documents'] += 1
-                    session = re.search(r'^session: (.+)$', row['text'], re.M)
+                    session = _SESSION_LINE.search(row['text'])
                     if session:
                         from .ingest.drain import header_value
                         transcript_sessions.add(header_value(session[1].strip()))
@@ -2249,3 +2257,103 @@ def ingest(root, source, *, doc_id: str, session: str | None = None) -> dict:
         except FileNotFoundError:
             pass
         os.close(directory)
+
+
+# ------------------------------------------------------------------ the Studio evidence graph
+GRAPH_QUOTE_CHARS = 400
+
+
+def _graph_store(root):
+    """The read-only store connection for the graph readers, or (None, reason) when there is none."""
+    cfg = Config.for_project(root)
+    if not cfg.db_path.exists():
+        return None, 'no Rune2 store yet (bin/alpaca wiki recover builds it)'
+    if _store_locked(cfg):
+        return None, 'the store is locked by a rebuild'
+    behind = _removal_acts_pending(root)              # the serving gate: a store behind the record serves nothing
+    if behind is not None:
+        return None, ("the store has not processed the record's removal acts through event %s; %s applies them"
+                      % (behind['record_through'], behind['recovery']))
+    conn = open_db_readonly(cfg)
+    if not _table_exists(conn, 'claims') or not _table_exists(conn, 'edges'):
+        conn.close()
+        return None, 'the store holds no claims yet'
+    return conn, None
+
+
+def graph_claims(root, *, limit: int = 2000) -> dict:
+    """The wiki's checked claims for the Studio evidence graph: each claim with its verdict, the
+    question it answered, the record items its source assertion names (`about`) and the source
+    document. Only claims whose source block is servable leave (servable.servable, any compartment).
+    Read-only: the store is opened read-only and nothing is written."""
+    from . import servable as serve_rule
+    conn, reason = _graph_store(root)
+    if conn is None:
+        return {'available': False, 'reason': reason, 'claims': []}
+    try:
+        rows = conn.execute(
+            "SELECT c.claim_id, c.claim_text, c.claim_kind, c.verdict, c.source_block_id, c.created_at, "
+            "a.question, a.verdict, e.subj_node, e.obj_node, e.source_block_id, d.path "
+            "FROM claims c LEFT JOIN answers a ON a.answer_id=c.answer_id "
+            "LEFT JOIN edges e ON e.edge_id=c.source_edge_id "
+            "LEFT JOIN blocks b ON b.block_id=COALESCE(c.source_block_id, e.source_block_id) "
+            "LEFT JOIN docs d ON d.doc_id=b.doc_id ORDER BY c.created_at, c.claim_id LIMIT ?",
+            (max(1, int(limit)),)).fetchall()
+        blocks = {r[4] or r[10] for r in rows if r[4] or r[10]}
+        shown = serve_rule.servable(conn, blocks, compartment=None)
+        claims = []
+        for r in rows:
+            block = r[4] or r[10]
+            if block not in shown:
+                continue
+            claims.append({'id': r[0], 'text': r[1], 'kind': r[2], 'verdict': r[3], 'created': r[5],
+                           'question': r[6], 'answer_verdict': r[7],
+                           'about': [n for n in (r[8], r[9]) if n], 'source': r[11]})
+        return {'available': True, 'reason': None, 'claims': claims, 'hidden': len(rows) - len(claims)}
+    finally:
+        conn.close()
+
+
+def graph_assertion_list(root, *, limit: int = 5000) -> dict:
+    """Every active wiki assertion for the Studio evidence graph: subject, predicate, object, the cited
+    quote and the source document, servable blocks only, oldest first. Read-only."""
+    from . import servable as serve_rule
+    conn, reason = _graph_store(root)
+    if conn is None:
+        return {'available': False, 'reason': reason, 'assertions': []}
+    try:
+        rows = conn.execute(
+            "SELECT e.edge_id, e.subj_node, e.predicate, e.obj_node, e.obj_literal, e.source_quote, "
+            "e.source_block_id, e.recorded_at, d.path FROM edges e LEFT JOIN blocks b ON b.block_id=e.source_block_id "
+            "LEFT JOIN docs d ON d.doc_id=COALESCE(b.doc_id, e.source_doc_id) WHERE e.status='active' "
+            "ORDER BY e.recorded_at, e.edge_id LIMIT ?", (max(1, int(limit)),)).fetchall()
+        shown = serve_rule.servable(conn, {r[6] for r in rows if r[6]}, compartment=None)
+        items = [{'id': r[0], 'subject': r[1], 'predicate': r[2], 'object': r[3] or r[4],
+                  'node': r[3], 'quote': (r[5] or '')[:GRAPH_QUOTE_CHARS], 'recorded': r[7], 'source': r[8]}
+                 for r in rows if r[6] in shown]
+        return {'available': True, 'reason': None, 'assertions': items, 'hidden': len(rows) - len(items)}
+    finally:
+        conn.close()
+
+
+def graph_assertions(root, node_id: str, *, limit: int = 60) -> dict:
+    """What the wiki asserts about one item (a task, op, proof:<path> or decision id): its active
+    assertions with the cited quote and the source document, servable blocks only, newest first.
+    Read-only."""
+    from . import servable as serve_rule
+    conn, reason = _graph_store(root)
+    if conn is None:
+        return {'available': False, 'reason': reason, 'assertions': []}
+    try:
+        rows = conn.execute(
+            "SELECT e.subj_node, e.predicate, e.obj_node, e.obj_literal, e.source_quote, e.source_block_id, "
+            "e.recorded_at, d.path FROM edges e LEFT JOIN blocks b ON b.block_id=e.source_block_id "
+            "LEFT JOIN docs d ON d.doc_id=b.doc_id WHERE e.status='active' AND (e.subj_node=? OR e.obj_node=?) "
+            "ORDER BY e.recorded_at DESC LIMIT ?", (node_id, node_id, max(1, int(limit)))).fetchall()
+        shown = serve_rule.servable(conn, {r[5] for r in rows}, compartment=None)
+        items = [{'subject': r[0], 'predicate': r[1], 'object': r[2] or r[3],
+                  'quote': (r[4] or '')[:GRAPH_QUOTE_CHARS], 'recorded': r[6], 'source': r[7]}
+                 for r in rows if r[5] in shown]
+        return {'available': True, 'reason': None, 'assertions': items, 'hidden': len(rows) - len(items)}
+    finally:
+        conn.close()

@@ -12,7 +12,7 @@ from alpaca import db
 
 WEB = Path(__file__).resolve().parents[1] / "web"
 NODE = shutil.which("node")
-NEW_FILES = ("beam.css", "loader.js", "autodrive.js")
+NEW_FILES = ("beam.css", "beam.js", "loader.js", "autodrive.js")
 
 
 def node(script):
@@ -159,6 +159,73 @@ def test_overview_is_shared_until_the_record_head_moves(tmp_path, monkeypatch):
         live.overview()
         assert len(calls) == 3                       # the age bound refreshes file-only inputs
     finally:
+        conn.close()
+
+
+def test_overview_ignores_quiet_events_but_not_board_changes(tmp_path, monkeypatch):
+    """t-578: heartbeats, drain-failed and transcript notes do not end a cached overview; a task
+    move, a proof seal, a plan change or any other event does."""
+    from alpaca import hub, serve
+    root = tmp_path / "p"
+    root.mkdir()
+    conn = db.connect(str(root))
+    calls = []
+    monkeypatch.setattr(hub, "overview", lambda r: calls.append(r) or {"n": len(calls)})
+    live = serve.Live(str(root))
+    add = lambda kind, **kw: db.append_event(conn, session="s", actor="a", kind=kind, data={}, **kw)
+    try:
+        live.overview()
+        for kind in serve.OVERVIEW_QUIET_KINDS:
+            add(kind)
+        add("heartbeat", ref="t-1")
+        live.overview()
+        assert len(calls) == 1                       # a flood of quiet events reuses the cached overview
+        for n, kind in enumerate(("task-move", "proof-report", "task-plan", "task-contract"), 2):
+            add(kind, ref="t-1")
+            live.overview()
+            assert len(calls) == n, kind
+        add("heartbeat")
+        add("note")
+        live.overview()
+        assert len(calls) == 6                       # a quiet event never hides a later real one
+    finally:
+        conn.close()
+
+
+def test_overview_waiter_takes_the_value_computed_while_it_waited(tmp_path, monkeypatch):
+    """t-578: a read that arrives during a compute, with only quiet events landing meanwhile, takes
+    that compute's result instead of starting a second one."""
+    import threading
+    import time
+    from alpaca import hub, serve
+    root = tmp_path / "p"
+    root.mkdir()
+    conn = db.connect(str(root))
+    calls, started, release = [], threading.Event(), threading.Event()
+
+    def slow(_root):
+        calls.append(1)
+        started.set()
+        release.wait(5)
+        return {"n": len(calls)}
+    monkeypatch.setattr(hub, "overview", slow)
+    live = serve.Live(str(root))
+    results = []
+    try:
+        warm = threading.Thread(target=lambda: results.append(live.overview()))
+        warm.start()
+        assert started.wait(5)
+        db.append_event(conn, session="s", actor="a", kind="heartbeat", data={})
+        db.append_event(conn, session="s", actor="a", kind="drain-failed", data={})
+        waiter = threading.Thread(target=lambda: results.append(live.overview()))
+        waiter.start()
+        time.sleep(0.2)
+        release.set()
+        warm.join(5)
+        waiter.join(5)
+        assert len(calls) == 1 and len(results) == 2 and results[0] == results[1]
+    finally:
+        release.set()
         conn.close()
 
 

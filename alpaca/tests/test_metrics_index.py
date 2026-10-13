@@ -156,3 +156,34 @@ def test_compact_rows_have_a_byte_budget(project, monkeypatch):
         'session': {'operator': 'claude'}, 'models': []})
     metrics_index._analysis_row(project, 'oversized')
     assert not any(k[:2] == (str(project), 'oversized') for k in metrics_index._ROWS)
+
+
+def test_index_rows_are_identical_with_and_without_the_per_run_scope(project, monkeypatch):
+    """t-577: one connection, one obs_source read and one rate-card read for a whole run, same rows."""
+    import contextlib
+    import sqlite3
+    from alpaca.analytics import detail, metrics
+    register(project, 'parent')
+    write(transcripts.local_path(project, 'parent'), 'main-response', 999)
+    write(Path(transcripts.subagents_dir(project, 'parent')) / 'agent-child.jsonl', 'child-response', 777)
+    register(project, 'other')
+    write(transcripts.local_path(project, 'other'), 'other-response', 5)
+    sessions = [{'sid': 'parent', 'class': 'work'}, {'sid': 'other', 'class': 'work'}]
+    connects = []
+    real = sqlite3.connect
+    monkeypatch.setattr(sqlite3, 'connect', lambda *a, **k: connects.append(a) or real(*a, **k))
+
+    def run(scoped):
+        metrics._CACHE.clear()
+        metrics_index._ROWS.clear()
+        connects.clear()
+        if not scoped:
+            monkeypatch.setattr(detail, 'revision_scope', lambda root: contextlib.nullcontext())
+            monkeypatch.setattr(detail, 'revision_batch', lambda root: contextlib.nullcontext())
+        return metrics_index.index(project, sessions), len(connects)
+
+    with_scope, scoped_connects = run(True)
+    without, plain_connects = run(False)
+    assert with_scope == without
+    assert scoped_connects < plain_connects
+    assert detail._SCOPE.state is None

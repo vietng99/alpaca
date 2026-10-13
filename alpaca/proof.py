@@ -1333,6 +1333,97 @@ def done_gate(conn, root, ident, pointer, index=None) -> tuple:
     return True, []
 
 
+_GATE_CACHE = {}          # (root, ident) -> (key, [(path, stat stamp)], (ok, problems))
+
+
+def event_refs(conn) -> dict:
+    """ref -> (event count, newest event id): one indexed pass that tells `done_gate_cached`
+    whether anything was appended about a task since its gate last ran."""
+    return {r[0]: (r[1], r[2]) for r in conn.execute(
+        "SELECT ref, COUNT(*), MAX(id) FROM events WHERE ref IS NOT NULL GROUP BY ref")}
+
+
+def _stamp(path):
+    """What a file is, without reading it. The gate follows links when it hashes, so the stamp holds
+    the link itself (lstat), the file it opens (stat, which follows) and where the path resolves
+    (realpath, so a link in a parent directory that is pointed elsewhere shows). The inode and
+    ctime are in both so a rewrite that keeps the size and restores the mtime with os.utime still
+    shows (no user can set a ctime)."""
+    out = []
+    for call in (os.lstat, os.stat):
+        try:
+            st = call(path)
+        except OSError:
+            out.append(None)
+            continue
+        out.append((st.st_size, st.st_mtime_ns, st.st_ino, st.st_ctime_ns))
+    return (tuple(out), os.path.realpath(path))
+
+
+def _gate_files(conn, root, ident, ev) -> list:
+    """Every file the gate for `ident` reads, even one that is missing now (a file that appears
+    changes the answer): the report, each sealed evidence target and kept copy, project.yaml, and
+    the kept reviews of the task's verifications. None when the seal cites a `receipt:` or `job:`
+    file: the profile decides which file that is (`_run_file`), so no list of paths covers it."""
+    from alpaca import project
+    from alpaca.research import events as rev_events
+    data = ev["data"] if isinstance(ev.get("data"), dict) else {}
+    paths = [project.path(root)]
+    if data.get("path"):
+        paths.append(os.path.join(root, str(data["path"]).replace("/", os.sep)))
+    for item in data.get("evidence") or []:
+        if not isinstance(item, dict):
+            continue
+        kind = item.get("kind")
+        if kind in UNVERIFIABLE or kind is None or kind == "event":
+            continue
+        if kind in ("receipt", "job"):
+            return None
+        target = _evidence_file(root, kind, item.get("pointer"))
+        if target:
+            paths.append(target)
+        kept = _kept_file(root, item.get("kept"))
+        if kept:
+            paths.append(kept)
+    for row in conn.execute("SELECT data FROM events WHERE ref=? AND kind=?", (ident, rev_events.VERIFY_REVIEW)):
+        try:
+            rel = json.loads(row["data"]).get("path")
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if isinstance(rel, str) and rel:
+            paths.append(os.path.join(root, rel))
+    return paths
+
+
+def done_gate_cached(conn, root, ident, pointer, index, refs) -> tuple:
+    """`done_gate`, remembered per task for the life of the process. The answer is reused while
+    nothing it reads moved: the pointer, the latest seal event, the count and newest id of the
+    events about the task (`refs`, from `event_refs`; the verification record is among them), and
+    the stamp (size, mtime, inode, ctime) of every file the gate reads (`_gate_files`). A changed
+    proof or evidence file, a new event about the task or a re-seal runs the whole gate again.
+    The stamps are taken before the gate reads, so a file that changes while it runs is seen on
+    the next call."""
+    ev = latest_seal(conn, ident, index)
+    if ev is None or not pointer:
+        return done_gate(conn, root, ident, pointer, index)
+    key = (str(pointer), ev.get("id"), (refs or {}).get(ident))
+    slot = (str(root), ident)
+    held = _GATE_CACHE.get(slot)
+    if held is not None and held[0] == key and all(_stamp(p) == s for p, s in held[1]):
+        ok, problems = held[2]
+        return ok, list(problems)
+    if refs is None:
+        return done_gate(conn, root, ident, pointer, index)
+    named = os.path.join(root, str(pointer).split(":", 1)[-1].strip().replace("/", os.sep))
+    listed = _gate_files(conn, root, ident, ev)
+    if listed is None:
+        return done_gate(conn, root, ident, pointer, index)
+    files = [(p, _stamp(p)) for p in listed + [named]]
+    got = done_gate(conn, root, ident, pointer, index)
+    _GATE_CACHE[slot] = (key, files, (got[0], list(got[1])))
+    return got
+
+
 def refuse_done(gate_name, ident, problems) -> None:
     """Print the refusal the way every `done` boundary prints it: the GATE line, then the three
     commands. One shape, so a reader meets the same message from task move and from board move.

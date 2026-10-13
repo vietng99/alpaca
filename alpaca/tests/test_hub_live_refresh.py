@@ -364,6 +364,24 @@ test('the live log page never refreshes here', () => {
   assert.equal(dependsOn('live', FLAGS), false);
   assert.equal(autoRefresh('live', FLAGS, {}), false);
 });
+test('a refreshing index is polled with a growing delay, capped at 30 s', () => {
+  assert.deepEqual([0, 1, 2, 3, 4, 5, 50].map(lf.refreshDelay), [2000, 4000, 8000, 16000, 30000, 30000, 30000]);
+});
+test('a refreshing token board is polled with the same delays and drawn only when its build time moved', () => {
+  let poll = {tries: 0, stamp: null};
+  const steps = [];
+  for (const data of [{generated: 'a', refreshing: true}, {generated: 'a', refreshing: true},
+                      {generated: 'a', refreshing: true}, {generated: 'b', refreshing: false}]) {
+    const r = lf.burnPoll(data, poll);
+    steps.push([r.draw, r.delay]);
+    poll = r.poll;
+  }
+  assert.deepEqual(steps, [[true, 2000], [false, 4000], [false, 8000], [true, null]]);
+  assert.deepEqual(poll, {tries: 0, stamp: 'b'});
+  const moved = lf.burnPoll({generated: 'c', refreshing: true}, {tries: 2, stamp: 'b'});
+  assert.equal(moved.draw, true, 'a flagged board with a new build time is drawn');
+  assert.equal(lf.burnPoll({generated: 'c', refreshing: true}, {tries: 40, stamp: 'c'}).delay, 30000);
+});
 test('the conversation tab is never refreshed automatically', () => {
   assert.equal(autoRefresh('sessions', ['sessions'], {sid:'s1', view:'conversation'}), false);
   assert.equal(dependsOn('sessions', ['sessions']), true, 'the new-activity label still applies');
@@ -409,7 +427,7 @@ def test_live_rules_module_with_node(tmp_path):
     spec.write_text(NODE_TEST % {"module": (WEB / "liveflags.js").as_uri()}, encoding="utf-8")
     run = subprocess.run([node, "--test", str(spec)], capture_output=True, text=True, timeout=120)
     assert run.returncode == 0, run.stdout + run.stderr
-    assert re.search(r"# pass 15\b", run.stdout), run.stdout
+    assert re.search(r"# pass 17\b", run.stdout), run.stdout
 
 
 # ------------------------------------------------------------- client: DOM patch in a browser
@@ -543,6 +561,27 @@ try {
     check('keyed options: selection stays on its session', s.value === 's1' && s.selectedOptions[0] === picked && picked.textContent === 'Session s1');
   }
 
+  { // an element marked data-morph-keep stays as its script drew it
+    const el = box(); render(el, '<div><svg data-morph-keep></svg><p>A</p></div>');
+    const svg = el.querySelector('svg'); svg.setAttribute('width', '9'); svg.append(document.createElementNS('http://www.w3.org/2000/svg', 'path'));
+    patch(el, '<div><svg data-morph-keep></svg><p>B</p></div>');
+    check('keep: a marked element keeps its drawing', el.querySelector('svg') === svg && svg.getAttribute('width') === '9' && svg.children.length === 1 && el.querySelector('p').textContent === 'B');
+  }
+  { // a kept element is never matched to a different node that takes its position
+    for (const keyed of [true, false]) {
+      const tag = keyed ? ' data-key="log"' : '';
+      const page = rows => '<aside><h2>T</h2>' + rows.map(r => '<div class="row">' + r + '</div>').join('') + '<div data-morph-keep' + tag + '></div></aside>';
+      const el = box(); render(el, page(['one']));
+      const log = el.querySelector('[data-morph-keep]'); log.textContent = 'evidence text';
+      patch(el, page(['one', 'two']));
+      check('keep ' + (keyed ? 'keyed' : 'unkeyed') + ': one more earlier sibling', el.querySelectorAll('[data-morph-keep]').length === 1 && el.querySelector('[data-morph-keep]') === log && log.textContent === 'evidence text' && el.querySelectorAll('.row').length === 2);
+      patch(el, page(['one', 'two', 'three', 'four']));
+      check('keep ' + (keyed ? 'keyed' : 'unkeyed') + ': several more', el.querySelector('[data-morph-keep]') === log && el.querySelectorAll('.row').length === 4 && el.querySelector('aside').lastElementChild === log);
+      patch(el, page([]));
+      check('keep ' + (keyed ? 'keyed' : 'unkeyed') + ': fewer', el.querySelector('[data-morph-keep]') === log && el.querySelectorAll('.row').length === 0 && log.textContent === 'evidence text');
+    }
+  }
+
   // ---- analytics notes: unpriced models and recorded rate cards
   const idx = analyticsIndex({sessions: [], totals: {unpriced_models: [{model: 'claude-new-9', provider: 'anthropic', responses: 3, sessions: 2, fix: 'agent-cli ratecard record claude-new-9 <page>'}], unpriced_other: 4}});
   const ix = box(); ix.innerHTML = idx;
@@ -655,7 +694,7 @@ const [,, base, profile] = process.argv;
 const chrome = spawn(process.env.CHROME, ['--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check', ...JSON.parse(process.env.CHROME_FLAGS),
   '--remote-debugging-port=0', '--user-data-dir=' + profile, '--window-size=1280,900', 'about:blank'], {stdio: 'ignore'});
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-let port; for (let i = 0; i < 200 && !port; i++) { await sleep(100); if (existsSync(profile + '/DevToolsActivePort')) port = readFileSync(profile + '/DevToolsActivePort', 'utf8').split('\n')[0]; }
+let port; for (let i = 0; i < 600 && !port; i++) { await sleep(100); if (existsSync(profile + '/DevToolsActivePort')) port = readFileSync(profile + '/DevToolsActivePort', 'utf8').split('\n')[0]; }
 const page = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find(t => t.type === 'page');
 const ws = new WebSocket(page.webSocketDebuggerUrl);
 await new Promise(r => ws.onopen = r);
@@ -917,9 +956,68 @@ assert.match(v.title,/collector unknown/);
 assert.match(v.title,/2 missing child sources/);
 assert.equal(connectionHealth({...h,projection:{state:'stale'}}).label,'Stale');
 assert.equal(connectionHealth({projection:{state:'fresh'},observability:{status:'ok'}}).label,'Live');
+// /hub/vitals.json counts the missing child sources (t-590)
+assert.match(connectionHealth({...h,observability:{...h.observability,coverage:{missing_children:4394}}}).title,/4394 missing child sources/);
 """
     result = subprocess.run([node,'--input-type=module','-e',script,str(WEB / 'liveflags.js')],capture_output=True,text=True)
     assert result.returncode == 0, result.stderr
+
+
+def test_health_meter_names_every_lost_point():
+    """t-590: the bar under Arthur shows Health N/1000, fills N/10 percent and its tooltip names
+    every lost point with its reason (alpaca/healthscore.py builds the parts)."""
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('node unavailable')
+    script = r"""
+import assert from 'node:assert/strict';
+import {pathToFileURL} from 'node:url';
+const {healthMeter} = await import(pathToFileURL(process.argv[1]));
+const parts = [{key:'page',label:'page data',points:250,max:250,reasons:[]},
+  {key:'speed',label:'hub speed',points:130,max:250,reasons:['p95 2.1 s over the last 5 min (40 reads)']},
+  {key:'capture',label:'capture backlog and issues',points:60,max:150,reasons:['backlog 40.0 MB','5 open issues seen in the last hour']}];
+const m = healthMeter({value:790,max:1000,band:'attention',parts,notes:['4394 missing child sources (long-standing coverage gaps)']});
+assert.equal(m.text,'Health 790/1000');
+assert.equal(m.width,'79%');
+assert.equal(m.band,'attention');
+assert.equal(m.valuetext,'790 of 1000, attention');
+assert.deepEqual(m.title.split('\n'),['Health 790/1000 (attention)','-120 hub speed: p95 2.1 s over the last 5 min (40 reads)',
+  '-90 capture backlog and issues: backlog 40.0 MB; 5 open issues seen in the last hour',
+  'Not scored: 4394 missing child sources (long-standing coverage gaps)']);
+assert.equal(healthMeter({value:1000,max:1000,band:'good',parts:[]}).title,'Health 1000/1000 (good)\nNo points lost');
+assert.equal(healthMeter({value:1000,max:1000,band:'good',parts:[]}).width,'100%');
+const none = healthMeter(undefined);
+assert.equal(none.band,'unknown'); assert.equal(none.width,'0%'); assert.equal(none.text,'Health --/1000');
+// one line per loss, so the backlog and the issues of one part are named apart (alpaca/healthscore.py losses)
+const split = healthMeter({value:860,max:1000,band:'attention',parts:[{key:'capture',label:'capture backlog and issues',points:60,max:150,
+  reasons:['backlog 40.6 MB','5 open issues seen in the last hour'],losses:[{points:40,reason:'backlog 40.6 MB'},{points:50,reason:'5 open issues seen in the last hour'}]}]});
+assert.deepEqual(split.title.split('\n').slice(1),['-40 capture backlog and issues: backlog 40.6 MB','-50 capture backlog and issues: 5 open issues seen in the last hour']);
+// a failed poll keeps the last score and says since when; a 404 is a server older than the score
+const kept = healthMeter({value:860,max:1000,band:'attention',parts:[]},{since:Date.UTC(2026,9,11,14,5)});
+assert.equal(kept.text,'Health 860/1000'); assert.equal(kept.stale,true); assert.equal(kept.width,'86%');
+assert.equal(kept.title.split('\n')[0],'Health 860/1000 (attention, not updated since 14:05)');
+assert.equal(kept.valuetext,'860 of 1000, attention, not updated since 14:05');
+const old = healthMeter(null,{old:true});
+assert.equal(old.text,'Health --/1000'); assert.equal(old.title,'Health unknown: this server has no health score yet (older version)');
+assert.equal(healthMeter(null,{since:undefined}).title,'Health unknown: the server did not answer');
+"""
+    result = subprocess.run([node,'--input-type=module','-e',script,str(WEB / 'liveflags.js')],capture_output=True,text=True,
+                            env=dict(os.environ, TZ='UTC'))
+    assert result.returncode == 0, result.stderr
+
+
+def test_hub_polls_the_slim_vitals_and_draws_the_health_meter():
+    hub_js = (WEB / 'hub.js').read_text(encoding='utf-8')
+    html = (WEB / 'hub.html').read_text(encoding='utf-8')
+    assert "api('/hub/vitals.json')" in hub_js and "api('/health.json')" not in hub_js
+    # a 404 names an older server; any other failure keeps the last score with its time
+    assert "error?.status===404)healthBar(null,{old:true})" in hub_js and "{since:lastHealth?.at}" in hub_js
+    meter = html[html.index('id="health-meter"') - 40:]
+    meter = meter[:meter.index('</div>')]
+    for attr in ('role="meter"', 'aria-valuemin="0"', 'aria-valuemax="1000"', 'aria-valuenow=', 'aria-valuetext='):
+        assert attr in meter
+    # right below Arthur, above his caption
+    assert html.index('id="arthur"') < html.index('id="health-meter"') < html.index('id="arthur-caption"')
 
 
 def test_index_reads_remain_responsive_during_cold_build_and_refresh(project, monkeypatch):
@@ -962,3 +1060,51 @@ def test_index_reads_remain_responsive_during_cold_build_and_refresh(project, mo
         assert json.loads(body)['totals']['revision'] == 'second'
     finally:
         release.set(); _join(live); httpd.shutdown(); httpd.server_close()
+
+
+# The watcher tick hands the fold to its own thread: the board step does not wait behind it.
+def test_the_watcher_tick_does_not_wait_for_a_running_fold(project, monkeypatch):
+    entered, gate, folds = threading.Event(), threading.Event(), []
+    real = serve.build_index._fold
+
+    def slow(root, sessions):
+        folds.append(1)
+        entered.set()
+        gate.wait(30)
+        return real(root, sessions)
+    monkeypatch.setattr(serve.build_index, "_fold", slow)
+    conn = db.connect(project)
+    live = serve.Live(project)
+    live.refresh(fold=False)
+    board = live.board_rev
+    assert board and not live.data_rev
+    live.refresh(throttle=True)                      # returns while the fold is held open
+    assert entered.wait(10) and not live.data_ready.is_set()
+    _heartbeat(conn)
+    live._fold_at = live._board_at = 0
+    gen = live.gen
+    live.refresh(throttle=True)
+    assert len(folds) == 1, "one fold at a time"
+    assert live.board_rev != board and live.gen > gen, "the board moved and was pushed during the fold"
+    assert not live.data_rev
+    gate.set()
+    live._fold_thread.join(30)
+    assert live.data_ready.is_set() and live.data_rev
+    assert live.health["state"] == "fresh"
+    conn.close()
+
+
+def test_burn_board_reuses_a_read_in_flight_and_the_index_poll_backs_off():
+    """t-577: concurrent burn.json reads share one request; the poll delay comes from refreshDelay."""
+    source = (WEB / "hub.js").read_text(encoding="utf-8")
+    assert "path==='/hub/burn.json'" in source and "apiReads.has(url)" in source
+    assert "refreshDelay(indexPoll.tries++)" in source
+    assert "setTimeout(()=>{if(ticket===state.ticket&&state.route==='sessions')applyLive();},2000)" not in source
+
+
+def test_the_sessions_page_asks_again_for_a_board_served_while_it_rebuilds():
+    """t-583: a refreshing token board is re-fetched with the index's backoff, one timer, ended by navigation."""
+    source = (WEB / "hub.js").read_text(encoding="utf-8")
+    assert "burnPoll(data,burnPollState)" in source and "clearTimeout(burnTimer)" in source
+    assert "ticket===state.ticket&&state.route==='sessions')burnBoard(ticket,true,days,true)" in source
+    assert "Updating&hellip;" in (WEB / "burn.js").read_text(encoding="utf-8")

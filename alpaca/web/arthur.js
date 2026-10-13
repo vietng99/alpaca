@@ -42,7 +42,7 @@
 // cursor movement: the stage slides with a CSS transform while he plays move-right and move-left (the
 // package's movement poses do not move the element); with reduced motion he plays the poses in place.
 // The caption says why he does what he does. The artwork and player are the owner's Arthur package,
-// vendored unchanged under vendor/arthur (see vendor/README.md); reduced motion follows the system.
+// vendored under vendor/arthur with one owner-accepted patch (see vendor/README.md); reduced motion follows the system.
 import {inflightCount} from './inflight.js';
 import {caption, periodAt} from './pulse.js';
 
@@ -197,17 +197,26 @@ export const partyToday = (days, date = new Date()) => Array.isArray(days) && da
 // setup/vendor_arthur.py), so the avatar reads the manifest through stripsManifest: a new action keeps
 // its frames, durations, loop flag, label and trigger and drops the full-size sheet geometry.
 export const STRIP_KEEP = ['frames', 'durationsMs', 'loop', 'label', 'trigger'];
-export function stripsManifest(m) {
+// The gaze atlas ships as a lossless WebP (setup/vendor_arthur.py), so its path ends in .webp here; the strips stay
+// PNG (a WebP strip decodes one level off on 693 edge pixels, which the Studio baseline refuses). `v` is the
+// content version of Arthur's files (the page's arthur-version meta, serve.py arthur_version): every image path
+// gets it as a query, so the browser can keep the artwork for a day and still see a changed file at once (t-595).
+export function stripsManifest(m, v = '') {
   if (!m || !m.actions) return m;
+  const at = (image, ext = '') => (ext ? image.replace(/\.png$/, ext) : image) + (v ? `?v=${v}` : '');
   const actions = {};
   for (const [id, a] of Object.entries(m.actions)) {
     if (a && typeof a.image === 'string' && a.image.startsWith('new-sheets/')) {
-      const e = {image: `strips/${id}.png`};
+      const e = {image: at(`strips/${id}.png`)};
       for (const k of STRIP_KEEP) if (k in a) e[k] = a[k];
       actions[id] = e;
-    } else actions[id] = a;
+    } else actions[id] = a && typeof a.image === 'string' ? {...a, image: at(a.image)} : a;
   }
-  return {...m, actions};
+  // The shipped atlas holds only the rows of the gaze frames (slim_atlas): the full width, from the top of the
+  // first frame row to the bottom of the last, so the frames sit that far higher in the file.
+  const frames = m.gaze && m.gaze.frames, top = frames ? Math.min(...frames.map(f => f.y)) : 0;
+  const atlas = m.atlas && {...m.atlas, image: at(m.atlas.image, '.webp'), height: frames ? Math.max(...frames.map(f => f.y + f.height)) - top : m.atlas.height};
+  return {...m, actions, atlas, ...(frames ? {gaze: {...m.gaze, frames: frames.map(f => ({...f, y: f.y - top}))}} : {})};
 }
 
 export const routeOf = hash => { const name = String(hash || '').replace(/^#/, '').split('?')[0]; return name === 'mission' ? 'roadmap' : name; };
@@ -221,8 +230,6 @@ const reduced = () => typeof matchMedia === 'function' && matchMedia('(prefers-r
 function say(text) {
   const cap = document.getElementById('arthur-caption');
   if (cap) cap.textContent = text;
-  const slot = document.getElementById('arthur-slot');
-  if (slot) slot.title = `${text}. Arthur acts out the work in this workspace and looks at your cursor.`;
 }
 
 // A pose the package plays once and holds (loop:false in its manifest) holds its last frame as a loop.
@@ -240,6 +247,9 @@ function show(force = false) {
 }
 
 function current() {
+  // Before the first overview lands Arthur knows nothing, so he stays on the idle strip he already loaded: a rest
+  // pose chosen from the clock alone would fetch a second strip on the first visit (t-595 confirm: sleeping at night).
+  if (!marks && !offline) return {action: 'idle', caption: 'Idle'};
   return loopFor({...state, offline, typing: Date.now() < typingUntil, roadmap: routeOf(location.hash) === 'roadmap',
     night: periodAt(new Date()) === 'Night', now: Date.now()});
 }
@@ -354,15 +364,22 @@ function lookAtCursor(event) {
 // ("Offline"). "Stale", "Preparing" and "Live - capture gaps" are a reachable server.
 export const LOST_LABELS = new Set(['Reconnecting', 'Offline']);
 export const connectionLost = conn => conn.classList.contains('error') && LOST_LABELS.has((conn.querySelector('span')?.textContent || '').trim());
+// "Stale" (a quiet refresh that failed) proves nothing either way: while the server is gone the 15 s refresh
+// writes it between the health check's "Offline" every 10 s, so it neither starts nor clears the 30 s wait,
+// and a wait that ends on it still counts as lost.
+export const HOLD_LABELS = new Set(['Stale']);
+export const connectionHeld = conn => conn.classList.contains('error') && HOLD_LABELS.has((conn.querySelector('span')?.textContent || '').trim());
+// What a change of the connection row does to the 30 s wait: start it, leave it as it is, or clear it.
+export const connectionStep = conn => connectionLost(conn) ? 'start' : connectionHeld(conn) ? 'hold' : 'clear';
 
 function watchConnection(conn) {
   const check = () => {
-    const lost = connectionLost(conn);
-    if (!lost) {
+    const step = connectionStep(conn);
+    if (step === 'clear') {
       clearTimeout(lostTimer); lostTimer = 0;
       if (offline) { offline = false; refresh(); }
-    } else if (!lostTimer && !offline) {
-      lostTimer = setTimeout(() => { lostTimer = 0; if (connectionLost(conn)) { offline = true; refresh(); } }, OFFLINE_MS);
+    } else if (step === 'start' && !lostTimer && !offline) {
+      lostTimer = setTimeout(() => { lostTimer = 0; if (connectionStep(conn) !== 'clear') { offline = true; refresh(); } }, OFFLINE_MS);
     }
   };
   new MutationObserver(check).observe(conn, {attributes: true, attributeFilter: ['class'], childList: true, characterData: true, subtree: true});
@@ -409,7 +426,7 @@ export async function startArthur() {
   const conn = document.getElementById('connection');
   if (conn) watchConnection(conn);
   try {
-    avatar = await window.ArthurAvatar.create(host, {assetBaseURL: BASE, manifest: stripsManifest(window.ArthurAssets),
+    avatar = await window.ArthurAvatar.create(host, {assetBaseURL: BASE, manifest: stripsManifest(window.ArthurAssets, document.querySelector('meta[name="arthur-version"]')?.content || ''),
       reducedMotion: 'system', label: 'Arthur the alpaca'});
   } catch (e) {
     host.hidden = true;

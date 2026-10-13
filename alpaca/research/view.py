@@ -19,11 +19,15 @@ Design: design/research-engine/operator-surface.md sections 7.2 to 7.10 and 8.1.
 from __future__ import annotations
 
 import contextlib
+import datetime
 import json
 import math
+import os
+import threading
+import time
 
-from alpaca import db
-from alpaca.research import events, paths, state, verify_gate
+from alpaca import db, project
+from alpaca.research import events, jobs, paths, state, verify_gate
 from alpaca.research.types import INFRA_CLASSES
 
 SCHEMA = "research-view/1"
@@ -123,6 +127,51 @@ def _record(root):
         conn.close()
 
 
+def source_stamp(root) -> tuple:
+    """What the view reads outside the record, as stamps (size, mtime_ns, inode; None for a missing
+    path): project.yaml (the budget posture), and for every run directory the directory itself,
+    runner.lock and runner.pid (the runner probe) and the run's report folder with each entry in
+    it. A file the fold reads deeper in a run (an attempt's evidence) is not stamped: the server's
+    reuse ceiling (OVERVIEW_S) covers it. The server keys its cached view on this and the record head."""
+    stamp = _stat_stamp
+    root = str(root)
+    out = [stamp(project.path(root))]
+    base = paths.research_dir(root)
+    try:
+        names = sorted(n for n in os.listdir(base) if paths.RUN_ID.fullmatch(n))
+    except OSError:
+        names = []
+    for name in names:
+        out.extend(_run_stamp(root, name))
+        if out[-2][2] is not None:       # a runner lock exists: whether it is held moves no stamp (t-593 N2)
+            from alpaca.research import runner
+            out.append((name, runner.is_alive(root, name)))
+    return tuple(out)
+
+
+def _stat_stamp(p):
+    try:
+        st = os.stat(p)
+    except OSError:
+        return None
+    return (st.st_size, st.st_mtime_ns, st.st_ino)
+
+
+def _run_stamp(root, name) -> tuple:
+    """The part of source_stamp that belongs to one run (op-012 t-593: a cached run body is kept
+    while this and the project.yaml stamp are as they were)."""
+    base = paths.research_dir(root)
+    folder = paths.reports_dir(root, name)
+    head = (name, _stat_stamp(os.path.join(base, name)), _stat_stamp(paths.runner_lock(root, name)),
+            _stat_stamp(paths.runner_pid(root, name)))
+    folder_stamp = _stat_stamp(folder)          # before the listing, as hub._folder_documents does
+    try:
+        entries = sorted(os.listdir(folder))
+    except OSError:
+        entries = []
+    return head, (name, folder_stamp) + tuple((e, _stat_stamp(os.path.join(folder, e))) for e in entries)
+
+
 def _check_id(run_id) -> str:
     if not isinstance(run_id, str) or not paths.RUN_ID.fullmatch(run_id):
         raise ValueError("run must be a research run id such as rr-001")
@@ -134,17 +183,111 @@ def _head(conn) -> tuple:
     return (row["ts"], row["id"]) if row is not None else (None, 0)
 
 
+#: A built run summary kept for the next runs() call (op-012 t-593): str(root) -> {run: _Kept}. The
+#: whole list was rebuilt on every new event of the record (2.7 s for 36 runs on the live record) though
+#: a new event touches one run at most. `_touches` decides from the events since the body was built.
+_KEPT = {}
+_KEPT_LOCK = threading.Lock()
+_KEPT_AGE_S = 15               # a run not ended is rebuilt this often: the runner probe and deep files
+_KEPT_EVENTS_MAX = 20000       # further behind than this, everything is rebuilt
+#: kinds read for every run whatever they name: the ship cards and decisions a hold points at
+_ALL_RUNS = ("review-", "decision")
+#: whole-project snapshots name every run and task in their data and no run summary reads them
+_SNAPSHOTS = ("mission-snapshot", "transcript-version")
+
+
+class _Kept:
+    def __init__(self, through, refs, stamp, body, built, handed=None):
+        self.through, self.refs, self.stamp, self.body, self.built = through, refs, stamp, body, built
+        self.handed = handed            # when the oldest open job was handed, for its age at read time
+
+
+def _touches(kept, rid, event) -> bool:
+    """Whether `event` (id, kind, ref, data text) can change run `rid`'s summary: it is on the run or
+    one of its tasks, names the run or one of its tasks in its data, or is of a kind every run reads.
+    Leaning to yes: a false yes costs one rebuild, a false no is a change that never shows."""
+    _, kind, ref, data = event
+    if ref in kept.refs or kind.startswith(_ALL_RUNS):
+        return True
+    return kind not in _SNAPSHOTS and (rid in (data or "")
+                                       or any('"%s"' % task in (data or "") for task in kept.refs))
+
+
+def _posture(conn, root):
+    from alpaca.resilience import budget
+    try:
+        return budget.state(conn, root=root).get("posture")
+    except Exception:  # noqa: BLE001 - an unreadable project.yaml shows no posture, as in state._budget
+        return None
+
+
+def _at_read(root, rid, kept, body, posture) -> dict:
+    """`body` with the fields that come from the clock, a lock or the project, not from the record:
+    the budget posture (the project's), runner.alive (the lock, as `_runner` probes it) and the
+    age of the oldest handed job (jobs.counts). A kept body is patched on every read, so none of
+    them is older than the read (t-593 review N1; a rebuild on a timer put 2 s on the reader)."""
+    body = dict(body)
+    if isinstance(body.get("budget"), dict):
+        body["budget"] = dict(body["budget"], posture=posture)
+    try:
+        from alpaca.research import runner
+        alive = runner.is_alive(root, rid)
+    except Exception:  # noqa: BLE001 - a probe that cannot run reads as not alive, as in _runner
+        alive = False
+    if isinstance(body.get("runner"), dict):
+        body["runner"] = dict(body["runner"], alive=alive)
+    elif alive:
+        body["runner"] = {"alive": True}
+    if kept.handed is not None and isinstance(body.get("jobs"), dict):
+        age = (datetime.datetime.now(datetime.timezone.utc) - kept.handed).total_seconds()
+        body["jobs"] = dict(body["jobs"], oldest_handed_age_s=round(age, 1))
+    return body
+
+
 def runs(root) -> dict:
     """{"schema", "as_of", "through_event", "runs"}: every recorded run, newest first, each the
-    fold headline with the compact chart of its first metric and its open holds."""
+    fold headline with the compact chart of its first metric and its open holds. A run whose
+    inputs did not change since its last build is reused (`_touches`, the run's `_run_stamp`)."""
+    root = str(root)
     with _record(root) as conn:
         as_of, through = _head(conn)
-        out = []
-        for rid in state.run_ids(conn):
-            try:
-                out.append(_build(conn, str(root), rid, full=False))
-            except KeyError:
-                continue
+        ids = state.run_ids(conn)
+        with _KEPT_LOCK:
+            held = dict(_KEPT.get(root, {}))
+        low = min((held[r].through for r in ids if r in held), default=through)
+        fresh = None
+        if through - low <= _KEPT_EVENTS_MAX:
+            fresh = [tuple(r) for r in conn.execute(
+                "SELECT id, kind, ref, data FROM events WHERE id > ? AND id <= ? ORDER BY id",
+                (low, through))]
+        project_stamp = _stat_stamp(project.path(root))
+        posture = _posture(conn, root)
+        now = time.monotonic()
+        out, kept = [], {}
+        for rid in ids:
+            old = held.get(rid)
+            stamp = (project_stamp,) + _run_stamp(root, rid)
+            if fresh is not None and old is not None and old.stamp == stamp \
+                    and (old.body.get("state") in ENDED or now - old.built < _KEPT_AGE_S) \
+                    and not any(e[0] > old.through and _touches(old, rid, e) for e in fresh):
+                old.through = through       # nothing since its build concerned it
+                kept[rid], body = old, old.body
+            else:
+                try:
+                    body = _build(conn, root, rid, full=False)
+                except KeyError:
+                    continue
+                refs = {rid} | {a["ref"] for a in state._run_tasks(conn, rid) if a["ref"]}
+                handed = None
+                if (body.get("jobs") or {}).get("oldest_handed_age_s") is not None:
+                    handed = jobs.oldest_handed_at(conn, rid)
+                kept[rid] = _Kept(through, refs, stamp, body, now, handed)
+            body = _at_read(root, rid, kept[rid], body, posture)
+            out.append(body)
+        with _KEPT_LOCK:
+            _KEPT[root] = kept
+            while len(_KEPT) > 8:
+                _KEPT.pop(next(k for k in _KEPT if k != root))
         return {"schema": SCHEMA, "as_of": as_of, "through_event": through, "runs": out,
                 "sources": dict(SOURCES)}
 

@@ -571,6 +571,22 @@ a.hm-cell:hover, a.hm-cell:focus-visible { outline:2px solid var(--accent); outl
 .arthur-stage { transition:transform 2120ms linear }
 @media (prefers-reduced-motion:reduce) { .arthur-stage { transition:none; transform:none !important } }
 .arthur-caption { margin-top:var(--sp-1); font-size:var(--fs-xs); line-height:var(--lh-xs); color:var(--sidebar-muted, var(--muted)); letter-spacing:.02em; text-align:center }
+/* The health bar right below Arthur (t-590): the fill at N/10 percent in its band's colour beside
+   "Health N/1000", from /hub/vitals.json; the tooltip names every lost point (liveflags.js healthMeter).
+   One row, and the slot's bottom margin gives up its height, so the sidebar keeps its length. */
+.arthur-slot { margin-bottom:var(--sp-1) }
+.health-meter { display:flex; align-items:center; gap:var(--sp-2); width:176px; max-width:100%; margin-top:var(--sp-1); border-radius:var(--r-sm); cursor:help }
+.health-meter:focus-visible { outline:2px solid var(--focus); outline-offset:2px }
+/* The track's 1px edge in --faint reaches 3:1 on the sidebar in both themes (3.25 light, 4.75 dark);
+   its inside stays --line-strong so each band's fill still stands out from it. */
+.health-track { flex:1; height:6px; border-radius:3px; background:var(--line-strong); box-shadow:inset 0 0 0 1px var(--faint); overflow:hidden }
+.health-meter[data-stale] .health-fill { opacity:.55 }
+.health-fill { display:block; width:0; height:100%; border-radius:inherit; background:var(--faint); transition:width 600ms ease }
+.health-meter[data-band="good"] .health-fill { background:var(--green) }
+.health-meter[data-band="attention"] .health-fill { background:var(--amber) }
+.health-meter[data-band="bad"] .health-fill { background:var(--red) }
+.health-label { font-size:var(--fs-xs); line-height:var(--lh-xs); color:var(--sidebar-text); font-variant-numeric:tabular-nums; white-space:nowrap }
+@media (prefers-reduced-motion:reduce) { .health-fill { transition:none } }
 /* Topbar pulse orb: the full orb stage scaled into a 56px box at the right end of the topbar,
    in place of the old initials avatar. It sits 26px low and hangs below the topbar, so its rings clear
    the page top even at full load. The caption stays for screen readers; the tooltip states it. */

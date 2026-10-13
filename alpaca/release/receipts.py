@@ -64,6 +64,21 @@ class PublishReceipt:
 
 
 @dataclass
+class TagReceipt:
+    """A merged public release tagged vX.Y.Z with its release page."""
+    publish: dict
+    status: str
+    plan: dict = field(default_factory=dict)
+    notes: str = ''
+    release_url: str = ''
+    error: str = ''
+    attempt: str = field(default_factory=lambda: uuid.uuid4().hex)
+    kind: str = 'tag'
+    schema: int = 1
+    created_at: str = field(default_factory=timestamp)
+
+
+@dataclass
 class ApprovalReceipt:
     """Private record of who approved or revoked one exact development commit."""
     source_sha: str
@@ -79,7 +94,7 @@ class ApprovalReceipt:
     created_at: str = field(default_factory=timestamp)
 
 
-ReleaseReceipt = (BuildReceipt, CheckReceipt, PublishReceipt, ApprovalReceipt)
+ReleaseReceipt = (BuildReceipt, CheckReceipt, PublishReceipt, TagReceipt, ApprovalReceipt)
 
 
 def record_receipt(root, session, receipt):

@@ -53,3 +53,22 @@ def test_index_repair_keeps_corruption_detectable_and_raw_store_mutable(tmp_path
     migrate.apply(conn)
     assert conn.total_changes == before
     conn.close()
+
+
+def test_obs_source_parent_index_is_in_new_records_and_added_to_existing_ones(tmp_path):
+    """t-577: source_revision looks sources up by parent_session on every analytics read."""
+    conn = db.connect(str(tmp_path))
+    plan = lambda: ' '.join(str(r[3]) for r in conn.execute(
+        'EXPLAIN QUERY PLAN SELECT * FROM obs_source WHERE session=? OR parent_session=? ORDER BY source_id', ('s', 's')))
+    assert 'idx_obs_source_parent' in plan(), plan()
+    conn.execute('DROP INDEX idx_obs_source_parent')
+    names = lambda: {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+    assert 'idx_obs_source_parent' not in names()
+    conn.close()
+    # An existing record at the current version gets it on its next open for write.
+    conn = db.connect(str(tmp_path))
+    assert 'idx_obs_source_parent' in names()
+    before = conn.total_changes
+    migrate.apply(conn)
+    assert conn.total_changes == before
+    conn.close()

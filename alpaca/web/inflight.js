@@ -3,6 +3,7 @@
 // generated. All dynamic text is escaped; colors, sizes and spacing come from theme.css tokens.
 import {orb} from './orb.js';
 import {levelChip} from './autodrive.js';
+import {BEAM_RING} from './beam.js';
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const grp = n => Number(n || 0).toLocaleString();
 const fmt = n => { n = Number(n || 0); return n >= 1e9 ? (n/1e9).toFixed(2)+' B' : n >= 1e6 ? (n/1e6).toFixed(1)+' M' : n >= 1e3 ? Math.round(n/1e3)+' k' : String(Math.round(n)); };
@@ -92,10 +93,10 @@ function card(c, focus, href) {
   const complete = more ? more.complete : c.feed_complete;
   const trend = tests.runs.length ? tests.runs.map(r => `<span class="if-test ${r.ok ? 'ok' : 'bad'}" title="${esc(stamp(r.ts))}">${r.ok ? (r.passed != null ? r.passed+' passed' : 'pass') : r.failed+' failed'}</span>`).join('') : '';
   const stat = (k, v, n = '') => `<div class="if-stat"><span>${k}</span><strong>${v}</strong>${n ? `<small>${n}</small>` : ''}</div>`;
-  // Live work rides the beam; a card whose session shows off-track signals or a lease about to lapse rides the red one.
-  return `<article class="panel if-card beam beam-inside${alert(c) ? ' beam-alert' : ''}${focus ? ' focus' : ''}" id="if-${esc(c.id)}" data-key="if-${esc(c.id)}">
-    <header class="if-head"><div class="if-title">${orb('working',20)}<div><span class="eyebrow">${esc(c.id)} &middot; ${esc(c.op)}${c.op_phase ? ' &middot; phase '+esc(c.op_phase) : ''}${c.workstream ? ' &middot; '+esc(c.workstream.title) : ''}</span><h2><button type="button" data-task="${esc(c.id)}">${esc(c.title)}</button></h2></div></div>
-      <div class="if-meta">${levelChip(c.level)}<span>Running <strong>${esc(span(c.running_s))}</strong></span><span>since ${esc(stamp(c.claimed_at))}</span>${c.session ? `<a class="text-link" href="${esc(href('sessions', {sid: c.session}))}">Session ${esc(c.session.slice(0, 8))}</a>` : '<span>No claiming session recorded</span>'}<span>Lease to ${esc(stamp(Date.parse(c.lease_until)/1000))}</span></div></header>
+  // Live work rides the beam on the header strip (the tall body never repaints); a card whose session shows off-track signals or a lease about to lapse rides the still red one.
+  return `<article class="panel if-card${focus ? ' focus' : ''}" id="if-${esc(c.id)}" data-key="if-${esc(c.id)}">
+    <header class="if-head beam${alert(c) ? ' beam-alert' : ''}"><div class="if-title">${orb('working',20)}<div><span class="eyebrow">${esc(c.id)} &middot; ${esc(c.op)}${c.op_phase ? ' &middot; phase '+esc(c.op_phase) : ''}${c.workstream ? ' &middot; '+esc(c.workstream.title) : ''}</span><h2><button type="button" data-task="${esc(c.id)}">${esc(c.title)}</button></h2></div></div>
+      <div class="if-meta">${levelChip(c.level)}<span>Running <strong>${esc(span(c.running_s))}</strong></span><span>since ${esc(stamp(c.claimed_at))}</span>${c.session ? `<a class="text-link" href="${esc(href('sessions', {sid: c.session}))}">Session ${esc(c.session.slice(0, 8))}</a>` : '<span>No claiming session recorded</span>'}<span>Lease to ${esc(stamp(Date.parse(c.lease_until)/1000))}</span></div>${BEAM_RING}</header>
     ${progress(c.progress)}
     <div class="if-now"><span class="if-mode">${esc(mode.mode || 'no activity yet')}</span><p>${c.now ? esc(c.now) : 'No status line from the session since the claim.'}</p></div>
     ${c.shared_with.length ? `<p class="if-note">This session also holds ${c.shared_with.map(esc).join(', ')}: the activity below is the session&#39;s, not this task&#39;s alone.</p>` : ''}

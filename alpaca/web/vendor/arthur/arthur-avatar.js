@@ -37,7 +37,7 @@
         throw new Error("reducedMotion must be true, false, or system");
       this._media=this.window.matchMedia("(prefers-reduced-motion: reduce)");
       this._reducedMotion=this._motionOverride==="system"?this._media.matches:this._motionOverride;
-      this._images=new Map();this._pendingLoads=new Set();
+      this._images=new Map();this._pendingLoads=new Set();this._loads=new Map();
       this._cleanups=[];
       this._loaded=false;this._destroyed=false;this._paused=false;this._hidden=this.document.hidden;
       this._actionRevision=0;this._raf=0;this._lastTime=null;this._point=null;this._gaze=null;this._frameIndex=0;
@@ -90,8 +90,12 @@
       this._cleanups.push(()=>target.removeEventListener(name,handler,options));
     }
     async _loadImages(){
-      const paths=new Set([this.manifest.atlas.image,...Object.values(this.manifest.actions).map(a=>a.image)]);
-      await Promise.all([...paths].map(path=>new Promise((resolve,reject)=>{
+      const m=this.manifest;
+      await this._load(m.actions[this._resolveAction(m.neutralAction)].image);
+    }
+    _load(path){
+      if(this._loads.has(path)) return this._loads.get(path);
+      const load=new Promise((resolve,reject)=>{
         const image=new this.window.Image();
         const finish=error=>{
           image.onload=null;image.onerror=null;this._pendingLoads.delete(cancel);
@@ -103,24 +107,36 @@
         };
         this._pendingLoads.add(cancel);
         image.onload=()=>{
-          if(!this._destroyed) this._images.set(path,image);
+          if(this._destroyed) return finish();
+          try{this._check(path,image);}catch(error){return finish(error);}
+          this._images.set(path,image);
           finish();
         };
         image.onerror=()=>finish(new Error("Could not load Arthur asset: "+path));
         image.src=new URL(path,this.assetBaseURL).href;
-      })));
-      if(this._destroyed) return;
+      });
+      this._loads.set(path,load);
+      return load;
+    }
+    _check(path,image){
       const m=this.manifest;
-      const atlas=this._images.get(m.atlas.image);
-      if(atlas.naturalWidth!==m.atlas.width||atlas.naturalHeight!==m.atlas.height)
+      if(path===m.atlas.image&&(image.naturalWidth!==m.atlas.width||image.naturalHeight!==m.atlas.height))
         throw new Error("Arthur atlas dimensions do not match its manifest");
       for(const [name,action] of Object.entries(m.actions)){
-        const image=this._images.get(action.image);
+        if(action.image!==path) continue;
         Geometry.validate(action,m.width,m.height);
         const size=Geometry.sourceSize(action,m.width,m.height);
         if(image.naturalWidth!==size.width||image.naturalHeight!==size.height)
           throw new Error("Arthur strip dimensions do not match: "+name);
       }
+    }
+    _ready(path){
+      if(this._images.has(path)) return true;
+      if(!this._loads.has(path)) this._want(path);
+      return false;
+    }
+    _want(path){
+      this._load(path).then(()=>this._draw(),()=>{setTimeout(()=>this._loads.delete(path),5000);});
     }
     _assertAlive(){if(this._destroyed) throw new Error("Arthur avatar has been destroyed");}
     _resolveAction(name){return Object.hasOwn(this.manifest.aliases,name)?this.manifest.aliases[name]:name;}
@@ -195,7 +211,7 @@
     _draw(){
       if(!this._loaded||this._destroyed) return;
       const m=this.manifest;
-      const useGaze=this._gazeEnabled&&!this._reducedMotion&&this._gaze&&Core.canUseGaze(this._player.action,m.neutralAction);
+      const useGaze=this._gazeEnabled&&!this._reducedMotion&&this._gaze&&Core.canUseGaze(this._player.action,m.neutralAction)&&this._ready(m.atlas.image);
       const kind=useGaze?"gaze":"action";
       const index=useGaze?this._gaze.index:this._frameIndex;
       const key=kind+":"+this._player.action+":"+index;
@@ -209,6 +225,7 @@
       }else{
         const action=m.actions[this._player.action];
         image=this._images.get(action.image);
+        if(!image){this._ready(action.image);return;}
         const rect=Geometry.frameRect(action,index,m.width,m.height);
         sx=rect.x;sy=rect.y;sw=rect.width;sh=rect.height;
         destination=Geometry.destinationRect(action,m.width,m.height);

@@ -385,7 +385,7 @@ export function renderBurn(d, {href, windowHref, childLink, rangeLabel = ''}) {
     + (w.key === 'range' ? `<span class="tab active" aria-current="page">${esc(rangeLabel || 'Chosen days')}</span>` : '');
   const stand = t.first ? `Every session that made a request between ${esc(stamp(w.key === 'all' ? t.first : w.start))} and ${esc(stamp(w.key === 'all' ? t.last : Math.min(w.now, w.end)))}, in ${esc(resolution(w.bucket_s).replace('-',' '))} steps.${top ? ` One session, <b>${esc(short(top.title, 70))}</b>, took <b>${esc(pct(top.share))}</b> of the ${esc(fmt(t.tokens))} tokens spent.` : ''}` : 'No session made a request in this window.';
   return `<div class="burn">
-    <div class="burn-top"><div><span class="eyebrow">TOKEN AND COST BOARD</span><p class="burn-stand">${stand}</p></div><nav class="tabs burn-tabs" aria-label="Time window">${tabs}</nav></div>
+    <div class="burn-top"><div><span class="eyebrow">TOKEN AND COST BOARD</span><p class="burn-stand">${stand}${d.refreshing ? ' <span class="burn-n">Updating&hellip;</span>' : ''}</p></div><nav class="tabs burn-tabs" aria-label="Time window">${tabs}</nav></div>
     ${tiles(d)}${lanes(d)}${push(d)}${why(d)}${signalsCard(d)}${outcomesCard(d)}${sharedCard(d)}${table(d, href)}</div>`;
 }
 

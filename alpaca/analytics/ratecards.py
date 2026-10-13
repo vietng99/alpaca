@@ -30,7 +30,7 @@ import urllib.request
 from decimal import Decimal
 
 from alpaca import db, paths, util
-from alpaca.analytics import pricing
+from alpaca.analytics import detail, pricing
 
 EVENT = "ratecard-verified"
 ANTHROPIC_PRICING_MD = "https://platform.claude.com/docs/en/about-claude/pricing.md"
@@ -70,6 +70,13 @@ def revision(root, *, conn=None):
     Cheap enough for the live server to call whenever the record head moves, and used as a
     cache key by analytics so a newly recorded card reprices every cached analysis.
     """
+    if conn is None:
+        # One read per analytics index run, not one per session analysed (t-577).
+        return detail.scoped(root, "ratecards-revision", lambda: _revision(root))
+    return _revision(root, conn=conn)
+
+
+def _revision(root, *, conn=None):
     own = conn is None
     if own:
         if not os.path.isfile(paths.db_path(root)):

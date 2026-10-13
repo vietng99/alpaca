@@ -41,23 +41,36 @@ import subprocess
 import sys
 import threading
 import time
+from collections import deque
 
 from alpaca import cli, db, export, paths, render, util
 from alpaca.analytics import build_index, metrics_index, ratecards
 
+SPEED_SAMPLES = 4096         # memory guard on the hub speed reads kept (t-590); they are pruned by
+                             # age to healthscore.SPEED_WINDOW_S, and a full ring is named in the reason
+#: The reader went away mid-response: counted as a disconnect, never as a server failure (t-590).
+CLIENT_GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
 POLL_S = 0.7                 # watcher cadence; also the debounce floor for pushes
 FOLD_MIN_S = 60              # the watcher refolds analytics at most this often (a fold reads every
                              # transcript: 16 s of CPU on this record, and live sessions change
                              # its inputs every few seconds, so an unthrottled watcher never rests)
+FOLD_STALL_S = 3 * FOLD_MIN_S  # a fold still running after this long reports the projection stale
 BOARD_MIN_S = 15             # the watcher rebuilds the status board at most this often; each new
                              # board is a live push that makes open pages re-render, so match the
                              # pages' own 15 s refresh
 GAPS_MIN_S = 900             # without a viewer, recompute the index for the pricing gap notice this often
 INDEX_VIEW_S = 600           # a viewer's index request keeps the watcher warming the index this long
 DATA_WAIT_S = 60             # an analytics request waits this long for the first fold
-INFLIGHT_S = 5                # an In-flight snapshot is reused this long (seconds)
+INFLIGHT_S = 5                # an In-flight snapshot older than this is rebuilt in the background (seconds)
+INFLIGHT_MAX_S = 60           # past this age (since its reads began) a reader waits for a fresh In-flight build (seconds)
+VIEW_STALE_S = 60             # a research or mission view is served this long after its inputs were read while it rebuilds
+VIEW_RETRY_S = 5              # a failed rebuild is not tried again for this long (seconds)
+VIEW_KEEP = 32                # research and mission views kept (a run id or a snapshot id each)
 OVERVIEW_S = 15               # an overview is reused this long while the record head stays put (seconds)
-VCS_S = 10                    # a Version control snapshot is reused this long (seconds)
+VCS_WARM_S = 3                 # the start-up Version control build waits this long after the first fold (seconds)
+VCS_S = 60                    # a Version control snapshot older than this is rebuilt in the background (seconds)
+BURN_STALE_S = 300            # a token board older than this is rebuilt before it is served
+BURN_RETRY_S = 5              # a failed background token board build is not retried for this long
 BURN_KEEP = 12                # token boards kept: the three windows plus recent custom ranges
 RETRY_FOLD_S = 10            # Retry-After for an index request that arrives before the first fold
 HEARTBEAT_S = 15             # SSE keep-alive comment interval
@@ -78,7 +91,7 @@ PRIVATE_DIRS = (".alpaca", ".git", ".venv")
 WEB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 _REGISTRY = [None]
 _ASSET_TYPES = {".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".png": "image/png",
-                ".woff2": "font/woff2", ".json": "application/json"}
+                ".woff2": "font/woff2", ".json": "application/json", ".webp": "image/webp"}
 
 
 def registry():
@@ -126,6 +139,11 @@ def hub_page(root=None):
         page = fh.read()
     page = page.replace("<!-- studio:pages -->",
                         links + '\n<script type="application/json" id="studio-pages">' + copy + "</script>", 1)
+    # Arthur's scripts and artwork are kept for a day (hub_assets route), so their URLs carry a content
+    # version: the scripts here, the artwork through this meta (arthur.js adds it to each image) (t-595).
+    version = arthur_version()
+    page = re.sub(r'(src="/hub/assets/vendor/arthur/[^"]+\.js)"', lambda m: '%s?v=%s"' % (m.group(1), version), page)
+    page = page.replace("</head>", '<meta name="arthur-version" content="%s">\n</head>' % version, 1)
     return render.ascii_entities(page)
 
 
@@ -157,6 +175,71 @@ def _content_tag(path, body):
             _TAGS.clear()
         tag = _TAGS[key] = hashlib.sha256(body).hexdigest()
     return tag
+
+
+def mission_compact(d):
+    """What the cockpit's Mission map overview draws (mission.js renderMission compact): each sector's title
+    and, per node, its sector, state and linked tasks' id and status, with the plan's task and node states."""
+    plan = d.get("development") or {}
+    dev = {k: plan[k] for k in ("unavailable",) if k in plan}
+    dev["tasks"] = [{"id": t.get("id"), "status": t.get("status")} for t in plan.get("tasks") or []]
+    dev["operations"] = [{"groups": [{"nodes": [{k: n.get(k) for k in ("id", "evidence", "state")} for n in g.get("nodes") or []]}
+                                     for g in op.get("groups") or []]} for op in plan.get("operations") or []]
+    return {"title": d.get("title"), "edges": [], "development": dev,
+            "groups": [{"id": g.get("id"), "title": g.get("title")} for g in d.get("groups") or []],
+            "nodes": [{"id": n.get("id"), "group": n.get("group"), "state": n.get("state"),
+                       "tasks": [{"id": t.get("id"), "status": t.get("status")} for t in n.get("tasks") or []]}
+                      for n in d.get("nodes") or []]}
+
+
+def research_compact(d):
+    """What the cockpit's Research runs section draws (research.js renderResearchSection): the runs not
+    finished and the first three that ended, each in full, and the count of runs recorded."""
+    ended = ("finished", "stopped", "failed")
+    runs = d.get("runs") or []
+    shown = [r for r in runs if r.get("state") not in ended] + [r for r in runs if r.get("state") in ended][:3]
+    return dict(d, runs=shown, recorded=len(runs), sources=[])
+
+
+#: The cockpit's session panel reads this many sessions' latest ask (Live.session_asks), each cut to
+#: this many characters (the panel shows the first line, 200 characters).
+SESSION_ASKS = 40
+SESSION_ASK_CHARS = 400
+
+
+def arthur_version():
+    """A short tag of Arthur's files under alpaca/web/vendor/arthur: it changes when any of them does.
+    _content_tag keeps each file's hash per size and modification time, so a page load rehashes nothing."""
+    parts = []
+    for path in sorted(glob.glob(os.path.join(WEB, "vendor", "arthur", "**", "*.*"), recursive=True)):
+        st = os.stat(path)
+        tag = _TAGS.get((path, st.st_size, st.st_mtime_ns))
+        if tag is None:
+            with open(path, "rb") as fh:
+                tag = _content_tag(path, fh.read())
+        parts.append(tag)
+    return hashlib.sha256("".join(parts).encode("ascii")).hexdigest()[:12]
+
+
+_VENDOR_LINK = re.compile(rb"((?:/hub/assets/vendor|\./vendor)/)([\w.-]+\.(?:woff2|js))(?=['\"])")
+
+
+def vendor_links(name, body):
+    """The body of a hub stylesheet or module with the vendored fonts and scripts it names given a
+    content version (?v=<first 12 of the file's sha256>): hub.css names the fonts and orb.js imports
+    thinking-orbs.js, and both are served each load, so a changed vendor file has a new URL (t-595)."""
+    if not name.endswith((".css", ".js")) or b"vendor/" not in body:
+        return body
+
+    def link(m):
+        path = os.path.join(WEB, "vendor", m.group(2).decode("ascii"))
+        try:
+            with open(path, "rb") as fh:
+                tag = _content_tag(path, fh.read())
+        except OSError:
+            return m.group(0)
+        return m.group(0) + b"?v=" + tag[:12].encode("ascii")
+    return _VENDOR_LINK.sub(link, body)
 
 
 def _state_path(root):
@@ -387,19 +470,38 @@ def _transcript_inputs(transcripts):
             yield sid, "subagent", subagent
 
 
+#: Event kinds the overview cache key leaves out, so they do not end a cached overview. They are
+#: most of the record's traffic. `heartbeat`: a lease renewal also patches tasks.updated
+#: (claims.renew), which stays in the key, and research state folds it to "doing" as the claim
+#: before it did. `drain-failed`: the overview lists the newest 20 in capture.errors. The rest are
+#: read by no module hub.overview calls (grep of alpaca/ finds them in hooks, the collector, the
+#: wiki, research jobs, sessions_view, the serve fold and the history feed's filter only):
+#: `transcript-version`, `transcript-snapshot`, `subagent-start`, `subagent-stop`, `turn-end`,
+#: `style-rearm`. The fields that do show them, `as_of` (the newest event's time),
+#: capture.errors and observability (observability.status reads MAX(id) over all events for each
+#: consumer's event_lag), then lag by at most OVERVIEW_S, the ceiling every cached overview
+#: already has for inputs outside the record.
+OVERVIEW_QUIET_KINDS = ("heartbeat", "drain-failed", "transcript-version", "transcript-snapshot",
+                        "subagent-start", "subagent-stop", "turn-end", "style-rearm")
+
+
 def _overview_head(root):
-    """The record head an overview depends on: the event chain, tasks, ops, messages and decisions.
-    The record is append-only and every write lands in one of these, so an unchanged head means an
-    unchanged record. None when the record cannot be read (the overview is then never reused)."""
+    """The record head an overview depends on: the event chain (minus OVERVIEW_QUIET_KINDS), tasks,
+    ops, messages and decisions. The record is append-only and every other write lands in one of
+    these, so an unchanged head means an unchanged overview. None when the record cannot be read
+    (the overview is then never reused)."""
     try:
         conn = db.connect_readonly(root)
     except Exception:
         return None
     try:
+        # newest first by id, so it stops at the first event that counts
         return tuple(conn.execute(
-            "SELECT (SELECT COALESCE(MAX(id), 0) FROM events), (SELECT COUNT(*) FROM tasks),"
+            "SELECT COALESCE((SELECT id FROM events WHERE kind NOT IN (%s) ORDER BY id DESC LIMIT 1), 0),"
+            " (SELECT COUNT(*) FROM tasks),"
             " (SELECT COALESCE(MAX(updated), '') FROM tasks), (SELECT COUNT(*) FROM ops),"
-            " (SELECT COALESCE(MAX(id), 0) FROM messages), (SELECT COALESCE(MAX(id), 0) FROM decisions)").fetchone())
+            " (SELECT COALESCE(MAX(id), 0) FROM messages), (SELECT COALESCE(MAX(id), 0) FROM decisions)"
+            % ",".join("?" * len(OVERVIEW_QUIET_KINDS)), OVERVIEW_QUIET_KINDS).fetchone())
     except Exception:
         return None
     finally:
@@ -519,6 +621,17 @@ class FoldPending(Exception):
     """The analytics index was asked for before the first successful fold."""
 
 
+_NO_VIEW = object()           # a build's outcome when the view does not exist (an unknown run)
+
+
+class _ViewRun:
+    """One running build of a cached view (Live.view): the key it builds for, when that key was read,
+    an event set when it ends, and its outcome ((body, etag), _NO_VIEW, or None when it failed)."""
+
+    def __init__(self, key, key_at):
+        self.key, self.key_at, self.done, self.outcome = key, key_at, threading.Event(), None
+
+
 class Live:
     """Latest folded data + library, recomputed by the watcher thread only.
 
@@ -543,17 +656,29 @@ class Live:
         self._pricing_sig = None
         self._index = None                     # ((data_rev, pricing_rev), json body, etag) of the index
         self._gaps_at = 0.0                    # when the index (and the pricing gap notice) was last computed
+        self._slims = {}                       # kind -> (etag of the full view, body, etag) of the cockpit's slim reads
+        self._asks = None                      # (data_rev, json body, etag) of /hub/session-asks.json
         self._index_ready = threading.Event()
         self._index_lock = threading.Lock()    # one index computation at a time; waiters reuse it
         self._burn = {}                        # (window, start, end) -> ((data_rev, pricing_rev, window, start, end, minute), body, etag)
-        self._burn_lock = threading.Lock()
-        self._inflight = None                  # (computed at, value) of the In-flight snapshot
-        self._inflight_lock = threading.Lock()
-        self._overview = None                  # (computed at, record head, body, etag) of /hub/overview.json
+        self._burn_lock = threading.Lock()     # guards _burn and _burn_locks only; a board builds under its key's lock
+        self._burn_locks = {}                  # (window, start, end) -> [lock, callers]; one build per key, and a key in use is never evicted
+        self._inflight = None                  # [taken at, value, refreshing, retry not before] of the In-flight snapshot
+        self._inflight_lock = threading.Lock() # guards _inflight only; a build never runs under it
+        self._inflight_build = threading.Lock()  # one synchronous build at a time (first read, or past INFLIGHT_MAX_S)
+        self._overview = None                  # (computed at, record head, body, etag, tasks, messages) of /hub/overview.json
         self._overview_lock = threading.Lock()
         self._overview_warm = None             # the background thread computing the next overview
-        self._vcs = {}                         # days -> (computed at, value) of the Version control snapshot
-        self._vcs_lock = threading.Lock()     # one board computation at a time (alpaca.analytics.burn)
+        self._views = {}                       # (view, arg) -> (computed at, key, body, etag): research and mission views
+        self._view_locks = {}                  # (view, arg) -> [running builds, callers]; a reader waits only for a build with its key or newer inputs
+        self._view_guard = threading.Lock()
+        self._view_building = set()            # slots with a background rebuild running
+        self._view_retry = {}                  # slot -> monotonic time before which a failed rebuild is not retried
+        self._vcs = {}                         # days -> [taken at, value, refreshing, retry not before] of the Version control snapshot
+        self._vcs_lock = threading.Lock()     # guards the _vcs table only; a build never runs under it
+        self._vcs_build = {}                   # days -> lock held while that window builds (windows do not block each other)
+        from alpaca import gitview
+        self._vcs_sweep = gitview.Sweeper(self.root)   # keeps worktree statuses fresh while the page is requested (t-592)
         self._warm_thread = None
         self._index_requested_at = 0.0         # last /hub/analytics-index.json request (HTTP handler only)
         self._warm_pending = False             # a warm was due but skipped; the watcher re-checks it
@@ -565,18 +690,21 @@ class Live:
         self.data_ready = threading.Event()    # set once the first analytics fold has finished
         self._board_sig = None
         self._fold_at = 0.0
+        self._fold_thread = None               # the watcher's fold, one at a time
+        self._fold_running = False             # true from the fold's start until its last step
         self._board_at = 0.0
         self.started_at = time.time()
         self.checked_at = None
         self.refreshed_at = None
         self.failures = {}
+        self.speed = deque(maxlen=SPEED_SAMPLES)  # (at, seconds) of the page data reads of the last 5 min (t-590)
         self.clients = 0
         self.idle_since = time.time()
 
     @contextmanager
     def foreground_read(self, path):
         """Give current-work data reads priority over the usage index rebuild."""
-        priority = path in ('/hub/overview.json', '/hub/research.json')
+        priority = path in ('/hub/overview.json', '/hub/tasks.json', '/hub/messages.json', '/hub/research.json')
         if priority:
             with self.cond:
                 self._foreground_reads += 1
@@ -619,8 +747,8 @@ class Live:
         with self.lock:
             return 0 if self.clients > 0 else time.time() - self.idle_since
 
-    def board_snapshot(self):
-        """Overlay request-time liveness on the immutable cached record projection."""
+    def _board_live(self):
+        """The cached record projection with request-time liveness on each work session."""
         from alpaca import sessions_view
         with self.lock:
             board = json.loads(self.board_json)
@@ -628,18 +756,41 @@ class Live:
         now = datetime.datetime.fromtimestamp(time.time(), datetime.timezone.utc).isoformat()
         for session in (current.get("sessions") or {}).get("work") or []:
             session["active"] = sessions_view.is_active(dict(session, **{"class": sessions_view.WORK}), now)
+        return board
+
+    def live_work(self):
+        """/hub/live-work.json as (body, etag): the work sessions of /board/data.json's pulse, with the
+        fields the cockpit's Parallel sessions panel reads, in the same place (pulse.now.sessions.work),
+        instead of the whole 770 KB board (t-595)."""
+        keep = ("sid", "active", "last_beat", "last_tool", "claims", "lapsed")
+        work = (((self._board_live().get("pulse") or {}).get("now") or {}).get("sessions") or {}).get("work") or []
+        body = json.dumps({"pulse": {"now": {"sessions": {"work": [{k: s[k] for k in keep if k in s} for s in work]}}}},
+                          ensure_ascii=True, sort_keys=True)
+        return body.encode("utf-8"), util.sha256_hex(body)
+
+    def board_snapshot(self):
+        """Overlay request-time liveness on the immutable cached record projection."""
+        board = self._board_live()
         # No volatile clock stamp: a conditional request only changes at a liveness boundary.
         revision = util.sha256_hex(util.canonical_json({key: value for key, value in board.items() if key != "generated"}))
         return json.dumps(board, ensure_ascii=True, sort_keys=True).encode("utf-8"), revision
 
-    def health_json(self):
-        from alpaca import hub
-        capture = hub.capture_health(self.root)
+    def _projection(self):
         with self.lock:
             projection = dict(self.health, checked_at=self.checked_at, refreshed_at=self.refreshed_at)
             failures = json.loads(json.dumps(self.failures))
         if self.checked_at is not None and time.time() - self.checked_at > max(15, POLL_S * 5):
             projection.update(state="stale", detail="dashboard watcher has not checked inputs recently")
+        # The fold runs off the watcher thread, so a hung fold no longer stalls the watcher's own
+        # check-in; report it here instead.
+        if self._folding() and time.time() - self._fold_at > FOLD_STALL_S:
+            projection.update(state="stale", detail="analytics fold has run for over %d s" % FOLD_STALL_S)
+        return projection, failures
+
+    def health_json(self):
+        from alpaca import hub
+        capture = hub.capture_health(self.root)
+        projection, failures = self._projection()
         # Keep legacy state scoped to projection freshness. Overall status has its own key.
         status = "ok" if projection["state"] == "fresh" and capture.get("status") == "ok" else "degraded"
         return json.dumps({**projection, "status": status, "status_scope": "projection_and_collection",
@@ -648,6 +799,34 @@ class Live:
                            "projection": projection, "observability": capture,
                            "server": {"failures": failures, "since": self.started_at,
                                       "scope": "current_process", "persistent_log": "supervisor_stderr"}}, ensure_ascii=True)
+
+    def note_speed(self, seconds):
+        from alpaca.healthscore import SPEED_WINDOW_S
+        now = time.time()
+        with self.lock:
+            self.speed.append((now, seconds))
+            while self.speed and now - self.speed[0][0] > SPEED_WINDOW_S:
+                self.speed.popleft()
+
+    def vitals_json(self):
+        """What the hub's 10 s poll reads (t-590): the connection chip's facts and the health score.
+        /health.json keeps the full capture lists; this one counts them, about 1 KB."""
+        from alpaca import healthscore, hub
+        capture = hub.capture_summary(self.root)
+        projection, failures = self._projection()
+        with self.lock:
+            speed = list(self.speed)
+        issues = capture.get("issues") or {}
+        coverage = capture.get("coverage") or {}
+        value = healthscore.score({"page": projection, "speed": speed, "speed_cap": SPEED_SAMPLES,
+                                   "collector": capture.get("collector"),
+                                   "backlog": (capture.get("backlog") or {}).get("bytes"),
+                                   "issues": issues.get("last_seen"), "issues_open": issues.get("open"),
+                                   "failures": failures, "missing_children": coverage.get("missing_children")},
+                                  time.time())
+        return json.dumps({"projection": projection,
+                           "observability": {**capture, "issues": {"open": issues.get("open", 0)}},
+                           "score": value}, ensure_ascii=True)
 
     def failure(self, component, error):
         """Count failures without logging request queries, source payloads or credentials."""
@@ -665,10 +844,57 @@ class Live:
             self.health = value
             return True
 
+    def _folding(self):
+        return self._fold_running
+
+    def _fold_async(self, dsig):
+        """The watcher's fold, off the watcher thread: publish what it changed like the tick would.
+
+        The fold counts as finished (the running mark clears, data_ready sets) only after the last
+        step, so a caller that waits on data_ready and refreshes again always gets its fold."""
+        try:
+            changed, index_moved = self._run_fold(dsig)
+            if changed:
+                with self.cond:
+                    self.gen += 1
+                    self.cond.notify_all()
+            if index_moved:
+                self._warm_index()
+        except Exception as error:
+            self.failure("projection", error)
+        finally:
+            self._fold_running = False
+            self.data_ready.set()
+
+    def _run_fold(self, dsig):
+        """Fold the analytics for input signature dsig; returns (changed, index_moved).
+        The caller sets data_ready once everything it does after the fold is done."""
+        changed = index_moved = False
+        try:
+            data = build_index._fold(self.root, build_index.collect(self.root))
+            dj = json.dumps(data, ensure_ascii=True)
+            rev = util.sha256_hex(_content_rev(data))
+            with self.lock:
+                if rev != self.data_rev:
+                    self.data_json, self.data_rev = dj, rev
+                    changed = index_moved = True
+            self._data_sig = dsig
+            self.refreshed_at = time.time()
+            changed = self._set_health("fresh", "analytics fold and status board match current inputs") or changed
+        except Exception as e:
+            self.failure("projection", e)
+            detail = "analytics fold failed: %s" % type(e).__name__
+            state = "stale" if self.data_rev else "error"
+            changed = self._set_health(state, detail) or changed
+            sys.stderr.write("alpaca serve: fold failed: %s\n" % detail)
+        return changed, index_moved
+
     def refresh(self, throttle=False, fold=True):
         """Recompute what changed. The watcher passes throttle=True so the analytics fold runs at
         most every FOLD_MIN_S and the board at most every BOARD_MIN_S; a direct call recomputes
-        at once. fold=False skips the analytics fold (the server's fast first refresh)."""
+        at once, except that a direct call made while the watcher's fold is still running skips its own
+        fold (one fold at a time). fold=False skips the analytics fold (the server's fast first
+        refresh)."""
         changed = board_moved = False
         with self.lock:
             self.checked_at = time.time()
@@ -726,27 +952,22 @@ class Live:
                 changed = self._set_health(state, detail) or changed
                 sys.stderr.write("alpaca serve: board failed: %s\n" % detail)
         if fold and dsig is not None and (dsig != self._data_sig or not self.data_rev or retry_degraded) and (
-                not throttle or now - self._fold_at >= FOLD_MIN_S):
+                not throttle or now - self._fold_at >= FOLD_MIN_S) and not self._folding():
             self._fold_at = now
-            try:
-                data = build_index._fold(self.root, build_index.collect(self.root))
-                dj = json.dumps(data, ensure_ascii=True)
-                rev = util.sha256_hex(_content_rev(data))
-                with self.lock:
-                    if rev != self.data_rev:
-                        self.data_json, self.data_rev = dj, rev
-                        changed = index_moved = True
-                self._data_sig = dsig
-                self.refreshed_at = time.time()
-                changed = self._set_health("fresh", "analytics fold and status board match current inputs") or changed
-            except Exception as e:
-                self.failure("projection", e)
-                detail = "analytics fold failed: %s" % type(e).__name__
-                state = "stale" if self.data_rev else "error"
-                changed = self._set_health(state, detail) or changed
-                sys.stderr.write("alpaca serve: fold failed: %s\n" % detail)
-            finally:
-                self.data_ready.set()
+            if throttle:
+                # The watcher hands the fold to its own thread (one at a time), so the board,
+                # library, profile and liveness steps below keep their cadence while it runs.
+                self._fold_running = True
+                self._fold_thread = threading.Thread(target=self._fold_async, args=(dsig,),
+                                                     name="alpaca-fold", daemon=True)
+                self._fold_thread.start()
+            else:
+                try:
+                    fold_changed, fold_index = self._run_fold(dsig)
+                finally:
+                    self.data_ready.set()
+                changed = fold_changed or changed
+                index_moved = fold_index or index_moved
         try:
             items = scan_library(self.root)
             lsig = _lib_sig(items)
@@ -836,6 +1057,29 @@ class Live:
         return json.dumps({"state": "building", "message": "Preparing session measurements.",
                            "retry_after": 2}), None, 202, "building"
 
+    def session_asks(self):
+        """/hub/session-asks.json as (body, etag): the cockpit's Parallel sessions panel reads a
+        title and the latest ask of each live session, so it takes every session of the board's work
+        list first, then the most recent ones of the fold up to SESSION_ASKS, with those two fields
+        instead of the whole 830 KB /data.json (t-595). Kept for the current (data_rev, board_rev)."""
+        with self.lock:
+            key, data_json, board_json, cached = (self.data_rev, self.board_rev), self.data_json, self.board_json, self._asks
+        if cached is not None and cached[0] == key:
+            return cached[1], cached[2]
+        work = (((json.loads(board_json).get("pulse") or {}).get("now") or {}).get("sessions") or {}).get("work") or []
+        live = {s.get("sid") for s in work}
+        recent = sorted(json.loads(data_json).get("sessions", []), key=lambda s: s.get("last") or "", reverse=True)
+        rows = []
+        for s in [s for s in recent if s.get("sid") in live] + [s for s in recent if s.get("sid") not in live][:SESSION_ASKS]:
+            asks = [a for a in (s.get("human_prompts") or [])[-1:] if isinstance(a, dict)]
+            rows.append({"sid": s.get("sid"), "title": s.get("title"),
+                         "human_prompts": [{"ts": a.get("ts"), "text": str(a.get("text") or "")[:SESSION_ASK_CHARS]} for a in asks]})
+        body = json.dumps({"sessions": rows}, ensure_ascii=True)
+        etag = util.sha256_hex(body)
+        with self.lock:
+            self._asks = (key, body, etag)
+        return body, etag
+
     def analytics_index(self):
         """The project analytics index as (JSON body, etag), computed once per revision pair.
 
@@ -876,52 +1120,387 @@ class Live:
         second on a large record (task contracts, proof gates, capture health), so viewers share one
         while the record head (_overview_head) stays put, for at most OVERVIEW_S so inputs outside
         the record (reports, receipts, leases running out) still refresh. A read that arrives while
-        the value is computed waits for it instead of starting a second computation."""
+        the value is computed waits for it and takes it when the head still matches, so a flood of
+        events the key ignores (OVERVIEW_QUIET_KINDS) never makes it compute twice."""
+        return self._overview_entry()[2:4]
+
+    def _overview_entry(self):
         from alpaca import hub
         head = _overview_head(self.root)
         with self._overview_lock:
             cached = self._overview
             if cached is not None and head is not None and cached[1] == head and time.time() - cached[0] < OVERVIEW_S:
-                return cached[2], cached[3]
-            body = json.dumps(hub.overview(self.root), ensure_ascii=True).encode("utf-8")
+                return cached
+            full = hub.overview(self.root)
+            # each task carries its text_rev in both bodies, so the page keys a task's text on it (t-591)
+            tasks = [{**t, "text_rev": hub.text_rev(t)} for t in full.get("tasks", [])]
+            # compact separators: the page body is read by every tab (t-591)
+            body = json.dumps(hub.page_overview({**full, "tasks": tasks}), ensure_ascii=True,
+                              separators=(",", ":")).encode("utf-8")
             etag = util.sha256_hex(body)
-            self._overview = (time.time(), head, body, etag)
-            return body, etag
+            self._overview = (time.time(), head, body, etag, tasks, full.get("messages", []))
+            return self._overview
+
+    def work_view(self, name, ids=None):
+        """/hub/tasks.json (every task whole, or the comma-separated `ids`) or /hub/messages.json as
+        (body, etag), cut from the last overview computation. A drawer open never recomputes it: the
+        page's own refresh does, and the text_rev on each task tells the page which text is current
+        (t-591). Only a server that has computed no overview yet computes one here."""
+        entry = self._overview or self._overview_entry()
+        if name == "tasks":
+            want = {i for i in (ids or "").split(",") if i}
+            value = {"tasks": [t for t in entry[4] if t["id"] in want] if ids else entry[4]}
+        else:
+            value = {"messages": entry[5]}
+        body = json.dumps(value, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
+        return body, util.sha256_hex(body)
+
+    def view(self, name, arg, key, compute):
+        """A cached JSON view (/hub/research.json, /hub/mission.json) as (body, etag), or None when
+        `compute` returns None (an unknown run, never cached).
+
+        `key` is a function returning the view's key: the record head from _overview_head plus what
+        the view reads outside the record (None when the record cannot be read); a constant stands in
+        for a function in tests. view() notes the time just before it calls the function (key_at), so
+        a key is ordered by when it was really read, and takes the age of a body after the function
+        returns. A stored body is (build start, key, body, etag, key_at of its key) and a body is
+        never stored over one whose key was read later.
+
+        At most one compute runs per slot at any time, foreground or background.
+          * A body whose key is unchanged is served as is while it is under OVERVIEW_S old.
+          * Aged only (key unchanged, up to VIEW_STALE_S after its inputs were read): the body is
+            served at once and a background build is started if none is running. A build that fails
+            keeps the old body and is not tried again for VIEW_RETRY_S.
+          * Key moved, no body yet, past VIEW_STALE_S or a key of None: the reader needs a build that
+            read its key at or after the reader's own read. If one is running it waits for it and
+            takes its body when that holds (or when the build has the reader's key, however long it
+            ran). Otherwise the first reader to find none running starts the next build, which reads
+            the key again at its own start, and every reader waiting by then takes its result. Readers
+            that arrive during that build wait for the one after it: one running and one pending.
+        The worst case for a moved-key reader is the rest of the running build plus one build; a
+        failure in a build raises to the reader that ran it, and the others go on to run their own."""
+        slot = (name, arg)
+        key_fn = key if callable(key) else (lambda: key)
+        key_at = time.monotonic()
+        key = key_fn()
+        now = time.monotonic()
+        with self._view_guard:
+            cached = self._views.get(slot)
+            if cached is not None and key is not None and cached[1] == key:
+                if now - cached[0] < OVERVIEW_S:
+                    return cached[2], cached[3]
+                if now - cached[0] < VIEW_STALE_S:
+                    self._view_start_refresh(slot, name, now, key_fn, compute)
+                    return cached[2], cached[3]
+            held = self._view_hold(slot)
+        waited = False
+        try:
+            while True:
+                with self._view_guard:
+                    cached = self._views.get(slot)
+                    if cached is not None and (cached[4] >= key_at or (
+                            key is not None and cached[1] == key and time.monotonic() - cached[0] < OVERVIEW_S)):
+                        return cached[2], cached[3]
+                    running = held[0][0] if held[0] else None
+                    if running is None:
+                        mine = _ViewRun(key, key_at)
+                        held[0].append(mine)
+                if running is None:
+                    return self._view_run(slot, held, mine, compute, key_fn if waited else None)
+                running.done.wait()            # a build with inputs as new as ours: take its body or go again
+                waited = True
+                if running.outcome is not None and (running.key_at >= key_at or (key is not None and running.key == key)):
+                    return None if running.outcome is _NO_VIEW else running.outcome
+        finally:
+            self._view_release(slot, held)
+
+    def _view_run(self, slot, held, run, compute, key_fn=None):
+        """Compute and store the slot's view for `run` (registered in held[0]); wakes its waiters.
+        With key_fn the key is read again first (a build that follows another reads it at its start)."""
+        try:
+            if key_fn is not None:
+                at = time.monotonic()
+                key = key_fn()
+                with self._view_guard:
+                    run.key, run.key_at = key, at
+            started = time.monotonic()         # the age bound runs from when the inputs were read
+            value = compute()
+            if value is None:
+                with self._view_guard:
+                    cached = self._views.get(slot)
+                    if cached is not None and cached[4] <= run.key_at:
+                        del self._views[slot]
+                        self._view_retry.pop(slot, None)
+                run.outcome = _NO_VIEW
+                return None
+            body = json.dumps(value, ensure_ascii=True).encode("utf-8")
+            etag = util.sha256_hex(body)
+            with self._view_guard:
+                cached = self._views.get(slot)
+                if cached is not None and cached[4] > run.key_at:
+                    run.outcome = (cached[2], cached[3])   # a body whose key was read later stays
+                    return run.outcome
+                self._views[slot] = (started, run.key, body, etag, run.key_at)
+                self._view_retry.pop(slot, None)
+                # evict the oldest slot nobody is using; a slot being computed or waited on stays
+                while len(self._views) > VIEW_KEEP:
+                    idle = [k for k in self._views if self._view_locks[k][1] == 0]
+                    if not idle:
+                        break
+                    stale = min(idle, key=lambda k: self._views[k][0])
+                    del self._views[stale]
+                    del self._view_locks[stale]
+                    self._view_retry.pop(stale, None)
+            run.outcome = (body, etag)
+            return run.outcome
+        finally:
+            with self._view_guard:
+                held[0].remove(run)
+            run.done.set()
+
+    def _view_start_refresh(self, slot, name, now, key_fn, compute):
+        """Start the slot's background build unless a build runs or a failed one is backing off. Call
+        with _view_guard held. A thread that cannot start leaves the slot as it was."""
+        entry = self._view_locks.get(slot)
+        if (entry is not None and entry[0]) or slot in self._view_building or now < self._view_retry.get(slot, 0.0):
+            return
+        held = self._view_hold(slot)
+        run = _ViewRun(None, now)              # reads its key when it starts (_view_run)
+        held[0].append(run)
+        self._view_building.add(slot)
+        try:
+            threading.Thread(target=self._view_refresh, args=(slot, held, run, key_fn, compute),
+                             name="view-%s" % name, daemon=True).start()
+        except Exception as error:
+            held[0].remove(run)
+            run.done.set()
+            self._view_building.discard(slot)
+            held[1] -= 1
+            self.failure("view_refresh", error)
+
+    def _view_hold(self, slot):
+        """The slot's [running builds (at most one), callers], counting one more caller. Call with
+        _view_guard held."""
+        held = self._view_locks.setdefault(slot, [[], 0])
+        held[1] += 1                           # callers waiting on or running this slot
+        return held
+
+    def _view_release(self, slot, held):
+        with self._view_guard:
+            held[1] -= 1
+            if held[1] == 0 and slot not in self._views:
+                self._view_locks.pop(slot, None)   # nothing stored: no entry left to grow the table
+
+    def _view_refresh(self, slot, held, run, key_fn, compute):
+        """The background build behind an aged body. It reads the key when it starts, so its body carries
+        the key then current. A failure is recorded and keeps the old body."""
+        try:
+            self._view_run(slot, held, run, compute, key_fn)
+        except Exception as error:
+            with self._view_guard:
+                if slot in self._views:
+                    self._view_retry[slot] = time.monotonic() + VIEW_RETRY_S
+            self.failure("view_refresh", error)
+        finally:
+            with self._view_guard:
+                self._view_building.discard(slot)
+            self._view_release(slot, held)
+
+    def research_view(self, run):
+        """/hub/research.json (the run list, or one run) through view(): keyed on the record head and
+        the stamps research.view.source_stamp takes."""
+        from alpaca.research import view as research_view
+
+        def key():
+            head = _overview_head(self.root)
+            return None if head is None else (head, research_view.source_stamp(self.root))
+        return self.view("research", run, key, lambda: (
+            research_view.run(self.root, run) if run else research_view.runs(self.root)))
+
+    def slim(self, kind, got, project):
+        """A cockpit projection of a cached view (body, etag), built once per revision of the view: the
+        cockpit draws a fraction of /hub/mission.json and /hub/research.json, so it reads this instead
+        and the other pages keep the full reads (t-595)."""
+        body, etag = got
+        with self.lock:
+            cached = self._slims.get(kind)
+        if cached is not None and cached[0] == etag:
+            return cached[1], cached[2]
+        out = json.dumps(project(json.loads(body)), ensure_ascii=True, separators=(",", ":"))
+        tag = util.sha256_hex(out)
+        with self.lock:
+            self._slims[kind] = (etag, out.encode("utf-8"), tag)
+        return out.encode("utf-8"), tag
+
+    def mission_view(self, at):
+        """/hub/mission.json through view(): keyed on the record head (a new mission check, link,
+        snapshot or task change moves it) and project.yaml. The source files the map observes are not
+        in the key: a change only to them reaches readers through the background rebuild that starts
+        once the body is OVERVIEW_S old, so within VIEW_STALE_S."""
+        from alpaca import mission, project
+
+        def key():
+            head = _overview_head(self.root)
+            if head is None:
+                return None
+            try:
+                st = os.stat(project.path(self.root))
+                return (head, (st.st_size, st.st_mtime_ns, st.st_ino))
+            except OSError:
+                return (head, None)
+        return self.view("mission", at, key, lambda: mission.project(self.root, at=at))
 
     def inflight(self):
-        """The In-flight snapshot (alpaca.analytics.inflight), reused for INFLIGHT_S so several viewers
-        polling every 15 s cost one read. Transcripts are read incrementally between snapshots."""
-        from alpaca.analytics import inflight
+        """The In-flight snapshot (alpaca.analytics.inflight), served stale-while-revalidate like vcs().
+
+        The first read builds it. After that the last snapshot is returned at once; once it is older than
+        INFLIGHT_S one background thread rebuilds it (a failed rebuild keeps the old one and backs off 5 s).
+        A snapshot older than INFLIGHT_MAX_S, counted from when its reads began, is never served: that
+        reader waits for a build. So a viewer polling every 15 s sees data at most one poll behind in
+        normal running (about INFLIGHT_S + 15 s) and never older than INFLIGHT_MAX_S.
+        Transcripts are read incrementally between snapshots."""
         with self._inflight_lock:
-            cached = self._inflight
-            if cached is not None and time.time() - cached[0] < INFLIGHT_S:
-                return cached[1]
+            entry = self._inflight
+            if entry is not None:
+                age = time.time() - entry[0]
+                if age < INFLIGHT_MAX_S:
+                    if age >= INFLIGHT_S and time.time() >= entry[3] and not entry[2]:
+                        entry[2] = True
+                        threading.Thread(target=self._inflight_refresh, args=(entry,), daemon=True,
+                                         name="inflight-refresh").start()
+                    return entry[1]
+        from alpaca.analytics import inflight
+        with self._inflight_build:            # first build, or past the age cap: readers share one read
+            with self._inflight_lock:
+                entry = self._inflight
+                if entry is not None and time.time() - entry[0] < INFLIGHT_MAX_S:
+                    return entry[1]
+            taken = time.time()
             value = inflight.snapshot(self.root)
-            self._inflight = (time.time(), value)
+            with self._inflight_lock:
+                self._inflight = [taken, value, False, 0.0]
             return value
 
+    def _inflight_refresh(self, entry):
+        """Rebuild `entry`, the snapshot this refresh was started from. A reader past the age cap may
+        have replaced it with a newer synchronous build meanwhile; that one is left as it is."""
+        from alpaca.analytics import inflight
+        taken = time.time()
+        try:
+            value = inflight.snapshot(self.root)
+        except Exception:
+            value = None                      # keep serving the old snapshot; the next call tries again
+        with self._inflight_lock:
+            if self._inflight is entry:
+                if value is not None:
+                    entry[0], entry[1], entry[3] = taken, value, 0.0
+                else:
+                    entry[3] = time.time() + 5
+            entry[2] = False
+
     def vcs(self, days):
-        """The Version control snapshot (alpaca.gitview), kept VCS_S per window so polling viewers share one read."""
+        """The Version control snapshot (alpaca.gitview), served stale-while-revalidate (t-585).
+
+        The first call for a window builds it; after that the last snapshot is returned at once and, once it
+        is older than VCS_S, one background thread per window rebuilds it. A failed rebuild keeps the old one."""
         from alpaca import gitview
         if days not in (1, 7, 30, 90):
             raise ValueError("days must be 1, 7, 30 or 90")
         with self._vcs_lock:
-            cached = self._vcs.get(days)
-            if cached is not None and time.time() - cached[0] < VCS_S:
-                return cached[1]
-            value = gitview.snapshot(self.root, days)
-            self._vcs[days] = (time.time(), value)
-            return value
+            entry = self._vcs.get(days)
+            build = self._vcs_build.setdefault(days, threading.Lock())
+            if entry is not None:
+                if time.time() - entry[0] >= VCS_S and time.time() >= entry[3] and not entry[2]:
+                    entry[2] = True
+                    threading.Thread(target=self._vcs_refresh, args=(days,), daemon=True, name="vcs-refresh").start()
+                return dict(entry[1], snapshot_at=entry[0], refreshing=entry[2])
+        with build:                           # first build: viewers of this window wait for one read
+            with self._vcs_lock:
+                entry = self._vcs.get(days)
+            if entry is None:
+                taken = time.time()                # snapshot_at: when the git reads began
+                value = gitview.snapshot(self.root, days, opened=self._vcs_sweep.opened_paths())
+                entry = [taken, value, False, 0.0]
+                with self._vcs_lock:
+                    self._vcs[days] = entry
+            return dict(entry[1], snapshot_at=entry[0], refreshing=entry[2])
+
+    def vcs_touch(self, value=None):
+        """A Version control request: keep the status sweeper running (t-592). `value` is a snapshot, whose live
+        sessions tell the sweeper which worktrees to read every tick."""
+        from alpaca import gitview
+        live = gitview.live_paths(value["worktrees"]) if value and value.get("worktrees") else None
+        self._vcs_sweep.touch(live)
+
+    def vcs_status(self):
+        """/hub/vcs-status.json: the cached status rows of the worktrees the sweeper keeps live (the watched set and
+        those opened on demand), and the overall line over every worktree. Nothing is read here."""
+        from alpaca import gitview
+        trees = gitview.worktrees(self.root)
+        watch = self._vcs_sweep.select(trees)
+        rows = gitview.status_rows(self.root, trees)
+        return {"generated": time.time(), "worktrees": {p: r for p, r in rows.items() if r and p in watch},
+                "overall": gitview.overall(rows, watch), "hot_backlog": self._vcs_sweep.backlog}
+
+    def vcs_tree(self, path):
+        """/hub/vcs-tree.json: one worktree read now and kept live for the next SWEEP_IDLE_S (the viewer's "Load
+        status"). None when `path` is not exactly one of the repository's worktree paths; nothing is read then."""
+        from alpaca import gitview
+        trees = gitview.worktrees(self.root)
+        if not path or not any(w["path"] == path for w in trees):
+            return None
+        self._vcs_sweep.open(path)
+        return gitview.tree_row(self.root, path, trees)
+
+    def warm_vcs(self, days=7):
+        """Build the page's default Version control window in the background after a start (t-585), at low
+        priority and after the first fold, so the first page loads do not compete with it. It goes through
+        vcs(), so a request that arrives during the warm waits on the same build lock and shares its result."""
+        def run():
+            self.data_ready.wait(DATA_WAIT_S * 4)
+            time.sleep(VCS_WARM_S)
+            try:
+                os.setpriority(os.PRIO_PROCESS, threading.get_native_id(), 10)    # git children inherit it
+            except (OSError, AttributeError):
+                pass
+            try:
+                self.vcs(days)
+            except Exception:
+                pass                          # the first request builds it and reports the error
+        thread = threading.Thread(target=run, daemon=True, name="vcs-warm")
+        thread.start()
+        return thread
+
+    def _vcs_refresh(self, days):
+        from alpaca import gitview
+        taken = time.time()
+        try:
+            value = gitview.snapshot(self.root, days, opened=self._vcs_sweep.opened_paths())
+        except Exception:
+            value = None                      # keep serving the old snapshot; the next call tries again
+        with self._vcs_lock:
+            entry = self._vcs[days]
+            if value is not None:
+                entry[0], entry[1] = taken, value
+            else:
+                entry[3] = time.time() + 5             # back off 5 s before the next attempt
+            entry[2] = False
 
     def burn(self, window, start=None, end=None):
         """The Sessions tab token and cost board (alpaca.analytics.burn) as (JSON body, etag).
 
-        Kept per (data_rev, pricing_rev, window, start, end, minute): the fold moves when a
-        transcript or a child transcript grows, and a rolling window (or a range that ends today)
-        moves with the clock, so one minute is the longest a board is reused. A custom range
-        (start and end from the browser) replaces the window; a bad one is a ValueError (400)
-        before any work. Only the last BURN_KEEP boards are kept, since ranges are open-ended.
-        Concurrent requests wait on one computation.
+        Served stale-while-revalidate (t-583). The first request for a window (or range) builds it
+        and waits. After that the last board is returned at once; when its inputs moved (the fold,
+        the pricing revision, or the minute a rolling window is cut at) one background thread per
+        key builds the next, a request during that build gets the old board, and a failed build
+        keeps the old board and is retried after BURN_RETRY_S. A board older than BURN_STALE_S is
+        not served stale: that request waits for a fresh one, and while builds keep failing it
+        gets the error (backed off BURN_RETRY_S between attempts), not the old board. So a viewer sees a board at most one
+        minute plus one build old while the page is polled, and never more than BURN_STALE_S.
+        While a rebuild runs the body carries "refreshing": true ("generated" is the build time).
+        A custom range (start and end from the browser) replaces the window; a bad one is a
+        ValueError (400) before any work. Only the last BURN_KEEP boards are kept, since ranges
+        are open-ended. Different windows build side by side.
         """
         from alpaca.analytics import burn as burn_board
         if start or end:
@@ -930,27 +1509,105 @@ class Live:
         elif window not in burn_board.WINDOWS:
             raise ValueError("unknown window; use one of %s" % ", ".join(burn_board.WINDOWS))
         which = (window, start or None, end or None)
+        key = self._burn_key(which)
+        now = time.time()
         with self._burn_lock:
-            with self.lock:
-                key = (self.data_rev, self.pricing_rev) + which + (int(time.time() // 60),)
-                data_json = self.data_json
-            if not key[0]:
-                raise FoldPending("first analytics fold pending")
-            cached = self._burn.get(which)
-            if cached is not None and cached[0] == key:
-                return cached[1], cached[2]
-            sessions = json.loads(data_json).get("sessions", [])
-            if window == "range":
-                value = burn_board.board(self.root, sessions, start=start, end=end)
-            else:
-                value = burn_board.board(self.root, sessions, window)
-            body = json.dumps(value, ensure_ascii=True)
-            etag = util.sha256_hex(body)
+            entry = self._burn.get(which)
+            if entry is not None and now - entry[3] < BURN_STALE_S:
+                if entry[0] != key and not entry[4] and now >= entry[5]:
+                    entry[4] = True
+                    self._burn_locks.setdefault(which, [threading.Lock(), 0])[1] += 1    # the thread is a caller
+                    threading.Thread(target=self._burn_refresh, args=(which, entry), daemon=True, name="burn-refresh").start()
+                return self._burn_served(entry)
+            held = self._burn_locks.setdefault(which, [threading.Lock(), 0])
+            held[1] += 1                        # callers waiting on or running this key: its lock is not dropped
+        try:
+            with held[0]:                       # a first (or too old) board: viewers of this key wait for one build
+                key = self._burn_key(which)
+                with self._burn_lock:
+                    entry = self._burn.get(which)
+                    if entry is not None:
+                        if entry[0] == key or time.time() - entry[3] < BURN_STALE_S:
+                            return self._burn_served(entry)
+                        if time.time() < entry[5]:
+                            # backing off after a failed build: say so, not a stale board. A new exception each
+                            # time, so the stored one's traceback does not grow with every request.
+                            raise RuntimeError("the last board build failed: %s" % entry[6]) from None
+                try:
+                    entry = self._burn_build(which, key)
+                except Exception as exc:
+                    with self._burn_lock:
+                        old = self._burn.get(which)
+                        if old is not None:
+                            old[5], old[6] = time.time() + BURN_RETRY_S, exc
+                    raise
+                return self._burn_served(entry)
+        finally:
+            self._burn_release(which)
+
+    def _burn_release(self, which):
+        with self._burn_lock:
+            held = self._burn_locks.get(which)
+            if held is not None:
+                held[1] -= 1
+                if held[1] == 0 and which not in self._burn:
+                    del self._burn_locks[which]      # nothing stored: no lock left to grow the table
+
+    def _burn_key(self, which):
+        with self.lock:
+            key = (self.data_rev, self.pricing_rev) + which + (int(time.time() // 60),)
+        if not key[0]:
+            raise FoldPending("first analytics fold pending")
+        return key
+
+    @staticmethod
+    def _burn_served(entry):
+        if not entry[4] and not entry[5] > time.time():     # not rebuilding, and no retry pending after a failed build
+            return entry[1], entry[2]
+        body = entry[1][:-1] + ', "refreshing": true}'
+        return body, util.sha256_hex(body)
+
+    def _burn_build(self, which, key):
+        """Compute the board for `which` and store it; returns the stored entry
+        [key, body, etag, built at, refreshing, retry not before, last error]."""
+        from alpaca.analytics import burn as burn_board
+        window, start, end = which
+        with self.lock:
+            data_json = self.data_json
+        sessions = json.loads(data_json).get("sessions", [])
+        built = time.time()
+        if window == "range":
+            value = burn_board.board(self.root, sessions, start=start, end=end)
+        else:
+            value = burn_board.board(self.root, sessions, window)
+        body = json.dumps(value, ensure_ascii=True)
+        entry = [key, body, util.sha256_hex(body), built, False, 0.0, None]
+        with self._burn_lock:
             self._burn.pop(which, None)
-            self._burn[which] = (key, body, etag)
+            self._burn[which] = entry
+            # evict the oldest board nobody is building or waiting on; a key in use stays
             while len(self._burn) > BURN_KEEP:
-                self._burn.pop(next(iter(self._burn)))
-            return body, etag
+                idle = [k for k in self._burn if k != which and self._burn_locks.get(k, (None, 0))[1] == 0]
+                if not idle:
+                    break
+                stale = min(idle, key=lambda k: self._burn[k][3])
+                del self._burn[stale]
+                self._burn_locks.pop(stale, None)
+        return entry
+
+    def _burn_refresh(self, which, mine):
+        """The background rebuild of one key (the caller set `mine`'s refreshing flag and counted this
+        thread as a caller); a failure keeps the old board and backs off. Only `mine` is touched."""
+        try:
+            with self._burn_locks[which][0]:
+                self._burn_build(which, self._burn_key(which))
+        except Exception as exc:
+            with self._burn_lock:
+                mine[5], mine[6] = time.time() + BURN_RETRY_S, exc
+        finally:
+            with self._burn_lock:
+                mine[4] = False
+            self._burn_release(which)
 
     def _warm_index(self, *, force=False):
         """Recompute a stale index off the watcher thread after the fold or the pricing moved.
@@ -1277,8 +1934,9 @@ def make_handler(live, root, remote=False):
         def do_GET(self):
             try:
                 return self._get()
-            except (BrokenPipeError, ConnectionResetError) as error:
+            except CLIENT_GONE as error:
                 live.failure("disconnect", error)
+                self.close_connection = True
             except Exception as error:
                 live.failure("endpoint", error)
                 self.close_connection = True
@@ -1357,10 +2015,14 @@ def make_handler(live, root, remote=False):
                 live.touch()
                 return self._files_api(path, parse_qs(u.query))
             if path == "/data.json":
+                start = time.monotonic()
                 live.data_ready.wait(DATA_WAIT_S)    # right after a start the first fold is running
                 with live.lock:
                     body, etag = live.data_json.encode("utf-8"), live.data_rev
-                return self._send(body, "application/json", etag=etag, cache="no-cache")
+                try:
+                    return self._send(body, "application/json", etag=etag, cache="no-cache")
+                finally:
+                    live.note_speed(time.monotonic() - start)
             if path == "/health.json":
                 live.touch()
                 return self._send(live.health_json().encode("utf-8"), "application/json")
@@ -1383,8 +2045,16 @@ def make_handler(live, root, remote=False):
                               "application/json", code)
 
         def _hub(self, path, query):
-            with live.foreground_read(path):
-                return self._hub_read(path, query)
+            # The page's data reads are timed for the health score's hub speed (t-590); its own
+            # vitals poll is not, nor the page and its assets, nor a git status a viewer asked for by hand
+            # (vcs-tree.json: one worktree read on demand, up to the sweeper's read timeout).
+            start = time.monotonic()
+            try:
+                with live.foreground_read(path):
+                    return self._hub_read(path, query)
+            finally:
+                if path.endswith(".json") and not path.startswith("/hub/assets/") and path not in ("/hub/vitals.json", "/hub/vcs-tree.json"):
+                    live.note_speed(time.monotonic() - start)
 
         def _hub_read(self, path, query):
             """Read services and an explicit static allowlist for the operations workbench."""
@@ -1414,19 +2084,36 @@ def make_handler(live, root, remote=False):
                 if name not in assets or not (web / name).is_file():
                     return self._send(b"not found", "text/plain", 404)
                 body = (web / name).read_bytes()
-                if name.startswith("vendor/arthur/"):
-                    # Arthur's artwork is about 10 MB the avatar loads in full on every page load:
-                    # the browser keeps it and revalidates it on a reload, and an
-                    # unchanged file answers 304 with no body. The tag is the content's sha256.
-                    return self._send(body, assets[name], etag=_content_tag(web / name, body), cache="no-cache")
-                return self._send(body, assets[name])
+                if name.startswith("vendor/"):
+                    # A vendor file is kept for a day only under a URL that carries a content version
+                    # (?v=): Arthur's links get arthur_version, and the fonts and thinking-orbs.js are
+                    # versioned where hub.css and orb.js name them (vendor_links), so a changed file
+                    # has a new URL. Any other request for it revalidates by its sha256 ETag (t-595).
+                    versioned = "v" in query and name.endswith((".png", ".webp", ".woff2", ".js"))
+                    return self._send(body, assets[name], etag=_content_tag(web / name, body),
+                                      cache="max-age=86400" if versioned else "no-cache")
+                return self._send(vendor_links(name, body), assets[name])
             try:
-                if path == "/hub/overview.json":
+                if path == "/hub/vitals.json":
+                    return self._send(live.vitals_json().encode("utf-8"), "application/json")
+                elif path == "/hub/overview.json":
                     body, etag = live.overview()
                     return self._send(body, "application/json", etag=etag, cache="no-cache")
+                elif path == "/hub/session-asks.json":
+                    live.data_ready.wait(DATA_WAIT_S)
+                    body, etag = live.session_asks()
+                    return self._send(body.encode("utf-8"), "application/json", etag=etag, cache="no-cache")
+                elif path in ("/hub/tasks.json", "/hub/messages.json"):
+                    got = live.work_view(path[len("/hub/"):-len(".json")], one("ids"))
+                    return self._send(got[0], "application/json", etag=got[1], cache="no-cache")
                 elif path == "/hub/mission.json":
-                    from alpaca import mission
-                    value = mission.project(root, at=one("at") or None)
+                    got = live.mission_view(one("at") or None)
+                    if one("view") == "compact" and got is not None:
+                        got = live.slim("mission", got, mission_compact)
+                    return self._send(got[0], "application/json", etag=got[1], cache="no-cache")
+                elif path == "/hub/live-work.json":
+                    got = live.live_work()
+                    return self._send(got[0], "application/json", etag=got[1], cache="no-cache")
                 elif path == "/hub/mission-evidence.json":
                     if not files_auth(root):
                         return self._json({"error": "Evidence reading requires a configured web login"}, 403)
@@ -1437,12 +2124,15 @@ def make_handler(live, root, remote=False):
                     # ValueError (400); an unknown run is answered here, since the chain's
                     # KeyError answer names a session
                     from alpaca.research import view as research_view
+                    run = None
                     if "run" in query:
-                        value = research_view.run(root, one("run"))
-                        if value is None:
-                            return self._json({"error": "Research run not found in this project"}, 404)
-                    else:
-                        value = research_view.runs(root)
+                        run = research_view._check_id(one("run"))
+                    got = live.research_view(run)
+                    if got is None:
+                        return self._json({"error": "Research run not found in this project"}, 404)
+                    if one("view") == "compact" and not run:
+                        got = live.slim("research", got, research_compact)
+                    return self._send(got[0], "application/json", etag=got[1], cache="no-cache")
                 elif path == "/hub/history.json":
                     value = hub.history(root, before=one("before") or None, limit=int(one("limit", "50")),
                                         query=one("q"), kind=one("kind", "work"), session=one("session"), ref=one("ref"),
@@ -1462,6 +2152,17 @@ def make_handler(live, root, remote=False):
                 elif path == "/hub/records.json":
                     value = hub.records(root, one("section", "ops"), query=one("q"), limit=one("limit", "200"),
                                         offset=one("offset", "0") or 0)
+                elif path in ("/hub/graph.json", "/hub/graph-item.json"):
+                    # the evidence graph carries wiki claims: the same login as the wiki and the reports
+                    if not files_auth(root):
+                        return self._json({"error": "The evidence graph requires a configured web login"}, 403)
+                    if path == "/hub/graph.json":
+                        value = hub.evidence_graph(root)
+                    else:
+                        try:
+                            value = hub.graph_item(root, one("id"))
+                        except ValueError as exc:
+                            return self._json({"error": str(exc)}, 404)
                 elif path in ("/hub/wiki-status.json", "/hub/wiki-briefing.json"):
                     # wiki text is project knowledge: read behind the same login as the reports
                     if not files_auth(root):
@@ -1494,10 +2195,31 @@ def make_handler(live, root, remote=False):
                 elif path == "/hub/vcs.json":
                     # Read-only git (alpaca/gitview.py), reused for VCS_S.
                     from alpaca import gitview
+                    live.vcs_touch()                  # watched from the request's start: a first build can take a minute
                     try:
                         value = live.vcs(int(one("days", "7") or "7"))
                     except gitview.GitError as error:
                         return self._json({"error": "Git could not be read: %s" % str(error)[:200]}, 503)
+                    live.vcs_touch(value)
+                    value = dict(value, served_at=time.time(), hot_backlog=live._vcs_sweep.backlog)
+                elif path == "/hub/vcs-status.json":
+                    # Per-worktree status from the cache the sweeper keeps fresh; polled every 5 s by the open page (t-592).
+                    from alpaca import gitview
+                    live.vcs_touch()
+                    try:
+                        value = live.vcs_status()
+                    except gitview.GitError as error:
+                        return self._json({"error": "Git could not be read: %s" % str(error)[:200]}, 503)
+                elif path == "/hub/vcs-tree.json":
+                    # One worktree outside the watched set, read on demand ("Load status") and kept live a while.
+                    from alpaca import gitview
+                    live.vcs_touch()
+                    try:
+                        value = live.vcs_tree(one("path") or "")
+                    except gitview.GitError as error:
+                        return self._json({"error": "Git could not be read: %s" % str(error)[:200]}, 503)
+                    if value is None:
+                        return self._json({"error": "Not a worktree of this repository"}, 404)
                 elif path == "/hub/inflight.json":
                     # Polled every 15 s by the In-flight tab; "before" reads earlier activity.
                     from alpaca.analytics import inflight
@@ -1528,6 +2250,8 @@ def make_handler(live, root, remote=False):
                 return self._json({"error": "No readable report at this path"}, 404)
             except KeyError:
                 return self._json({"error": "Session not found in this project"}, 404)
+            except CLIENT_GONE:
+                raise                            # do_GET counts the reader leaving as a disconnect (t-590)
             except Exception as error:
                 live.failure("endpoint", error)
                 # Never disclose host paths, SQL, or source content in the HTTP error response.
@@ -1617,8 +2341,9 @@ def make_handler(live, root, remote=False):
         def do_POST(self):
             try:
                 return self._post()
-            except (BrokenPipeError, ConnectionResetError) as error:
+            except CLIENT_GONE as error:
                 live.failure("disconnect", error)
+                self.close_connection = True
             except Exception as error:
                 live.failure("endpoint", error)
                 self.close_connection = True
@@ -1711,6 +2436,8 @@ def make_handler(live, root, remote=False):
                 return self._json({"error": str(exc)}, 400)
             except FileNotFoundError:
                 return self._json({"error": "not found"}, 404)
+            except CLIENT_GONE:
+                raise                            # do_GET counts the reader leaving as a disconnect (t-590)
             except Exception as error:
                 live.failure("profile_route", error)
                 return self._json({"error": "The profile could not answer. Try again or check server health."}, 503)
@@ -1887,6 +2614,7 @@ def _run(root, port, keep=False, remote=False):
     httpd, port = _bind(port)
     live = Live(root)
     live.refresh(fold=False)
+    live.warm_vcs()
     httpd.RequestHandlerClass = make_handler(live, root, remote=remote)
     httpd.daemon_threads = True
     url = "http://127.0.0.1:%d/" % port

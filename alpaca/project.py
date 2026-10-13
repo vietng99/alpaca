@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 import uuid
@@ -9,18 +10,38 @@ DEFAULT_PHASES = ["requirement", "design", "build", "verify", "release"]
 def path(root):
     return os.path.join(root, FILE)
 
+#: parsed project.yaml per path, kept while the file's stamp (size, mtime_ns, ctime_ns, inode) and the
+#: instance.json stamp it may merge stay the same. A request that loads the file hundreds of times
+#: (the research view asks the budget for it per run) then parses it once.
+_LOAD_CACHE: dict = {}
+
+
+def _stamp(p):
+    try:
+        st = os.stat(p)
+    except OSError:
+        return None
+    return (st.st_size, st.st_mtime_ns, st.st_ctime_ns, st.st_ino)
+
+
 def load(root) -> dict:
     p = path(root)
     if not os.path.isfile(p):
         return {}
+    local = os.path.join(root, ".alpaca", "instance.json")
+    stamp = (_stamp(p), _stamp(local))
+    held = _LOAD_CACHE.get(p)
+    if held is not None and held[0] == stamp and stamp[0] is not None:
+        return copy.deepcopy(held[1])
     import yaml
     with open(p, encoding="utf-8") as fh:
         cfg = yaml.safe_load(fh) or {}
     if cfg.get("template") is True:
-        local = os.path.join(root, ".alpaca", "instance.json")
         if os.path.isfile(local):
             with open(local, encoding="utf-8") as fh:
                 cfg["project_id"] = json.load(fh)["project_id"]
+    if stamp[0] is not None:
+        _LOAD_CACHE[p] = (stamp, copy.deepcopy(cfg))
     return cfg
 
 

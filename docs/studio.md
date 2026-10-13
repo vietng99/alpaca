@@ -47,6 +47,12 @@ From the top:
    centred, with his caption in 12 px muted text under him. He is a button: a click plays a trick.
    There is no status row under the caption (the old green dot was removed by owner decision).
    Section 6 describes him.
+   Between Arthur and his caption sits the **health bar**: "Health N/1000" with a thin fill bar, a
+   meter for screen readers. The score comes from `/hub/vitals.json` (section 7.7) and has five
+   parts: page data 250, hub speed 250, capture collector 200, capture backlog and issues 150,
+   server errors 150. 900 and up is the good band, 600 to 899 attention, under 600 bad. Its
+   tooltip lists every lost point with its reason. Before the first answer it reads "Health
+   --/1000"; when a later poll fails it keeps the last score and says since when.
 3. **Navigation.** A small heading "WORKSPACE", then one link per page, each with a geometric icon.
    The order is fixed:
 
@@ -118,8 +124,10 @@ with actions at the right. Common parts used across pages:
 - **Badges**: small rounded state labels. Green for pass, done and complete; amber for blocked,
   stale and open; red for fail and error; blue for running, active and doing; grey otherwise.
   Running states carry a small working orb.
-- **Toolbars**: a search box, selects and a count at the right. Typing in a search box updates the
-  address after 450 ms; a select updates it at once. A chip with a close mark clears a filter.
+- **Toolbars**: a search box, selects and a count at the right. A search box asks once typing stops
+  (900 ms after the last key) or at once on Enter, keeps the page on screen while the answer loads
+  and asks nothing when the text is unchanged; a date updates the address after 450 ms and a select at
+  once. A chip with a close mark clears a filter.
 - **Empty states**: a small breathing orb, a title, one sentence saying what makes the page fill.
 - **Error box**: a red-ruled box "This view could not be loaded" with the message and a "Try
   again" button that reloads the data.
@@ -139,6 +147,14 @@ with actions at the right. Common parts used across pages:
   (Activity). Clicking a row goes there and closes the dialog. Esc closes it.
 - **Toast.** A dark pill centred 24 px above the bottom edge, shown for 3.5 s, used for short
   errors such as a failed "Show earlier".
+- **Tooltips** (alpaca/web/tips.js, tips.css). Every tooltip in the Studio is the Studio's own tip, never
+  the browser's, in the Rune dashboard's tip style: mono 11 px on a translucent surface with a hairline
+  border, at most 360 px wide, just above the element (below when there is no room), kept inside the
+  window, fading in over 80 ms with a 3 px rise. It shows
+  320 ms after the pointer reaches an element with a title (an SVG element's title too), or at once
+  for keyboard focus, and hides on leaving, a press, scrolling or Esc. The title moves into
+  `data-tip` as the pointer arrives, so the browser never shows its own; an element named only by its
+  title keeps that name as `aria-label`.
 
 ### 2.6 Narrow windows
 
@@ -299,7 +315,7 @@ outcomes, open operations, last meaningful activity); any **profile cards**; the
 result and proof link); right, **Next engineering action**, **Latest activity** (six progress events)
 and **Capture health**. A **host load panel** closes the page.
 
-*Reads.* `overview.json`, `runs.json`, `history.json?limit=6&kind=progress`; then, without blocking
+*Reads.* `overview.json`, `runs.json`, `history.json?limit=6&kind=progress`, `tasks.json?ids=...` (the assignment card, the latest completions and the claimed tasks); then, without blocking
 the first paint, `research.json`, `mission.json`, `/board/data.json`, `/data.json`; the host panel
 polls `system.json` every 3 s; profile card modules load from `/hub/assets/profile/`.
 
@@ -468,7 +484,7 @@ component of 4.3 scoped to the filters; History is a day-grouped timeline; Cards
 delivered with a fold for its method; Table lists number, item, state, what was delivered,
 completion and session, and proof link.
 
-*Reads.* `overview.json`. Address parameters: `tab`, `op`, `stage`, `status`, `q`, `layout`.
+*Reads.* `overview.json`, and `tasks.json` for the card, timeline and table layouts and for a search (the task text, t-591). Address parameters: `tab`, `op`, `stage`, `status`, `q`, `layout`.
 
 *Can do.* Click a task to open the record in the inspector: facts, plan position, contract (input,
 expected output, done bar, fail cases), purpose, report sections, proof links, history, related
@@ -577,21 +593,83 @@ id, the choice and its consequence, and a **Context and options** fold with the 
 its title and op, when it was done, and **Read report**, which opens the report in the Library reader)
 and **Wiki** (what the project wiki holds: serving state, documents, active blocks, nodes, links, where
 its knowledge time comes from and quarantined captures; and a box that takes an op or task id and
-shows the wiki's cited briefing of it, one source per line, with the gaps it found).
+shows the wiki's cited briefing of it, one source per line, with the gaps it found). Right below the
+wiki's summary sits the **vault seal** (alpaca/web/ventry.js, after the owner's Rune dashboard entry):
+in a box of its own, steel doors with Futhark columns and seam bolts, a combination dial inside three
+glyph rings, the record's counts typed out (operations, decisions, sealed proofs, the wiki's documents
+and links) and twelve key slots rolling hex. The rings align in about a second and the seal waits at
+ENGAGE THE SEAL for as long as it takes; it never opens itself. Pressing the dial (or Enter, or a
+double-click) grants access: the rings spin up to a blur, open inner to outer, the bolts draw, the
+doors part and the vault opens as the **evidence graph** (`#records?section=wiki&vault=open`,
+alpaca/web/evgraph.js), with no second entry. Under reduced motion the box is the plain **Open vault**
+card. The graph has fifteen colour-coded columns, left to right:
+Operations, Tasks, Decisions, Sealed proofs, four evidence kinds (record events, logs and outputs, code
+and tests, documents and other files), Review cards, Phase doors, Sessions, Messages, Wiki assertions,
+Wiki claims (a contradicted one in red) and Wiki sources. Each entry is a short mark stacked down its
+column and every link a curve between two columns (cited by, proves, part of, named in, reviews, door
+of, worked on, mentions, subject of, object of, source of, quoted in). Selecting an entry lights its
+chain, everything it rests on and everything resting on it, labels the lit entries and opens a side
+panel: the item's facts with the record event behind them, its links as buttons that step through the
+graph, and what the wiki records about it with each cited quote and source document. **Browse**, a
+tray of cards under the toolbar (folded until **Browse** is pressed, and kept so), narrows the record
+tier by tier: it opens on every operation, newest
+first; a card selects its item and opens the items linked to it, grouped by kind (an operation's tasks,
+decisions, messages, review cards, phase doors and wiki items; a task's sealed proofs, sessions,
+messages and decisions; a proof's evidence); **Back** steps up one tier and the path of crumbs above
+it jumps back further. A tier shows
+60 cards per kind, and its one filter box narrows it; at the first tier the box finds any item in the
+vault (it too waits for typing to stop; Enter selects the first match) and rings the matches. **Hide
+list** folds the tray away. The legend's chips
+highlight a sector: a pressed chip lights its column's links and makes only them fire, the rest stays
+on screen dimmed, and **Clear highlight** ends it; nothing is ever hidden. Scrolling on the graph zooms
+its columns, dragging moves them, **Fit** resets. **Firing** (0 to 100 percent) sets the share of links
+that fire, each on its own beat: a pulse with a short tail runs along the link from its left end to its
+right end, from operations toward the wiki, and the mark it reaches flashes; at 100 percent every link
+fires. **Speed** (0.25x to 4x) sets the pulse rate, and **Fire all** jumps to 100 percent (it reads
+**Calm** there and returns to the earlier share). **Brain** draws the same graph as a 3D brain inside a
+wireframe of both hemispheres, the cerebellum and the brainstem: each column is a region (sessions sit
+deep in the basal ganglia), neurons fill each region's volume, axons carry the pulses. It is drawn
+like the H01 map of human cortex (Harvard and Google, Science 2024) on an imaging field that follows
+the page theme (light with the page palette, or dark with the vivid one): each item a small lit orb
+(a soft halo and the shaded neuron cell with its forked dendrites, in four shapes and tints per
+colour; the smallest are dots) with one to three thin neurites that wander off in 3D, every link a
+long thin axon thread that bends on its way, blended so crossings glow in the dark theme.
+**Brightness** (10 to 200 percent, 70 at first, kept per viewer) scales the axons, neurites, halos,
+orbs and flashes. Somas and neurites grow with link count and zoom. While
+the brain turns, pans or zooms it draws a lighter sketch at half resolution (one axon in six as
+straight strokes, neurites only on the near side, neuron cells on the near side only, the rest as dots, flashes as batched dots) and paints
+in full 600 ms after it rests, in slices into a spare picture that is swapped in when done, with the
+axons at half resolution (auto-rotate holds still while the viewer pans, zooms or holds a key); its pixel density is capped at 1.5x. Drag turns it,
+Shift-drag, right-drag, the arrow keys or WASD (held, they glide) move it, Shift+arrows turn it, the
+wheel or a pinch zooms (pan and zoom reuse the finished picture until input rests), **Auto-rotate** and **Turn** (0x to 4x)
+set the spin, a pressed legend chip turns its region to the front, **Full screen** fills the screen.
+A double-click anywhere on the graph sends a shockwave from the cursor: rings run out, the marks or
+neurons on the front light up, and in the brain the neurons are pushed out and spring back.
+These settings are kept in the viewer's browser. An open vault is never rebuilt by the live refresh, so
+its zoom, turn and selection hold while the record changes. **Close vault** returns to the search
+mode. The selected item stays in the address (`&item=`).
 
 *Reads.* `/hub/records.json?section=ops|decisions|proofs&q=` (`hub.records`, the record through
 `connect_readonly`); on the Wiki tab `/hub/wiki-status.json` (`hub.wiki_status`: a summary of
 `alpaca.wiki.service.status`, read once a minute because it reads the whole store) and
 `/hub/wiki-briefing.json?op=|task=` (`hub.wiki_briefing`: `service.briefing`, servable sources only,
-never stored). The two wiki routes need the web login the reports need (403 without one).
+never stored); with the vault open `/hub/graph.json` (`hub.evidence_graph`: the record through
+`connect_readonly` and `alpaca.wiki.service.graph_claims`, servable claims only, one build until the
+record moves or a minute passes) and, for a selected item, `/hub/graph-item.json?id=`
+(`hub.graph_item`, with `service.graph_assertions`). The wiki and graph routes need the web login the
+reports need (403 without one).
 
 *Can do.* Switch tabs; search a tab (the text of every field); open an op, a task record or a proof
-report; ask the wiki about an op or a task. Nothing on the page writes.
+report; ask the wiki about an op or a task; open and close the vault, find, select and trace an item.
+Nothing on the page writes.
 
 *Empty.* "No operations recorded", "No decisions recorded", "No sealed proofs yet"; the Wiki tab says
 there is no store yet ("bin/alpaca wiki recover builds it").
 
-*Refresh.* On opening and on a search; no timer (the wiki status is costly).
+*Refresh.* On opening and on a search; no timer (the wiki status is costly). An open vault keeps its
+selection and zoom through a live refresh. Motion: a lit chain always pulses; with nothing selected
+the Firing share fires (30 percent at first). Reduced motion starts at 0 percent with still frames
+until the viewer moves a slider.
 
 ### 4.13 Sessions (`#sessions`)
 
@@ -637,11 +715,34 @@ Worktrees, Local changes, Activity, Remotes). The **commit graph**: lanes and do
 history (Enter jumps to the next match), and a button to expand all loaded commits. Selecting a
 commit shows its details; task and op ids in a message are links. Then a branch overview with
 workspace signals (worktrees with changes, locked or prunable worktrees, diverged upstreams, stash
-entries), and folds for Worktrees (branch, head, ahead and behind main, uncommitted count, session),
-Local changes (open by default), Git activity (from the reflogs), Remotes & releases, and Git guard
+entries), and folds for Worktrees, Local changes (open by default), Git activity (from the reflogs), Remotes & releases, and Git guard
 history (commands the guard refused in the last 30 days).
 
-*Reads.* `vcs.json?days=N`. Nothing is fetched from a remote.
+The **Worktrees** fold opens with an overall line: how many worktrees exist, the uncommitted files
+across those whose status is known, how many are not loaded yet, and how many could not be read. Then
+the live part, each row with branch, head, ahead and behind main, uncommitted count with when it was
+read, and session: the **Main tree**, the **Most recent** five (a live session in it first, then the
+newest of: its files moved, its index, HEAD or top directory changed, its HEAD commit) and the
+**Largest** five by last known uncommitted count (a tree already among the recent is not repeated; the
+next largest fills its place). Every other worktree sits in a closed fold, "Other worktrees (N)", by
+path and branch, with its last known count (or "not loaded") and a **Load status** button. Pressing it
+reads that one worktree now and keeps it live for 2 minutes.
+
+Why: one git status costs about 0.1 s on a warm tree and can cost seconds on a tree with stale index
+data, so reading every worktree on every pass grows with the number of worktrees (204 of them once
+cost about 9 CPU s per pass). The live set is at most eleven trees plus the ones a viewer opened,
+so the cost stays bounded however many worktrees exist.
+
+*Reads.* `vcs.json?days=N`. Nothing is fetched from a remote. `vcs-status.json` is polled every 5 s
+while the page is visible: it returns the cached status of the live worktrees (main, most recent,
+largest, opened) and the overall line, and runs no git status itself. `vcs-tree.json?path=<worktree>`
+is the Load status button: it accepts only a path that is exactly one of the repository's worktrees
+(anything else is a 404 and runs nothing), reads it with a 4 s limit and returns its row. A sweeper
+thread (started by any of these requests, ended 2 minutes after the last) reads only the live set:
+the hot ones every tick (live session, or status, HEAD or top directory changed within 30 min) and
+the rest in a rolling pass of about 70 s. Beside it a ranking lane reads at most one other worktree
+per tick, one never read or last read over 15 minutes ago, so the largest stay roughly known without
+a full pass. A snapshot build reads the live set too; any other row shows its cached count or none.
 
 *Empty.* "The main checkout has no uncommitted change." "No tags." "None." A repository with no
 commit yet (`alpaca new` runs `git init` and commits nothing) shows its branch and "No commits in
@@ -728,8 +829,8 @@ Other small motions: the theme thumb (0.45 s), the phone sidebar slide (0.2 s), 
 Arthur is the owner's alpaca avatar. He stands in the sidebar under the brand block, 128 px wide,
 centred. He is drawn from 192 by 208 px frames (a gaze atlas and 32 pose strips, one per action), played by the
 package's own player. If his files fail to load, he is hidden and the page works without him. His
-caption sits under him in 12 px muted text and says why he does what he does; the slot's tooltip
-repeats it ("Idle. Arthur acts out the work in this workspace and looks at your cursor.").
+caption sits under him in 12 px muted text and says why he does what he does. The slot has no
+tooltip of its own: the caption already says it.
 
 ### 6.2 Looking at the cursor
 
@@ -801,16 +902,21 @@ search, a date, the Roadmap or Mission tab) is no switch. A click ends a pace. T
 ### 6.7 Assets and cost
 
 The artwork is the owner's own and ships in every project with no license line. The first package's
-11 strips are copied byte for byte. Its gaze atlas keeps every pixel but has its image data
-recompressed (zlib level 9), because the package's own compressed bytes matched a rule of the
-release leak scan by chance. The second package's 21 new actions are shipped as
+11 strips are copied byte for byte. Its gaze atlas is cut to the full-width rows of the 16 gaze
+frames the avatar draws (1536 x 416, decoded 2.5 MB instead of 14 MB) and shipped as a lossless WebP;
+Chrome draws about 18,700 edge pixels of those frames one level off the PNG's. The owner accepted this
+deviation from the byte-for-byte rule on 2026-10-12 to cut the first visit's download.
+`alpaca/web/vendor/arthur/arthur-avatar.js` carries one patch: it loads the idle strip first and every other image the first time a draw needs it (`stripsManifest` in `alpaca/web/arthur.js` handles the cut atlas).
+The second package's 21 new actions are shipped as
 one 192 x 208 strip per action built from the package's own normalized frames, pixels unchanged.
 The package's `assets/avatar-manifest.js` ships byte for byte; it still names the full-size sheets,
 so the Studio reads it through `stripsManifest` (`alpaca/web/arthur.js`), which points each new
-action at its strip (`setup/vendor_arthur.py` rebuilds the strips; `alpaca/web/vendor/README.md` records the package version
-and hash). `alpaca/web/vendor/arthur/` is about 11 MB. The server sends these files with
-`Cache-Control: no-cache` and an ETag, so the first visit downloads them (about 10.6 MB) and a
-reload only revalidates (a few KB, answers 304).
+action at its strip and moves the gaze frames up by the cut (`setup/vendor_arthur.py` rebuilds the
+strips and the atlas; `alpaca/web/vendor/README.md` records the package version and hash).
+`alpaca/web/vendor/arthur/` is about 8.3 MB. Arthur stays on his idle strip until the first overview
+arrives and loads each other pose's strip the first time it plays, so a first visit no longer fetches
+all of them. Arthur's files are linked with a content version (`?v=`) and kept by the browser for a
+day; a changed file has a new URL, and any other request revalidates by its ETag (answers 304).
 
 ### 6.8 Reduced motion
 
@@ -910,11 +1016,15 @@ orb's repaint every 30 s, the clock every 15 s.
 ### 7.7 The connection row and Arthur's offline rule
 
 The sidebar's connection row combines three observations. The stream: "Reconnecting" while it is
-down. The health check: `/health.json` every 10 s gives "Live", "Live - capture gaps", "Stale",
-"Preparing" or "Page error", with details in the tooltip, and "Offline" if the call fails. The page
+down. The health check: `/hub/vitals.json` every 10 s (about 1 KB; `/health.json` keeps the full
+capture lists) gives "Live", "Live - capture gaps", "Stale", "Preparing" or "Page error", with
+details in the tooltip, and "Offline" if the call fails. The same answer carries the health score
+the sidebar's health bar shows (section 2.2). The page
 read: "Stale" when a quiet refresh fails. Any problem turns the row amber and its orb to
-"connecting". Arthur calls the connection lost only after 30 s of "Reconnecting" or "Offline"; the other amber
-states mean the server still answers (section 6.4).
+"connecting". Arthur calls the connection lost only after 30 s of "Reconnecting" or "Offline". "Stale" neither
+starts nor clears that wait: while the server is gone the 15 s refresh writes it between the health check's
+"Offline", and a wait that ends on it still counts as lost. The other amber states mean the server still
+answers (section 6.4).
 
 ### 7.8 The orb as reload
 
@@ -966,7 +1076,7 @@ stylesheet, cards and bookmarks keep working after an upgrade.
   named in section 4; the retired addresses (`#mission`, `/cockpit/legacy/`, `/analytics/legacy/`,
   `/board`) that still redirect.
 - **Server paths and shapes.** The `/hub/*.json` endpoints named in section 4, `/events`,
-  `/health.json`, `/board/data.json`, `/data.json`, and the fields the pages read from the overview,
+  `/health.json`, `/hub/vitals.json`, `/board/data.json`, `/data.json`, and the fields the pages read from the overview,
   including its `arthur` and `profile` blocks.
 - **The live update contract.** The `rev` event and its four keys, the five flags and the table that
   maps one to the other, the 15 s timer, the generation rule, the "New activity available" notice
@@ -981,7 +1091,7 @@ stylesheet, cards and bookmarks keep working after an upgrade.
   `alpaca.roadmap.*`, `alpaca.live.mode` and the Cache API name `alpaca-handoff`. Renaming a key
   would reset every viewer's saved state.
 - **The page order and names** of the sidebar (section 2.2), and the animation set M1 to M13 and
-  live mechanisms L1 to L6 as written in sections 5 and 7.
+  the live update mechanisms as written in sections 5 and 7 (7.1 to 7.8).
 
 A change to the stable list is a change to the template itself: it goes through the same design and
 owner review as the look did, and this document is updated in the same change.

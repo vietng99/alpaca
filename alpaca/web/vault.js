@@ -359,14 +359,14 @@
   }
 
   /* ---------- workspace handoff: the cockpit's first-paint reads load while the takeover plays ----------
-     /hub/ opens on the cockpit route, which renders from these five reads (hub.js, cockpit()). Each
+     /hub/ opens on the cockpit route, which renders from these first-paint reads (hub.js, cockpit()). Each
      response is parked in the Cache API under HANDOFF; hub.js takes it once on its first render and
      then deletes the cache, so later reads always go to the server. */
   var HANDOFF = 'alpaca-handoff', HANDOFF_WAIT_MS = 15000;
   // Not /data.json: right after a server reload it waits for the analytics fold (up to a minute), and
   // the cockpit paints without it.
   var HUB_FIRST_PAINT = ['/hub/overview.json', '/hub/runs.json', '/hub/history.json?limit=6&kind=progress',
-    '/board/data.json'];
+    '/hub/live-work.json'];
   // Returns a promise for the reads plus progress(): {done, total, fraction}. Each read counts as an
   // equal share; inside a read the share fills with the bytes received against the decoded size the
   // server names (X-Body-Length when gzipped, else Content-Length). A read with no size fills when it

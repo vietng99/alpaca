@@ -101,6 +101,11 @@ def _walk_calls(project):
         "context": lambda: service.context(project, "kestrel queue drains"),
         # t-068: the task briefing, built on demand from the store (it writes nothing)
         "briefing": lambda: service.briefing(project, task="t-9"),
+        # op-012 t-580: the Studio evidence graph's readers (servable claims, an item's assertions)
+        "graph_claims": lambda: service.graph_claims(project),
+        "graph_assertions": lambda: service.graph_assertions(project, "t-9"),
+        # op-012 t-589: every servable assertion, for the vault columns
+        "graph_assertion_list": lambda: service.graph_assertion_list(project),
         "ingest": lambda: service.ingest(project, page, doc_id="wiki/k1.md"),
         "capture": lambda: service.capture(project, sessions=["s-native"], session_events=True,
                                            deadline_s=30),

@@ -1267,3 +1267,91 @@ process.exit(out.some(line=>line.startsWith('FAIL'))?1:0);
     finally:
         server.shutdown()
         server.server_close()
+
+
+# ============================================================ the kept run summaries (t-593)
+def _uncached_runs(project):
+    view._KEPT.clear()
+    return view.runs(project)
+
+
+def test_a_new_event_of_one_run_rebuilds_only_that_run_and_shows(project):
+    """t-593: runs() keeps each run's summary; an event of the run, of one of its tasks or naming
+    it in its data reaches the next read, and a run it does not concern is not built again."""
+    conn = _conn(project)
+    _start(conn, "rr-001")
+    _start(conn, "rr-002")
+    first, second = _task(conn, 1, 0, run="rr-001"), _task(conn, 1, 0, run="rr-002")
+    _record(conn, first, "accepted", run="rr-001", value=5.0)
+    _record(conn, second, "accepted", run="rr-002", value=6.0)
+    before = {r["run"]: r for r in view.runs(project)["runs"]}
+    kept = dict(view._KEPT[str(project)])
+    # an event on a task of rr-002
+    third = _task(conn, 2, 0, run="rr-002")
+    _record(conn, third, "accepted", run="rr-002", value=4.0)
+    # an unrelated event, and one that names rr-001 only in its data
+    db.append_event(conn, session=S, actor="test", kind="msg", ref="elsewhere", data={"body": "x"})
+    db.append_event(conn, session=S, actor="test", kind="note", ref="elsewhere", data={"run": "rr-001"})
+    conn.close()
+    after = view.runs(project)
+    assert json.loads(json.dumps(after)) == json.loads(json.dumps(_uncached_runs(project)))
+    got = {r["run"]: r for r in after["runs"]}
+    assert got["rr-002"]["attempt_count"] == before["rr-002"]["attempt_count"] + 1
+    assert got["rr-002"] != before["rr-002"]
+    assert kept["rr-001"] is not view._KEPT[str(project)]["rr-001"]     # the second read built it afresh
+
+
+def test_an_event_that_does_not_concern_a_run_leaves_its_kept_summary(project):
+    conn = _conn(project)
+    _start(conn)
+    _record(conn, _task(conn, 1, 0), "accepted", value=5.0)
+    view.runs(project)
+    kept = view._KEPT[str(project)][RUN]
+    body = kept.body
+    db.append_event(conn, session=S, actor="test", kind="msg", ref="elsewhere", data={"body": "x"})
+    db.append_event(conn, session=S, actor="test", kind="mission-snapshot", ref=None,
+                    data={"tasks": ['"%s"' % RUN, RUN]})
+    conn.close()
+    view.runs(project)
+    assert view._KEPT[str(project)][RUN] is kept and kept.body is body
+
+
+def test_a_new_run_and_the_project_posture_show_without_a_rebuild_of_the_others(project):
+    conn = _conn(project)
+    _start(conn, "rr-001")
+    view.runs(project)
+    _start(conn, "rr-002")
+    from alpaca.resilience import budget
+    budget.spend(conn, 3.0, ref="elsewhere", session=S, actor="test")
+    conn.close()
+    got = view.runs(project)
+    assert [r["run"] for r in got["runs"]] == ["rr-002", "rr-001"]
+    assert json.loads(json.dumps(got)) == json.loads(json.dumps(_uncached_runs(project)))
+
+
+def test_a_kept_ended_run_follows_the_runner_lock_and_the_clock_at_read_time(project, monkeypatch):
+    """t-593 review N1: runner.alive and the age of the oldest handed job are patched into the kept
+    body on every read, so an ended run needs no timed rebuild to show them."""
+    from alpaca.research import runner
+    conn = _conn(project)
+    _start(conn)
+    events.emit(conn, events.RUNNER, run=RUN, ref=RUN, op=OP, session=S,
+                data={"pid": 1, "host": "h", "cause": "start", "foreground": False})
+    events.emit(conn, events.STOP, run=RUN, ref=RUN, op=OP, session=S, data={"reason": "x", "final": True})
+    conn.close()
+    alive = {"now": True}
+    monkeypatch.setattr(runner, "is_alive", lambda root, run: alive["now"])
+    first = view.runs(project)["runs"][0]
+    assert first["state"] in view.ENDED and first["runner"]["alive"] is True
+    kept = view._KEPT[str(project)][RUN]
+    alive["now"] = False
+    second = view.runs(project)["runs"][0]
+    assert view._KEPT[str(project)][RUN] is kept        # not rebuilt
+    assert second["runner"]["alive"] is False
+    assert json.loads(json.dumps(view.runs(project))) == json.loads(json.dumps(_uncached_runs(project)))
+    # the lock being held or not is part of what the server keys the view on
+    os.makedirs(os.path.dirname(view.paths.runner_lock(str(project), RUN)), exist_ok=True)
+    open(view.paths.runner_lock(str(project), RUN), "w").close()
+    stamp = view.source_stamp(project)
+    alive["now"] = True
+    assert view.source_stamp(project) != stamp

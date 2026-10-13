@@ -243,8 +243,12 @@ def apply(conn) -> int:
             'idx_events_invalid_json_id': 'CREATE INDEX IF NOT EXISTS idx_events_invalid_json_id '
                                          'ON events(id) WHERE NOT json_valid(data)',
         }
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='obs_source'").fetchone():
+            # t-577: source_revision looks sources up by parent_session on every analytics read.
+            indexes['idx_obs_source_parent'] = ('CREATE INDEX IF NOT EXISTS idx_obs_source_parent '
+                                                'ON obs_source(parent_session)')
         present = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='index' "
-                                                "AND name IN (?,?,?)", tuple(indexes))}
+                                                "AND name IN (%s)" % ",".join("?" * len(indexes)), tuple(indexes))}
         missing = [statement for name, statement in indexes.items() if name not in present]
         census_behind = _run_census_behind(conn)
         if missing or census_behind:

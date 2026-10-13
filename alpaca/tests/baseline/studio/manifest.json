@@ -14,10 +14,10 @@
   "stubs": {
    "/hub/system.json": "system.json",
    "/hub/vcs.json": "vcs.json",
-   "/health.json": "health.json"
+   "/hub/vitals.json": "vitals.json"
   },
-  "images": 84,
-  "bytes": 11399847
+  "images": 88,
+  "bytes": 12006834
  },
  "images": {
   "login-1440-light": {
@@ -125,7 +125,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 135288,
+   "bytes": 136510,
    "errors": []
   },
   "cockpit-1440-dark": {
@@ -137,7 +137,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 135568,
+   "bytes": 136888,
    "errors": []
   },
   "cockpit-390-light": {
@@ -173,7 +173,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 147568,
+   "bytes": 149205,
    "errors": []
   },
   "overview-1440-dark": {
@@ -185,7 +185,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 148034,
+   "bytes": 130985,
    "errors": []
   },
   "overview-390-light": {
@@ -221,14 +221,14 @@
    "masks": [
     [
      24,
-     895,
+     899,
      183,
-     5
+     1
     ]
    ],
    "ready": true,
    "stable": true,
-   "bytes": 163672,
+   "bytes": 162725,
    "errors": []
   },
   "roadmap-1440-dark": {
@@ -240,14 +240,14 @@
    "masks": [
     [
      24,
-     895,
+     899,
      183,
-     5
+     1
     ]
    ],
    "ready": true,
    "stable": true,
-   "bytes": 164251,
+   "bytes": 163425,
    "errors": []
   },
   "roadmap-390-light": {
@@ -283,14 +283,14 @@
    "masks": [
     [
      24,
-     895,
+     899,
      183,
-     5
+     1
     ]
    ],
    "ready": true,
    "stable": true,
-   "bytes": 140634,
+   "bytes": 141911,
    "errors": []
   },
   "roadmap-mission-1440-dark": {
@@ -302,14 +302,14 @@
    "masks": [
     [
      24,
-     895,
+     899,
      183,
-     5
+     1
     ]
    ],
    "ready": true,
    "stable": true,
-   "bytes": 141727,
+   "bytes": 142966,
    "errors": []
   },
   "roadmap-mission-390-light": {
@@ -345,14 +345,14 @@
    "masks": [
     [
      24,
-     895,
+     899,
      183,
-     5
+     1
     ]
    ],
    "ready": true,
    "stable": true,
-   "bytes": 94284,
+   "bytes": 95609,
    "errors": []
   },
   "roadmap-finished-1440-dark": {
@@ -364,14 +364,14 @@
    "masks": [
     [
      24,
-     895,
+     899,
      183,
-     5
+     1
     ]
    ],
    "ready": true,
    "stable": true,
-   "bytes": 93974,
+   "bytes": 95302,
    "errors": []
   },
   "roadmap-finished-390-light": {
@@ -407,14 +407,14 @@
    "masks": [
     [
      24,
-     895,
+     899,
      183,
-     5
+     1
     ]
    ],
    "ready": true,
    "stable": true,
-   "bytes": 129266,
+   "bytes": 130818,
    "errors": []
   },
   "roadmap-finished-op-1440-dark": {
@@ -426,14 +426,14 @@
    "masks": [
     [
      24,
-     895,
+     899,
      183,
-     5
+     1
     ]
    ],
    "ready": true,
    "stable": true,
-   "bytes": 129265,
+   "bytes": 130708,
    "errors": []
   },
   "roadmap-finished-op-390-light": {
@@ -469,7 +469,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 168282,
+   "bytes": 163765,
    "errors": []
   },
   "inflight-1440-dark": {
@@ -481,7 +481,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 168479,
+   "bytes": 164407,
    "errors": []
   },
   "inflight-390-light": {
@@ -493,7 +493,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 69104,
+   "bytes": 64677,
    "errors": []
   },
   "inflight-390-dark": {
@@ -505,7 +505,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 69533,
+   "bytes": 65563,
    "errors": []
   },
   "research-1440-light": {
@@ -517,7 +517,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 96838,
+   "bytes": 102094,
    "errors": []
   },
   "research-1440-dark": {
@@ -529,7 +529,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 100288,
+   "bytes": 101621,
    "errors": []
   },
   "research-390-light": {
@@ -565,7 +565,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 140913,
+   "bytes": 142455,
    "errors": []
   },
   "work-1440-dark": {
@@ -577,7 +577,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 130084,
+   "bytes": 143431,
    "errors": []
   },
   "work-390-light": {
@@ -613,7 +613,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 129898,
+   "bytes": 136224,
    "errors": []
   },
   "activity-1440-dark": {
@@ -625,7 +625,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 130425,
+   "bytes": 137266,
    "errors": []
   },
   "activity-390-light": {
@@ -637,7 +637,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 55745,
+   "bytes": 55679,
    "errors": []
   },
   "activity-390-dark": {
@@ -649,7 +649,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 57015,
+   "bytes": 57196,
    "errors": []
   },
   "messages-1440-light": {
@@ -661,7 +661,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 127259,
+   "bytes": 128520,
    "errors": []
   },
   "messages-1440-dark": {
@@ -673,7 +673,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 127485,
+   "bytes": 128798,
    "errors": []
   },
   "messages-390-light": {
@@ -709,7 +709,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 152518,
+   "bytes": 153759,
    "errors": []
   },
   "library-1440-dark": {
@@ -721,7 +721,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 152881,
+   "bytes": 154457,
    "errors": []
   },
   "library-390-light": {
@@ -757,7 +757,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 122579,
+   "bytes": 123885,
    "errors": []
   },
   "records-1440-dark": {
@@ -769,7 +769,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 122344,
+   "bytes": 123709,
    "errors": []
   },
   "records-390-light": {
@@ -805,7 +805,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 113388,
+   "bytes": 102963,
    "errors": []
   },
   "records-decisions-1440-dark": {
@@ -817,7 +817,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 113134,
+   "bytes": 114417,
    "errors": []
   },
   "records-decisions-390-light": {
@@ -853,7 +853,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 129050,
+   "bytes": 130480,
    "errors": []
   },
   "records-proofs-1440-dark": {
@@ -865,7 +865,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 128640,
+   "bytes": 130148,
    "errors": []
   },
   "records-proofs-390-light": {
@@ -901,7 +901,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 116747,
+   "bytes": 156084,
    "errors": []
   },
   "records-wiki-1440-dark": {
@@ -913,7 +913,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 116473,
+   "bytes": 151170,
    "errors": []
   },
   "records-wiki-390-light": {
@@ -925,7 +925,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 47189,
+   "bytes": 51520,
    "errors": []
   },
   "records-wiki-390-dark": {
@@ -937,7 +937,55 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 47415,
+   "bytes": 50788,
+   "errors": []
+  },
+  "records-vault-1440-light": {
+   "view": "records-vault",
+   "path": "/hub/#records?section=wiki&vault=open&item=op-001",
+   "width": 1440,
+   "height": 900,
+   "theme": "light",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 176082,
+   "errors": []
+  },
+  "records-vault-1440-dark": {
+   "view": "records-vault",
+   "path": "/hub/#records?section=wiki&vault=open&item=op-001",
+   "width": 1440,
+   "height": 900,
+   "theme": "dark",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 204357,
+   "errors": []
+  },
+  "records-vault-390-light": {
+   "view": "records-vault",
+   "path": "/hub/#records?section=wiki&vault=open&item=op-001",
+   "width": 390,
+   "height": 844,
+   "theme": "light",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 66684,
+   "errors": []
+  },
+  "records-vault-390-dark": {
+   "view": "records-vault",
+   "path": "/hub/#records?section=wiki&vault=open&item=op-001",
+   "width": 390,
+   "height": 844,
+   "theme": "dark",
+   "masks": [],
+   "ready": true,
+   "stable": true,
+   "bytes": 68043,
    "errors": []
   },
   "sessions-1440-light": {
@@ -949,7 +997,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 188799,
+   "bytes": 189668,
    "errors": []
   },
   "sessions-1440-dark": {
@@ -961,7 +1009,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 189811,
+   "bytes": 190673,
    "errors": []
   },
   "sessions-390-light": {
@@ -997,7 +1045,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 187080,
+   "bytes": 188315,
    "errors": []
   },
   "sessions-range-1440-dark": {
@@ -1009,7 +1057,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 188272,
+   "bytes": 189708,
    "errors": []
   },
   "sessions-range-390-light": {
@@ -1045,7 +1093,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 164945,
+   "bytes": 166700,
    "errors": []
   },
   "vcs-1440-dark": {
@@ -1057,7 +1105,7 @@
    "masks": [],
    "ready": true,
    "stable": true,
-   "bytes": 165616,
+   "bytes": 167110,
    "errors": []
   },
   "vcs-390-light": {

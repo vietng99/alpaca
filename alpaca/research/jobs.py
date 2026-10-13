@@ -115,19 +115,26 @@ def events_of(conn, scope: str, kinds=None, *, job: str | None = None, after: in
     sql = "SELECT * FROM events WHERE " + scope_match + " AND id>?"
     invalid = "SELECT * FROM events WHERE NOT json_valid(data) AND json_extract(data, '$.scope')=? AND id>?"
     params: list = [scope, int(after)]
+    bad_params: list = list(params)
     if kinds:
         marks = ",".join("?" for _ in kinds)
         sql += " AND kind IN (%s)" % marks
-        invalid += " AND kind IN (%s)" % marks
+        # The kind test sits in a CASE ahead of the JSON read, as +kind: the planner then takes the
+        # malformed-JSON partial index (with kind IN it walked every event of the seven job kinds, about
+        # 90 ms a call, to find none) and a malformed row of another kind is still never read.
+        invalid = ("SELECT * FROM events WHERE NOT json_valid(data) AND CASE WHEN +kind IN (%s)"
+                   " THEN json_extract(data, '$.scope') END=? AND id>?" % marks)
         params += list(kinds)
+        bad_params = list(kinds) + [scope, int(after)]
     if job is not None:
         sql += " AND json_extract(data, '$.job')=?"
         invalid += " AND json_extract(data, '$.job')=?"
         params.append(job)
+        bad_params.append(job)
     # Both branches share one read snapshot. The invalid branch visits only the
     # indexed malformed subset and raises SQLite's original JSON error there.
     return [_parse(r) for r in conn.execute(sql + " UNION ALL " + invalid + " ORDER BY id",
-                                          params + params).fetchall()]
+                                          params + bad_params).fetchall()]
 
 
 def find_job_event(conn, job: str) -> dict | None:
@@ -301,6 +308,15 @@ def counts(conn, scope: str) -> dict:
             oldest = age if oldest is None else max(oldest, age)
     out["oldest_handed_age_s"] = None if oldest is None else round(oldest, 1)
     return out
+
+
+def oldest_handed_at(conn, scope: str) -> datetime.datetime | None:
+    """When the oldest handed or claimed open job of `scope` was handed: `counts` ages it by the clock
+    (op-012 t-593: the research view keeps this time and ages it again on every read)."""
+    times = [parse_time(j["handed"].get("handed_at")) for j in open_jobs(conn, scope).values()
+             if j["handed"] and j["state"] in ("handed", "claimed")]
+    times = [t for t in times if t is not None]
+    return min(times) if times else None
 
 
 def refusal_counts(conn, scope: str) -> dict:
