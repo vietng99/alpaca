@@ -283,6 +283,29 @@ def test_group_and_mapped_task_creation_in_one_command(record, capsys):
     assert 't-008' in capsys.readouterr().out
 
 
+def test_task_group_then_task_add_work_under_the_rehearsal_mark(record, monkeypatch, capsys):
+    """op-062 D1: with ALPACA_REHEARSAL set the event writer adds rehearsal: true to every event's data. The plan
+    readers must not see it: the strict plan validation took it for an unknown key and refused every later task add."""
+    from alpaca import taskplan
+    root, conn = record
+    monkeypatch.setenv('ALPACA_REHEARSAL', '1')
+    assert cli.main(['task', 'group', 'op-001', 'release', '--title', 'Release pipeline',
+                     '--category', 'CI/CD']) == 0
+    marked = conn.execute("SELECT data FROM events WHERE kind='task-plan' ORDER BY id DESC LIMIT 1").fetchone()['data']
+    assert json.loads(marked).get('rehearsal') is True          # the mark is still written, outside the plan's meaning
+    assert 'rehearsal' not in taskplan.latest(conn, 'op-001')
+    assert cli.main(['task', 'add', 'op-001', 'Ship the feature', '--title', 'Ship feature', '--group', 'release',
+                     '--independent', '--no-resources']) == 0
+    assert cli.main(['task', 'group', 'op-001', 'docs', '--title', 'Documentation',
+                     '--category', 'Docs']) == 0
+    assert cli.main(['task', 'map', 't-008', '--group', 'docs']) == 0
+    plan = taskplan.latest(conn, 'op-001')
+    assert [g['id'] for g in plan['groups']] == ['release', 'docs']
+    assert next(t for t in plan['tasks'] if t['id'] == 't-008')['group'] == 'docs'
+    taskplan.validate(plan, {t['id'] for t in db.rows(conn, 'tasks', 'op=?', ('op-001',))})
+    assert 'plan needs fields' not in capsys.readouterr().out
+
+
 def test_bad_mapping_rolls_back_task_and_all_events(record):
     from alpaca import ops
     root, conn = record

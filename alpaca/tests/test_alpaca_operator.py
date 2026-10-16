@@ -69,6 +69,8 @@ def test_lifecycle_records_checkpoint_and_end_without_transcript(project, monkey
 
 def test_session_identity_and_levels_do_not_cross_operators(project, monkeypatch):
     from alpaca.posture import level
+    from alpaca.tests.ownerword_fixtures import owner_at_terminal
+    owner_at_terminal(monkeypatch, "L4")         # a raise above L2 is the owner's (t-678)
     assert invoke(monkeypatch, "--session", "codex-a", "session", "start", "--level", "L4") == 0
     assert invoke(monkeypatch, "--session", "claude-a", "session", "start", "--operator", "claude") == 0
     assert invoke(monkeypatch, "--session", "codex-a", "session", "start", "--operator", "claude") == 2
@@ -130,6 +132,8 @@ def test_analytics_ignore_cwd_history_and_ambient_transcripts(project, monkeypat
 
 
 def test_generated_session_can_resume_with_recorded_level(project, monkeypatch, capsys):
+    from alpaca.tests.ownerword_fixtures import owner_at_terminal
+    owner_at_terminal(monkeypatch, "L4")         # a raise above L2 is the owner's (t-678)
     assert invoke(monkeypatch, "session", "start", "--level", "L4") == 0
     first = json.loads(capsys.readouterr().out)
     assert first["session"].startswith("codex-")

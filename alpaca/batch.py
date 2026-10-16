@@ -216,8 +216,19 @@ FORMS = ("Reply in one message, one phrase for each item:\n"
          "  all yes           the whole message; accepts every proposal shown")
 
 
-def render(conn, op) -> str:
-    """The text the owner is shown for the batch of `op`."""
+def _readback(name, text, root, op=None):
+    """The sandbox item's answer or proposal read back to the owner (alpaca/sandbox.py `readback`), as
+    indented lines, or []. Only with a project root and only for the `sandbox` item. The reading is a
+    proposal with the `alpaca sandbox set` command that confirms it; it is never enforced by itself."""
+    if root is None or name != "sandbox" or not text:
+        return []
+    from alpaca import sandbox
+    return ["  " + line for line in sandbox.readback(str(text), root, op).splitlines()]
+
+
+def render(conn, op, root=None) -> str:
+    """The text the owner is shown for the batch of `op`. With `root`, the `sandbox` item is followed
+    by the reading the write guard makes of its answer or proposal."""
     state = items(conn, op)
     waiting = [s for s in state.values() if s["state"] != ANSWERED]
     lines = ["Batch of %s: %d of %d items wait for your answer before an autonomous run starts."
@@ -227,8 +238,10 @@ def render(conn, op) -> str:
         if s["state"] == ANSWERED:
             by = "derived by the agent" if s.get("source") == "derived" else "your answer"
             lines.append("    ANSWERED (%s): %s" % (by, s.get("answer")))
+            lines += _readback(name, s.get("answer"), root, op)
         elif s.get("proposal"):
             lines.append("    PROPOSAL (agent, not an answer): %s" % s["proposal"])
+            lines += _readback(name, s["proposal"], root, op)
         else:
             lines.append("    NO PROPOSAL: there is nothing to say yes to; answer with `%s: <answer>`"
                          % name)
@@ -240,7 +253,7 @@ def render(conn, op) -> str:
     return "\n".join(lines)
 
 
-def show(conn, op, *, session):
+def show(conn, op, *, session, root=None):
     """Record the owner-ask for the batch of `op` and return (text, the item states). The ask keeps
     each waiting item's proposal as printed, so `--yes` records what the owner was shown."""
     if not has_batch(conn, op):
@@ -248,7 +261,7 @@ def show(conn, op, *, session):
                          % (op, op))
     ownerword.require_real_session(session)
     state = items(conn, op)
-    text = render(conn, op)
+    text = render(conn, op, root)
     shown = {n: {"proposal": s.get("proposal"), "proposal_event": s["event"] if s.get("proposal")
                  else None, "state": s["state"]} for n, s in state.items()}
     ownerword.record_ask(conn, session, ask_subject(op), text, op=op,
@@ -284,7 +297,7 @@ def _window(conn, op):
         if other is not None and other != op:
             until = row["ts"]
             break
-    return ask, _data(ask), ask["session"], ask["ts"], until
+    return ask, _data(ask), ask["session"], ownerword.ask_floor(ask), until
 
 
 def _printed(conn, op, name, ask, shown):
@@ -539,7 +552,7 @@ def _cmd_batch(args):
             print("%s %s proposed (event %s); still unanswered until the owner answers"
                   % (args.op, args.item, ev["id"]))
         elif verb == "show":
-            text, state = show(conn, args.op, session=sid)
+            text, state = show(conn, args.op, session=sid, root=root)
             if args.json:
                 print(json.dumps({"verdict": "PASS", "op": args.op, "items": [
                     {"id": n, "question": s["question"], "state": s["state"],
@@ -549,6 +562,7 @@ def _cmd_batch(args):
                 print(text)
         elif verb == "answer":
             kw = dict(session=sid, by=args.by, quote=args.quote, root=root)
+            before = items(conn, args.op).get("sandbox", {}).get("event")
             if not args.by:
                 raise BatchError("BATCH-BY", "give --by owner and the owner's message with --quote")
             if args.all_yes:
@@ -566,6 +580,12 @@ def _cmd_batch(args):
                     raise BatchError("BATCH-ANSWER", "give --yes, --no or --text T")
                 ev = answer(conn, args.op, args.item, kind=kind, text=args.text, **kw)
                 print("%s %s: %s" % (args.op, args.item, items(conn, args.op)[args.item]["state"]))
+            sb = items(conn, args.op).get("sandbox") or {}
+            if sb.get("state") == ANSWERED and sb.get("event") != before:
+                from alpaca import sandbox
+                print("sandbox answer recorded; the write guard's proposal from it (NOT ENFORCED until the "
+                      "owner confirms a path list with `alpaca sandbox set`):")
+                print(sandbox.readback(str(sb.get("answer") or ""), root, args.op))
         elif verb == "check":
             problems = check(conn, args.op, root=root)
             if problems:

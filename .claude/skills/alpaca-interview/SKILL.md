@@ -51,6 +51,16 @@ says it, `round:<n>/q<n>` for the round and the question that settled it, or `ow
 owner states it outside a round. Keep the operator's words in `--value`, and a number always with
 its unit. A correction is a new `set`; the log is never edited.
 
+## After the first chat
+
+When the owner confirmed a setup card (`bin/alpaca onboard show` prints it), use it instead of asking again:
+
+- the `goal` slot comes from the goal note the card's `apply` kept, `--answered --source input/notes/<file>.md`;
+- the card's "Done when" line is the recommended option of the first `done-bar` question, and its "Limits you
+  gave" line answers `scope-out`;
+- the card's "Still unknown" lines are the first questions of round 1;
+- the level is on the card; do not ask for it again.
+
 ## Step 1: read the notes and settle what they answer
 
 1. `bin/alpaca note list`, then read every note file in full. A new piece the operator gives

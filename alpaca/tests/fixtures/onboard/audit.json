@@ -1,0 +1,190 @@
+{
+ "answers": {
+  "audit-reader": {
+   "event": 4,
+   "option": "a",
+   "quote": "I want to know where passwords are checked and whether they are stored safely. 2a",
+   "source": "owner",
+   "value": null
+  },
+  "done-guess": {
+   "event": 5,
+   "source": "agent",
+   "value": "a written answer that names the files and lines where login happens and where passwords are stored, each with a pointer."
+  },
+  "goal": {
+   "event": 3,
+   "option": null,
+   "quote": "I want to know where passwords are checked and whether they are stored safely. 2a",
+   "source": "owner",
+   "value": "where passwords are checked and whether they are stored safely"
+  },
+  "opening": {
+   "event": 2,
+   "option": null,
+   "quote": "can you audit this repo for me, I just want to understand how login works before I join the team",
+   "source": "owner",
+   "value": "can you audit this repo for me, I just want to understand how login works before I join the team"
+  }
+ },
+ "date": "2026-10-14",
+ "look": {
+  "around": {
+   "agent_files": [],
+   "ci": [
+    ".github/workflows/test.yml"
+   ],
+   "codeowners": [],
+   "contributing": null,
+   "contributing_branch_prefix": null,
+   "contributing_branch_rule_at": null,
+   "gitmodules": false,
+   "hooks": [],
+   "tests": [
+    "server/auth.test.js"
+   ]
+  },
+  "build_files": [
+   "package.json"
+  ],
+  "gates": [
+   {
+    "classify": "runs-repo-code",
+    "command": [
+     "npm",
+     "run",
+     "build"
+    ],
+    "evidence": "repo:package.json",
+    "kind": "build",
+    "name": "build",
+    "timeout": 600,
+    "trial": null
+   },
+   {
+    "classify": "runs-repo-code",
+    "command": [
+     "npm",
+     "test"
+    ],
+    "evidence": "repo:package.json",
+    "kind": "test",
+    "name": "test",
+    "timeout": 600,
+    "trial": null
+   }
+  ],
+  "git_findings": [],
+  "git_safe": true,
+  "head": {
+   "branch": "main",
+   "date": "2026-10-01",
+   "sha": "0123456789abcdef0123456789abcdef01234567",
+   "subject": "x"
+  },
+  "history": {
+   "authors": [
+    {
+     "commits": 400,
+     "name": "Author One"
+    },
+    {
+     "commits": 240,
+     "name": "Author Two"
+    }
+   ],
+   "base": "main",
+   "commits": 640,
+   "days_still": 5,
+   "first": "2024-01-10",
+   "last": "2026-10-09",
+   "recent_authors": [
+    {
+     "last": "2026-10-09",
+     "name": "Author One"
+    },
+    {
+     "last": "2026-10-02",
+     "name": "Author Two"
+    }
+   ],
+   "tips": []
+  },
+  "host": {
+   "git_user": "Alpaca Development",
+   "tools": {
+    "cmake": "found",
+    "git": "found",
+    "python3": "found"
+   },
+   "wanted": []
+  },
+  "now": "2026-10-14",
+  "repository": "acme/webapp",
+  "schema": 1,
+  "source": "https://github.com/acme/webapp",
+  "source_kind": "url",
+  "sources": [
+   {
+    "n": 1,
+    "text": "repo:package.json"
+   },
+   {
+    "n": 2,
+    "text": "cmd: git ls-files, grouped by file extension; examples repo:server/index.js, repo:server/auth.js, repo:web/app.ts"
+   },
+   {
+    "n": 3,
+    "text": "cmd: git ls-files | wc -l = 320; git ls-files node_modules | wc -l = 0"
+   },
+   {
+    "n": 4,
+    "text": "cmd: git log main --format=%an%x09%ad --date=short (2 authors, 640 commits)"
+   },
+   {
+    "n": 5,
+    "text": "cmd: git for-each-ref --sort=-committerdate refs/remotes"
+   },
+   {
+    "n": 6,
+    "text": "look scan of CI, hook, test, CODEOWNERS, CONTRIBUTING and agent files: found .github/workflows/test.yml, server/auth.test.js"
+   }
+  ],
+  "tracked": {
+   "files": 320,
+   "languages": [
+    {
+     "examples": [
+      "server/index.js",
+      "server/auth.js"
+     ],
+     "files": 180,
+     "name": "JavaScript"
+    },
+    {
+     "examples": [
+      "web/app.ts"
+     ],
+     "files": 60,
+     "name": "TypeScript"
+    }
+   ],
+   "own": 320,
+   "python_files": 0,
+   "vendor": [
+    {
+     "dir": "node_modules",
+     "files": 0
+    }
+   ]
+  },
+  "upstream": "https://github.com/acme/webapp"
+ },
+ "name": "webapp-audit",
+ "people": [
+  {
+   "name": "Alpaca Development",
+   "role": "owner"
+  }
+ ]
+}

@@ -90,3 +90,31 @@ def test_stop_refreshes_and_rebuilds_the_page_on_tenth_stop(project):
     with open(idx, encoding="utf-8") as fh:
         html = fh.read()
     assert "s1" in html and "s2" in html
+
+
+def test_session_end_removes_the_sandbox_temp_root_env_file_and_cache(project):
+    """The hook runs in a child process, so the real `/tmp/sbx<sid8>` of a session id of this test's own
+    is made here and removed by the hook; the finally clause is only the safety net."""
+    import secrets
+    from alpaca import sandbox
+    from alpaca.tests import sandbox_fixtures as fx
+    cli.main(["init"])
+    root = os.path.realpath(project)
+    sid = "end-%s-0001" % secrets.token_hex(4)
+    temp = sandbox.temp_root(root, sid)
+    try:
+        sb = {"ops": ["op-1"], "temp_root": temp, "roots": [root], "globs": [], "always": [],
+              "events": {"op-1": 1}}
+        sandbox.sync_env(root, sid, sb)
+        assert sb["temp_ok"] is True and os.path.isdir(temp)
+        open(os.path.join(temp, "pytest-of-x"), "w").close()
+        sandbox.mark_wired(root, sid)
+        sandbox._write(root, ("cache",), sid + ".json", "{}")
+        assert os.path.exists(sandbox.env_path(root, sid))
+        p = hook("alpaca.hooks.session_end", {"session_id": sid, "reason": "exit", "cwd": project}, project)
+        assert p.returncode == 0, p.stderr
+        for gone in (temp, sandbox.env_path(root, sid), sandbox.wired_path(root, sid),
+                     sandbox.cache_path(root, sid)):
+            assert not os.path.exists(gone), gone
+    finally:
+        fx.rm_real_temp(sid)

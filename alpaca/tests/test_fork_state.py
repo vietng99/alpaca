@@ -152,3 +152,74 @@ def test_hook_names_second_machine_and_acts_on_nothing(project):
     assert "FIRST CHAT" not in ctx      # a clone is not told to onboard
     # acts on nothing: no op-0 landed
     assert db.rows(db.connect(project), "ops", "id=?", ("op-0",)) == []
+
+
+# --- the first chat after `alpaca new` (op-062 t-656) -------------------------------------------
+
+def _hook_context(project, session="abcd1234-0000"):
+    env = {"CLAUDE_PROJECT_DIR": project, "PYTHONPATH": os.path.dirname(os.path.dirname(os.path.dirname(__file__)))}
+    rc, out, err = _hook({"session_id": session, "transcript_path": "", "cwd": project, "source": "startup"},
+                         cwd=project, env_extra=env)
+    assert rc == 0, err
+    return json.loads(out)["hookSpecificOutput"]["additionalContext"]
+
+
+def _set_first_chat(project, value):
+    conn = db.connect(project)
+    if value is None:
+        conn.execute("DELETE FROM meta WHERE key=?", (adopt.FIRST_CHAT,))
+    else:
+        db.meta_set(conn, adopt.FIRST_CHAT, value)
+    conn.close()
+
+
+def test_a_provisional_onboarding_leaves_the_first_chat_due_and_the_hook_names_the_skill(project):
+    cli.main(["init"])
+    assert cli.main(["onboard", "--provisional", "--name", "demo", "--who", "v:owner", "--what", "w"]) == 0
+    conn = db.connect(project)
+    assert adopt.first_chat_state(conn) == "due" and adopt.first_chat_due(conn)
+    assert adopt.detect(project) == adopt.POPULATED                       # detect is unchanged: three callers rely on it
+    ctx = _hook_context(project)
+    assert "FIRST CHAT: setup is not confirmed yet" in ctx and "/alpaca-first-chat" in ctx
+    assert "bin/alpaca onboard look <git-url|path>" in ctx and "never AskUserQuestion" in ctx
+    assert "unchanged as one message" in ctx
+    line = [l for l in pad.render(project).splitlines() if l.startswith("fork-state:")]
+    assert len(line) == 1 and adopt.POPULATED in line[0]
+    assert "first chat: tell Alpaca about your project" in pad.render(project)
+
+
+def test_the_hook_is_silent_for_a_populated_project_without_the_mark_and_after_done_or_skipped(project):
+    cli.main(["init"])
+    cli.main(["onboard", "--name", "demo", "--who", "v:owner", "--what", "w"])
+    assert adopt.first_chat_state(db.connect(project)) is None
+    assert "FIRST CHAT" not in _hook_context(project)
+    for value in ("done", "skipped"):
+        _set_first_chat(project, value)
+        assert not adopt.first_chat_due(db.connect(project))
+        assert "FIRST CHAT" not in _hook_context(project), value
+
+
+def test_a_confirmed_card_that_is_not_applied_tells_the_agent_to_apply_it(project):
+    cli.main(["init"])
+    cli.main(["onboard", "--provisional", "--name", "demo", "--who", "v:owner", "--what", "w"])
+    _set_first_chat(project, "confirmed")
+    conn = db.connect(project)
+    db.append_event(conn, session="s", actor="owner", kind="onboard-confirmed", op="op-0", ref="card-0123abcd",
+                    data={"card": "card-0123abcd"})
+    ctx = _hook_context(project)
+    assert "FIRST CHAT: the owner confirmed the setup card, but it is not applied. Run: bin/alpaca onboard apply card-0123abcd" in ctx
+    assert "never AskUserQuestion" not in ctx
+    assert "setup confirmed, not applied: run bin/alpaca onboard apply card-0123abcd" in pad.render(project)
+
+
+def test_a_second_machine_is_never_told_to_run_the_first_chat(project):
+    proj.save(project, {"name": "cloned-elsewhere"})
+    assert "FIRST CHAT" not in _hook_context(project)
+
+
+def test_the_flat_onboard_still_refuses_a_second_run_after_a_provisional_one(project, capsys):
+    cli.main(["init"])
+    cli.main(["onboard", "--provisional", "--name", "demo", "--who", "v:owner", "--what", "w"])
+    capsys.readouterr()
+    assert cli.main(["onboard", "--name", "again", "--who", "v:owner", "--what", "w"]) == cli.FAIL
+    assert adopt.POPULATED in capsys.readouterr().out

@@ -81,3 +81,22 @@ class Project:
                         data={"intent": "x"})
         db.upsert(self.conn, "ops", "id", {"id": op, "intent": "x", "status": "open"})
         return op
+
+
+class _TTY:
+    """A stdin that is a terminal."""
+
+    @staticmethod
+    def isatty():
+        return True
+
+
+def owner_at_terminal(monkeypatch, typed_text):
+    """The owner at a plain terminal (ownerword TERMINAL PATH): no agent marker and no session in
+    the environment, stdin a terminal, and `typed_text` typed when a confirmation is asked."""
+    import builtins
+    import sys
+    for name in ownerword.AGENT_MARKERS:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(sys, "stdin", _TTY())
+    monkeypatch.setattr(builtins, "input", lambda prompt="": typed_text)

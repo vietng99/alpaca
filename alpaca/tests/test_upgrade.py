@@ -405,3 +405,352 @@ def test_push_mode_refuses_a_target_without_a_manifest(tmp_path, monkeypatch):
     monkeypatch.chdir(empty)
     args = argparse.Namespace(target=str(empty), source=None, plan=False, recover=False)
     assert upgrade._cmd_upgrade(args) != 0
+
+
+# --------------------------------------------------------------------------- local edit or release change (t-646)
+def _locked_trees(trees, tmp_path):
+    """The live tree records, in MANIFEST.json, the bytes of every file its release shipped (all but
+    pytest.ini, which the lock leaves out); the source holds a newer release of them."""
+    import json
+    root, source = trees
+    files = {}
+    for dp, dn, fn in os.walk(root):
+        dn[:] = [d for d in dn if d not in (".alpaca", "analytics")]
+        for f in fn:
+            rel = os.path.relpath(os.path.join(dp, f), root).replace(os.sep, "/")
+            if rel not in ("RESUME.md", "pytest.ini"):
+                with open(os.path.join(dp, f), "rb") as fh:
+                    files[rel] = util.sha256_hex(fh.read())
+    util.write_text(os.path.join(root, "MANIFEST.json"), json.dumps({"files": files}) + "\n")
+    return root, source
+
+
+def test_a_path_that_differs_only_because_the_release_changed_it_is_not_a_local_edit(trees, tmp_path):
+    root, source = _locked_trees(trees, tmp_path)
+    p = upgrade.plan(root, source)
+    assert "alpaca/" in p.changed and "bin/alpaca" in p.changed
+    assert "alpaca/" not in p.modified and "bin/alpaca" not in p.modified
+    # a path with no shipped sha at all (pytest.ini is not in the lock) stays a local edit
+    assert p.modified == ["pytest.ini"] and p.local_files == ["pytest.ini"]
+
+
+def test_an_edited_an_added_and_a_deleted_file_each_make_a_local_edit(trees, tmp_path):
+    root, source = _locked_trees(trees, tmp_path)
+    util.write_text(os.path.join(root, "alpaca", "stub.txt"), "edited by the owner\n")
+    util.write_text(os.path.join(root, "alpaca", "mine.py"), "ADDED = 1\n")
+    p = upgrade.plan(root, source)
+    assert "alpaca/" in p.modified and "alpaca/" not in p.changed
+    assert {"alpaca/stub.txt", "alpaca/mine.py"} <= set(p.local_files)
+    os.remove(os.path.join(root, "alpaca", "mine.py"))
+    util.write_text(os.path.join(root, "alpaca", "stub.txt"), "alpaca content OLD\n")     # back to the shipped bytes
+    assert "alpaca/" in upgrade.plan(root, source).changed
+    os.remove(os.path.join(root, "alpaca", "stub.txt"))
+    p = upgrade.plan(root, source)
+    assert "alpaca/" in p.modified and p.local_files == ["pytest.ini"] and p.deleted_files == ["alpaca/stub.txt"]
+
+
+def test_python_caches_and_shipped_links_are_not_local_files(trees, tmp_path):
+    import json
+    root, source = _locked_trees(trees, tmp_path)
+    os.makedirs(os.path.join(root, "alpaca", "__pycache__"))
+    util.write_text(os.path.join(root, "alpaca", "__pycache__", "stub.cpython-312.pyc"), "x")
+    os.symlink("stub.txt", os.path.join(root, "alpaca", "link"))
+    with open(os.path.join(root, "MANIFEST.json"), encoding="utf-8") as fh:
+        doc = json.load(fh)
+    import hashlib
+    doc["files"]["alpaca/link"] = hashlib.sha256(b"symlink:stub.txt").hexdigest()
+    util.write_text(os.path.join(root, "MANIFEST.json"), json.dumps(doc) + "\n")
+    p = upgrade.plan(root, source)
+    assert "alpaca/" in p.changed and "alpaca/" not in p.modified
+    os.remove(os.path.join(root, "alpaca", "link"))
+    os.symlink("elsewhere", os.path.join(root, "alpaca", "link"))
+    assert upgrade.plan(root, source).local_files.count("alpaca/link") == 1
+
+
+def test_a_refresh_path_a_release_added_to_a_project_without_a_lock_is_a_local_edit(trees):
+    root, source = trees                                  # the fixture writes no MANIFEST.json
+    p = upgrade.plan(root, source)
+    assert p.changed == [] and "alpaca/" in p.modified and "alpaca/stub.txt" in p.local_files
+
+
+def test_the_plan_verb_says_refreshed_for_a_release_change_and_replaced_for_a_local_edit(trees, tmp_path, capsys, monkeypatch):
+    import argparse
+    monkeypatch.chdir(tmp_path)
+    root, source = _locked_trees(trees, tmp_path)
+    args = argparse.Namespace(target=root, source=source, plan=True, recover=False)
+    assert upgrade._cmd_upgrade(args) == 0
+    out = capsys.readouterr().out
+    assert "  will be refreshed: alpaca/" in out and "  will be refreshed: bin/alpaca" in out
+    assert "  local edit will be replaced: pytest.ini" in out
+    assert "local edit will be replaced: alpaca/" not in out
+    assert "modified=" in out and "changed=" in out
+    reason = upgrade.print_plan(upgrade.plan(root, source))
+    capsys.readouterr()
+    assert reason.startswith("refresh=") and " changed=" in reason and reason.endswith("memory-untouched=%d" % len(upgrade.plan(root, source).memory))
+
+
+def test_push_mode_reads_a_relative_target_from_the_callers_folder(trees, tmp_path, monkeypatch, capsys):
+    """bin/alpaca-python runs Python in the install root; a relative --target is the caller's."""
+    import argparse
+    root, source = trees
+    monkeypatch.chdir(REPO)
+    monkeypatch.setenv("ALPACA_CALLER_CWD", str(tmp_path))
+    args = argparse.Namespace(target="live", source=source, plan=True, recover=False)
+    assert upgrade._cmd_upgrade(args) == 0
+    assert "GATE alpaca-upgrade-plan: PASS" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------- boot block edits (t-646 round 1)
+def _lock_again(root):
+    """Record in root's MANIFEST.json the bytes every file holds now (the release shipped them)."""
+    import json
+    files = {}
+    for dp, dn, fn in os.walk(root):
+        dn[:] = [d for d in dn if d not in (".alpaca", "analytics")]
+        for f in fn:
+            rel = os.path.relpath(os.path.join(dp, f), root).replace(os.sep, "/")
+            if rel not in ("RESUME.md", "MANIFEST.json"):
+                with open(os.path.join(dp, f), "rb") as fh:
+                    files[rel] = util.sha256_hex(fh.read())
+    util.write_text(os.path.join(root, "MANIFEST.json"), json.dumps({"files": files}) + "\n")
+
+
+@pytest.mark.parametrize("name", ["CLAUDE.md", "AGENTS.md"])
+def test_a_line_added_inside_the_boot_block_is_a_local_edit(trees, name, capsys):
+    root, source = trees
+    for base in (root, source):
+        if name != "CLAUDE.md":
+            shutil.copy(os.path.join(base, "CLAUDE.md"), os.path.join(base, name))
+    _lock_again(root)
+    live = util.read_text(os.path.join(root, name))
+    util.write_text(os.path.join(root, name), live.replace(manifest.BOOT_END, "my own rule inside the block\n" + manifest.BOOT_END))
+    p = upgrade.plan(root, source)
+    assert name in p.merge and p.merge_edited == [name] and name in p.local_files
+    upgrade.print_plan(p)
+    assert "  local edit in the boot block will be replaced by the release's block: %s" % name in capsys.readouterr().out
+    # the plan only reports; apply still replaces the block, which is why update saves the file first
+    assert name not in p.modified
+
+
+@pytest.mark.parametrize("name", ["CLAUDE.md", "AGENTS.md"])
+def test_an_edit_outside_the_block_or_an_untouched_file_is_not_listed(trees, name):
+    root, source = trees
+    for base in (root, source):
+        if name != "CLAUDE.md":
+            shutil.copy(os.path.join(base, "CLAUDE.md"), os.path.join(base, name))
+    _lock_again(root)
+    p = upgrade.plan(root, source)                         # the file is the shipped bytes: only the release changed the block
+    assert name in p.merge and name not in p.merge_edited and name not in p.local_files
+    # an owner line OUTSIDE the block, and the block already the incoming one: nothing is lost
+    incoming = util.read_text(os.path.join(source, name))
+    util.write_text(os.path.join(root, name), "# my notes\n\n" + incoming)
+    p = upgrade.plan(root, source)
+    assert name in p.merge and name not in p.merge_edited and name not in p.local_files
+
+
+def test_a_boot_block_edit_is_listed_when_the_project_has_no_lock_and_a_missing_block_loses_nothing(trees):
+    root, source = trees                                   # no MANIFEST.json in the live tree
+    p = upgrade.plan(root, source)
+    assert "CLAUDE.md" in p.merge_edited and "CLAUDE.md" in p.local_files
+    util.write_text(os.path.join(root, "CLAUDE.md"), "# no block here, the release appends one\n")
+    assert upgrade.plan(root, source).merge_edited == []
+    os.remove(os.path.join(root, "CLAUDE.md"))
+    assert upgrade.plan(root, source).merge_edited == []
+
+
+# --------------------------------------------------------------------------- hardening (t-673)
+def _within(seconds, fn):
+    """Run fn() in a thread and wait at most `seconds`: (thread, {"value"|"error": ...}). A call that
+    blocks leaves a daemon thread behind instead of hanging the test run."""
+    import threading
+    box = {}
+
+    def run():
+        try:
+            box["value"] = fn()
+        except BaseException as e:      # noqa: BLE001 - handed to the test
+            box["error"] = e
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    t.join(seconds)
+    return t, box
+
+
+def _unblock_fifo(path):
+    """Let a reader that is stuck opening a named pipe go (it sees end of file)."""
+    try:
+        os.close(os.open(path, os.O_WRONLY | os.O_NONBLOCK))
+    except OSError:
+        pass
+
+
+def _hold_project_lock(root):
+    """Take the project lock on a file descriptor of our own, as another process would hold it."""
+    import fcntl
+    os.makedirs(os.path.join(root, ".alpaca"), exist_ok=True)
+    fd = os.open(upgrade.lock_path(root), os.O_CREAT | os.O_RDWR, 0o600)
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    return fd
+
+
+def test_a_held_project_lock_refuses_apply_and_leaves_a_journal_to_its_holder(trees):
+    root, source = trees
+    before = [_digest(root, rel) for rel in TAGGED]
+    fd = _hold_project_lock(root)
+    try:
+        with pytest.raises(upgrade.UpgradeLocked, match="is running"):
+            upgrade.apply(root, source)
+        assert not upgrade.pending(root) and [_digest(root, rel) for rel in TAGGED] == before
+    finally:
+        os.close(fd)
+    # the lock is the holder's own: a journal it wrote is not rolled back by another start
+    with pytest.raises(upgrade._KillInjected):
+        upgrade.apply(root, source, kill_at="stage")
+    with open(upgrade._journal_path(root), "rb") as fh:
+        journal = fh.read()
+    fd = _hold_project_lock(root)
+    try:
+        assert upgrade.busy(root)
+        res = upgrade.recover(root)
+        assert res["recovered"] is False and "running" in res["reason"]
+        with open(upgrade._journal_path(root), "rb") as fh:
+            assert fh.read() == journal
+    finally:
+        os.close(fd)
+    assert not upgrade.busy(root)
+    assert upgrade.recover(root)["recovered"] is True and not upgrade.pending(root)
+    assert [_digest(root, rel) for rel in TAGGED] == before
+
+
+def test_the_project_lock_is_reentrant_in_one_thread_and_a_clean_start_makes_no_lock_file(trees):
+    root, source = trees
+    with upgrade.project_lock(root):
+        assert upgrade.busy(root)
+        with upgrade.project_lock(root):           # apply inside a caller that holds the lock
+            assert upgrade.busy(root)
+        assert upgrade.busy(root)
+        t, box = _within(5, lambda: upgrade.busy(root))
+        assert box["value"] is True                # another thread sees it held
+    assert not upgrade.busy(root)
+    os.remove(upgrade.lock_path(root))
+    assert upgrade.recover(root)["recovered"] is False
+    assert not os.path.exists(upgrade.lock_path(root))      # the fast path writes nothing
+
+
+def test_a_named_pipe_under_a_refresh_path_is_listed_and_never_opened(trees, tmp_path):
+    root, source = _locked_trees(trees, tmp_path)
+    pipe = os.path.join(root, "alpaca", "pipe")
+    os.mkfifo(pipe)
+    os.symlink("pipe", os.path.join(root, "alpaca", "pipe-link"))
+    try:
+        t, box = _within(10, lambda: upgrade.plan(root, source))
+        assert not t.is_alive(), "plan() is stuck opening the named pipe"
+    finally:
+        _unblock_fifo(pipe)
+    p = box["value"]
+    assert "alpaca/" in p.modified and "alpaca/" not in p.changed
+    assert "alpaca/pipe" in p.local_files and "alpaca/pipe-link" in p.local_files
+    assert upgrade._file_sha(pipe) is None                  # a special file has no content hash
+    assert upgrade._tree_digest(pipe) is not None           # but it still takes part in the digest
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a mode 000 file")
+def test_an_unreadable_added_file_and_an_unreadable_claude_md_are_local_edits(trees, tmp_path):
+    root, source = _locked_trees(trees, tmp_path)
+    secret = os.path.join(root, "alpaca", "secret.py")
+    private = os.path.join(root, "alpaca", "private")
+    claude = os.path.join(root, "CLAUDE.md")
+    util.write_text(secret, "SECRET = 1\n")
+    os.makedirs(private)
+    util.write_text(os.path.join(private, "inner.py"), "INNER = 1\n")
+    try:
+        for path in (secret, private, claude):
+            os.chmod(path, 0)
+        p = upgrade.plan(root, source)
+    finally:
+        os.chmod(private, 0o755)
+        os.chmod(secret, 0o644)
+        os.chmod(claude, 0o644)
+    assert "alpaca/" in p.modified
+    assert "alpaca/secret.py" in p.local_files                # was counted as "not edited" (None == None)
+    assert "alpaca/private" in p.local_files                  # a folder the plan cannot read is named
+    assert p.merge_edited == ["CLAUDE.md"] and "CLAUDE.md" in p.local_files
+
+
+def _link_claude_to_agents(root, source):
+    for base in (root, source):
+        shutil.copy(os.path.join(base, "CLAUDE.md"), os.path.join(base, "AGENTS.md"))
+    os.remove(os.path.join(root, "CLAUDE.md"))
+    os.symlink("AGENTS.md", os.path.join(root, "CLAUDE.md"))
+
+
+@pytest.mark.parametrize("kill_at", [None, "backup", "stage", "promote"])
+def test_a_claude_md_link_to_agents_md_stays_a_link_through_apply_and_recovery(trees, kill_at, capsys):
+    root, source = trees
+    _link_claude_to_agents(root, source)
+    p = upgrade.plan(root, source)
+    assert p.merge_links == ["CLAUDE.md"] and "CLAUDE.md" not in p.merge_edited
+    upgrade.print_plan(p)
+    assert "kept as a link" in capsys.readouterr().out
+    if kill_at is None:
+        upgrade.apply(root, source)
+    else:
+        with pytest.raises(upgrade._KillInjected):
+            upgrade.apply(root, source, kill_at=kill_at)
+        assert upgrade.recover(root)["recovered"] is True
+    link = os.path.join(root, "CLAUDE.md")
+    assert os.path.islink(link) and os.readlink(link) == "AGENTS.md"
+    agents = util.read_text(os.path.join(root, "AGENTS.md"))
+    assert "House rules for OLD must survive." in agents
+    assert ("Alpaca boot NEW" if kill_at in (None, "promote") else "Alpaca boot OLD") in agents
+
+
+def test_links_inside_a_mechanism_folder_are_backed_up_and_restored_as_links(trees):
+    root, source = trees
+    os.symlink("stub.txt", os.path.join(root, "alpaca", "alias"))
+    os.symlink("nowhere-at-all", os.path.join(root, "alpaca", "dangling"))
+    with pytest.raises(upgrade._KillInjected):                # a dangling link must not break the backup
+        upgrade.apply(root, source, kill_at="stage")
+    backup = os.path.join(upgrade._backup_dir(root), "alpaca")
+    assert os.path.islink(os.path.join(backup, "alias")) and os.path.islink(os.path.join(backup, "dangling"))
+    shutil.rmtree(os.path.join(root, "alpaca"))
+    assert upgrade.recover(root)["recovered"] is True
+    assert os.readlink(os.path.join(root, "alpaca", "alias")) == "stub.txt"
+    assert os.readlink(os.path.join(root, "alpaca", "dangling")) == "nowhere-at-all"
+
+
+def test_apply_inside_a_caller_that_holds_the_project_lock_does_not_wait_for_itself(trees):
+    root, source = trees                       # alpaca update holds the lock for its plan and calls apply inside it
+    with upgrade.project_lock(root):
+        upgrade.apply(root, source)
+        assert upgrade.busy(root)
+    assert not upgrade.pending(root) and not upgrade.busy(root)
+    assert "NEW" in util.read_text(os.path.join(root, "bin", "alpaca"))
+
+
+def test_the_recover_verb_is_blocked_while_the_upgrade_it_would_roll_is_running(trees, tmp_path, monkeypatch, capsys):
+    import argparse
+    monkeypatch.chdir(tmp_path)
+    root, source = trees
+    with pytest.raises(upgrade._KillInjected):
+        upgrade.apply(root, source, kill_at="stage")
+    with open(upgrade._journal_path(root), "rb") as fh:
+        journal = fh.read()
+    args = argparse.Namespace(target=root, source=None, plan=False, recover=True)
+    fd = _hold_project_lock(root)
+    try:
+        assert upgrade._cmd_upgrade(args) == 2
+        out = capsys.readouterr().out
+        assert "GATE alpaca-upgrade-recover: BLOCKED" in out and "is running now" in out, out
+        with open(upgrade._journal_path(root), "rb") as fh:
+            assert fh.read() == journal
+        # push mode, which recovers a crashed upgrade before it begins one, leaves it alone too
+        args = argparse.Namespace(target=root, source=source, plan=False, recover=False)
+        assert upgrade._cmd_upgrade(args) == 2
+        capsys.readouterr()
+        with open(upgrade._journal_path(root), "rb") as fh:
+            assert fh.read() == journal
+    finally:
+        os.close(fd)
+    args = argparse.Namespace(target=root, source=None, plan=False, recover=True)
+    assert upgrade._cmd_upgrade(args) == 0 and not upgrade.pending(root)

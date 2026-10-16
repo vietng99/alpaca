@@ -51,16 +51,23 @@ stop: it captures the rest of the batch and, before its checkpoint advances, com
 open `transcript-unavailable` issue (naming the session, never the locator) and a queued
 snapshot retry for that session. The gap stays explicit: no transcript document is
 written and coverage stays incomplete. A restored original clears the issue through the
-normal snapshot retry. A malformed source, an unreadable file, or a directory, special
-file or dangling link at the locator still stops the consumer for retry. In every case
+normal snapshot retry; so is a source that goes while the batch reads it. An unreadable
+file, or a directory, special file or dangling link at the locator still stops the
+consumer for retry. A malformed source (a record that does not parse) stops it too, for
+five tries in a row; a torn record in the middle of a file never reads clean again, so
+after them the session goes to its own snapshot job with an open `transcript-malformed`
+issue (naming the session only) and the consumer advances. Later events of that session
+pass at once while the issue is open; the job retries the transcript and closes the issue
+when it reads clean. In every case
 the batch's event notes land first (FR-8); only the checkpoint waits. The wiki consumer's
 capture has no deadline of its own; a preservation job has 45 seconds, and lands its transcript
 before the deadline is checked. The collector loop waits at most 120 seconds for either
 (`CAPTURE_BUDGET_S`): past that it abandons the batch or job, which is retried after the
 consumer's backoff and leaves one `capture-deferred` record event, while the other consumers go on. The collector lends one wiki absorber to all its
-captures, so the echo index of every active block is read once per process (about 30
-seconds and 3.6 GiB on a store of 530,000 blocks) and again only after another writer
-commits to the wiki store. Sources are
+captures, so the echo index of every active block is read once per process and again
+only after another writer commits to the wiki store. The index keeps each block's tokens
+as ids and no block text: on a copy of the live store (1,091,479 active blocks,
+2026-10-15) it took about 40 seconds and 1.7 GB, where it had taken 6.8 GB. Sources are
 registered explicitly through session lifecycle commands or `collect register`. Codex
 session start discovers only a supplied native ID with a matching project header.
 Project pool discovery refuses symlink ancestry and never imports another project's

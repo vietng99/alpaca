@@ -485,11 +485,56 @@ def checks(root):
                 "consistency scan skipped: %s: %s" % (type(e).__name__, e))
 
     _uncommitted_code(root, add)
+    # first chat (op-062 t-656): a row exists only for a project whose record carries the `first_chat` mark,
+    # so a project set up before the first chat existed prints nothing new
+    try:
+        conn = db.connect_readonly(root)
+        try:
+            from alpaca import adopt
+            first_chat = adopt.first_chat_state(conn)
+            skipped_event = conn.execute("SELECT 1 FROM events WHERE kind='onboard-skipped' LIMIT 1").fetchone()
+        finally:
+            conn.close()
+        if first_chat == "due":
+            add("first-chat", "warn", "first chat not done: tell the agent about your project (a git URL, a folder path, "
+                                      "or \"start empty\")")
+        elif first_chat == "confirmed":
+            add("first-chat", "warn", "setup confirmed but not applied: run bin/alpaca onboard apply <card>")
+        elif first_chat == "skipped" and skipped_event:
+            add("first-chat", "ok", "the first chat was skipped by the owner")
+    except Exception:
+        pass
+    # first-chat evidence (op-062 t-656, design 7.6): what the record and the setup files say that does not add up
+    # (a state with no event behind it, a yes typed at a terminal while the chat ran in Claude Code, a yes whose
+    # transcript line does not read back, setup files changed since the first chat began). Read-only; an error here
+    # is one warning and the other rows still print.
+    try:
+        conn = db.connect_readonly(root)
+        try:
+            from alpaca import onboard_flow
+            for level, text in onboard_flow.evidence_lines(conn, root):
+                add("first-chat-evidence", level, text)
+        finally:
+            conn.close()
+    except Exception as e:
+        add("first-chat-evidence", "warn", "first-chat evidence check failed: %s: %s" % (type(e).__name__, e))
     try:
         from alpaca import disk
         disk.doctor_check(root, add)
     except Exception as e:
         add("disk", "warn", "disk check failed: %s: %s" % (type(e).__name__, e))
+    # attach mode (op-062): rows exist only for a project whose project.yaml has an `attach:` key, so a
+    # plain project's output cannot change, not even when the attach package fails to import
+    try:
+        attached = "attach" in (project.load(root) or {})
+    except Exception:
+        attached = False
+    if attached:
+        try:
+            from alpaca.attach import health as attach_health
+            attach_health.doctor_check(root, add)
+        except Exception as e:
+            add("attach", "warn", "attach check failed: %s: %s" % (type(e).__name__, e))
 
     # A generic project without a collector registration has no collection obligation yet.
     from alpaca.hub import capture_health

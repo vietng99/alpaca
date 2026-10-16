@@ -14,6 +14,13 @@ def next_action(root, *, conn=None, expire=True) -> str:
         return line
     if db.meta_get(conn, "onboarded") is None:
         return "run onboarding: bin/alpaca onboard --name <project> --who <name:role,...> --what <one line> [--task ...]"
+    first_chat = db.meta_get(conn, "first_chat")
+    if first_chat == "due":
+        return ("first chat: tell Alpaca about your project (a git URL, a folder path, or \"start empty\"); the "
+                "/alpaca-first-chat skill takes it from there")
+    if first_chat == "confirmed":
+        card = _confirmed_card(conn)
+        return "setup confirmed, not applied: run bin/alpaca onboard apply %s" % (card or "<card>")
     # expire=False is how a read-only caller (the data.json fold) asks for the same line without
     # the lease sweep: a projection renders the record, it never writes to it.
     if expire:
@@ -28,6 +35,28 @@ def next_action(root, *, conn=None, expire=True) -> str:
     if o:
         return "%s has no open tasks: add one (bin/alpaca task add %s \"...\" --title \"...\") or close it (bin/alpaca op close %s --basis ...)" % (o["id"], o["id"], o["id"])
     return "no open op: pick one from intents/queue.md and run bin/alpaca op new \"<intent>\" --done-when \"...\""
+
+def _confirmed_card(conn):
+    """The id of the newest card the owner confirmed, or None."""
+    row = conn.execute("SELECT ref FROM events WHERE kind='onboard-confirmed' ORDER BY id DESC LIMIT 1").fetchone()
+    return row["ref"] if row else None
+
+
+def _setup_line(conn):
+    """`setup: card-<id> confirmed <date> (<mode>, <level>)` once the first chat is applied, else None."""
+    import json
+    if db.meta_get(conn, "first_chat") != "done":
+        return None
+    row = conn.execute("SELECT ts, data FROM events WHERE kind='onboard-applied' ORDER BY id DESC LIMIT 1").fetchone()
+    card = _confirmed_card(conn)
+    if row is None or card is None:
+        return None
+    try:
+        data = json.loads(row["data"])
+    except (TypeError, ValueError):
+        data = {}
+    return "setup: %s confirmed %s (%s, %s)" % (card, row["ts"][:10], data.get("mode") or "?", data.get("level") or "?")
+
 
 # ------------------------------------------------------------------------------ resume points
 # op-009 t-130. Two ops can park work at once (op-008 and op-009 did), and the single Next action
@@ -266,6 +295,9 @@ def render(root) -> str:
     if not active:
         lines.append("(no session beat in the last %d minutes of record time)"
                      % (sessions_view.ACTIVE_WINDOW_S // 60))
+    setup = _setup_line(conn)
+    if setup:
+        lines.append(setup)
     lines += ["", "## Next action", "", next_action(root, conn=conn), ""]
     # How far each live op has got: folded once here, read by Resume points and by Progress below.
     # The board fold is guarded so its failure never turns a RESUME write into a failure.

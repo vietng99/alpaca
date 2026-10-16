@@ -27,7 +27,7 @@ runtime via the guarded `DB.migrate_column` / `CREATE TABLE IF NOT EXISTS` - no 
 from __future__ import annotations
 
 import re
-from collections import defaultdict
+from array import array
 import math
 import sys
 from typing import Optional
@@ -78,146 +78,282 @@ def _slug(surface: str) -> str:
     return s
 
 
-def _token_tuple(normalized: str) -> tuple[str, ...]:
-    """The distinct tokens of a normalized text: the members of `set(normalized.split())`, held as a
-    tuple of interned strings. An index of every active block holds tens of millions of token entries
-    over a vocabulary of about two million (the live store, 2026-10-06): one shared string per token
-    and a tuple per block instead of a set take about 3 GB less, and `detect` reads only the members
-    and their count, so every verdict is the one the set gave."""
-    return tuple(dict.fromkeys(map(sys.intern, normalized.split())))
-
-
 class EchoIndex:
-    """Incremental normalized/token index for deterministic echo detection."""
+    """Incremental token index for deterministic echo detection, held compactly (t-685).
 
-    def __init__(self):
-        self._doc: dict[str, str | None] = {}
-        self._by_doc: dict[str | None, set[str]] = defaultdict(set)
-        self._by_size: dict[int, set[str]] = defaultdict(set)
-        self._norm: dict[str, str] = {}
-        self._tokens: dict[str, tuple[str, ...]] = {}     # distinct tokens (`_token_tuple`)
-        self._exact: dict[str, set[str]] = defaultdict(set)
-        self._postings: dict[str, set[str]] = defaultdict(set)
+    Every block is a slot: its block id, its document, the length and the hash of its normalized
+    text, and its distinct tokens as an array of 4-byte token ids. A token's postings are an array
+    of slots (a token of one block holds that slot alone), and a removed block's slot stays in them, listed in `_dead`, until the index is
+    compacted (`_compact`, once the removed slots outnumber a quarter of the live ones), so a
+    removal costs its own tokens only and no slot is reused while a posting may still hold it.
+    Before t-685 the index held each block's whole normalized text, a tuple of its tokens and a
+    Python set per posting and per distinct text: 6.8 GB for a copy of the live store's 1,091,479
+    active blocks (66.6 million postings over 3.2 million tokens), against 1.7 GB now.
 
+    `fetch(block_id)`, when given, returns a block's text from the store (`load_echo_index` passes
+    the absorber's own connection), and the normalized texts are not kept: the two checks that read
+    a text, an exact match (by hash first) and a verbatim quote, read it from the store, the quote
+    check only for a block that can be a substring of the query (no longer than it, and holding no
+    more than two tokens the query lacks). Without `fetch`
+    the normalized texts are kept, as before. Either way every verdict is the one the set-based
+    index gave: the same candidates, read in block id order, with the same tests."""
+
+    def __init__(self, fetch=None):
+        self._fetch = fetch
+        self._slot: dict[str, int] = {}              # block id -> slot
+        self._ids: list = []                         # slot -> block id, None once removed
+        self._docs: list = []                        # slot -> document id (interned)
+        self._size = array("I")                      # slot -> distinct tokens
+        self._length = array("I")                    # slot -> len(normalized text)
+        self._hash = array("q")                      # slot -> hash(normalized text)
+        self._text: list | None = [] if fetch is None else None
+        self._tok: list = []                         # slot -> array of token ids, None once removed
+        self._vocab: dict[str, int] = {}             # token -> token id
+        self._words: list = []                       # token id -> token, None once free
+        self._df = array("I")                        # token id -> live blocks holding it
+        self._post: list = []                        # token id -> array of slots (removed ones too),
+        #                                              or the slot alone for a token of one block
+        self._free_tokens: list[int] = []
+        self._exact: dict[int, object] = {}          # hash(normalized) -> slot, or a list of slots
+        self._by_doc: dict = {}                      # document -> array of slots (removed ones too)
+        self._dead: set[int] = set()
+
+    def __len__(self) -> int:
+        return len(self._slot)
+
+    def __contains__(self, block_id) -> bool:
+        return block_id in self._slot
+
+    # ---- writes
     def add(self, block_id: str, text: str, doc_id: str | None = None) -> None:
         self.remove(block_id)
-        normalized = normalize_text(text)
-        tokens = _token_tuple(normalized)
-        self._doc[block_id] = doc_id
-        self._by_doc[doc_id].add(block_id)
-        self._norm[block_id] = normalized
-        self._tokens[block_id] = tokens
-        self._by_size[len(tokens)].add(block_id)
-        self._exact[normalized].add(block_id)
-        for token in tokens:
-            self._postings[token].add(block_id)
+        self._put(block_id, normalize_text(text), doc_id)
 
     def load(self, rows) -> None:
-        """Bulk `add` of `(block_id, text, doc_id)` rows into an empty index: the same index `add`
-        builds, without the per-block remove and method calls (the load of a whole store). It fills
-        the by-document and by-size maps `add` fills (main a24aef856, b70a1022f), which `detect`
-        reads to exclude a document's own blocks and to bound large comparisons."""
-        docs, norms, tokens_of = self._doc, self._norm, self._tokens
-        by_doc, by_size = self._by_doc, self._by_size
-        exact, postings = self._exact, self._postings
+        """Bulk `add` of `(block_id, text, doc_id)` rows into an empty index (the load of a whole
+        store)."""
+        put = self._put
         for block_id, text, doc_id in rows:
-            normalized = normalize_text(text)
-            tokens = _token_tuple(normalized)
-            if doc_id is not None:
-                doc_id = sys.intern(doc_id)              # one string per document, not per block
-            docs[block_id] = doc_id
-            by_doc[doc_id].add(block_id)
-            norms[block_id] = normalized
-            tokens_of[block_id] = tokens
-            by_size[len(tokens)].add(block_id)
-            exact[normalized].add(block_id)
-            for token in tokens:
-                postings[token].add(block_id)
+            put(block_id, normalize_text(text), doc_id)
+
+    def _put(self, block_id, normalized, doc_id):
+        if doc_id is not None:
+            doc_id = sys.intern(doc_id)              # one string per document, not per block
+        slot = len(self._ids)
+        vocab, df, post = self._vocab, self._df, self._post
+        tids = array("I")
+        for word in dict.fromkeys(normalized.split()):
+            tid = vocab.get(word)
+            if tid is None:
+                tid = self._new_token(word)
+            df[tid] += 1
+            held = post[tid]
+            if held is None:
+                post[tid] = slot                     # a token of one block: its slot, no array
+            elif held.__class__ is int:
+                post[tid] = array("I", (held, slot))
+            else:
+                held.append(slot)
+            tids.append(tid)
+        self._slot[block_id] = slot
+        self._ids.append(block_id)
+        self._docs.append(doc_id)
+        self._size.append(len(tids))
+        self._length.append(len(normalized))
+        key = hash(normalized)
+        self._hash.append(key)
+        if self._text is not None:
+            self._text.append(normalized)
+        self._tok.append(tids)
+        held = self._exact.get(key)
+        if held is None:
+            self._exact[key] = slot
+        elif isinstance(held, list):
+            held.append(slot)
+        else:
+            self._exact[key] = [held, slot]
+        members = self._by_doc.get(doc_id)
+        if members is None:
+            members = self._by_doc[doc_id] = array("I")
+        members.append(slot)
+
+    def _new_token(self, word):
+        if self._free_tokens:
+            tid = self._free_tokens.pop()
+            self._words[tid] = word
+        else:
+            tid = len(self._post)
+            self._post.append(None)
+            self._words.append(word)
+            self._df.append(0)
+        self._vocab[word] = tid
+        return tid
 
     def remove(self, block_id: str) -> None:
-        normalized = self._norm.pop(block_id, None)
-        tokens = self._tokens.pop(block_id, ())
-        sized = self._by_size.get(len(tokens))
-        if sized is not None:
-            sized.discard(block_id)
-            if not sized:
-                self._by_size.pop(len(tokens), None)
-        doc_id = self._doc.pop(block_id, None)
-        members = self._by_doc.get(doc_id)
-        if members is not None:
-            members.discard(block_id)
-            if not members:
-                self._by_doc.pop(doc_id, None)
-        if normalized is not None:
-            ids = self._exact.get(normalized)
-            if ids is not None:
-                ids.discard(block_id)
-                if not ids:
-                    self._exact.pop(normalized, None)
-        for token in tokens:
-            ids = self._postings.get(token)
-            if ids is not None:
-                ids.discard(block_id)
-                if not ids:
-                    self._postings.pop(token, None)
+        slot = self._slot.pop(block_id, None)
+        if slot is None:
+            return
+        df, post = self._df, self._post
+        for tid in self._tok[slot]:
+            df[tid] -= 1
+            if not df[tid]:                          # no live block holds the token any more
+                del self._vocab[self._words[tid]]
+                self._words[tid] = post[tid] = None
+                self._free_tokens.append(tid)
+        key = self._hash[slot]
+        held = self._exact.get(key)
+        if isinstance(held, list):
+            held.remove(slot)
+            if len(held) == 1:
+                self._exact[key] = held[0]
+        elif held == slot:
+            del self._exact[key]
+        self._ids[slot] = None
+        self._docs[slot] = None
+        self._tok[slot] = None
+        if self._text is not None:
+            self._text[slot] = None
+        self._dead.add(slot)
+        if len(self._dead) > max(4096, len(self._slot) // 4):
+            self._compact()
+
+    def _compact(self) -> None:
+        """Number the live blocks again from 0 and rebuild every posting and document list from their
+        token arrays, dropping the removed slots (no store read)."""
+        live = [slot for slot, block_id in enumerate(self._ids) if block_id is not None]
+        ids, docs, tok = self._ids, self._docs, self._tok
+        text = self._text
+        self._ids = [ids[s] for s in live]
+        self._docs = [docs[s] for s in live]
+        self._tok = [tok[s] for s in live]
+        if text is not None:
+            self._text = [text[s] for s in live]
+        self._size = array("I", (self._size[s] for s in live))
+        self._length = array("I", (self._length[s] for s in live))
+        self._hash = array("q", (self._hash[s] for s in live))
+        numbers = list(range(len(live)))             # one int object per slot, shared below
+        self._slot = dict(zip(self._ids, numbers))
+        post = [None] * len(self._post)
+        for slot, tids in zip(numbers, self._tok):
+            for tid in tids:
+                held = post[tid]
+                if held is None:
+                    post[tid] = slot
+                elif held.__class__ is int:
+                    post[tid] = array("I", (held, slot))
+                else:
+                    held.append(slot)
+        self._post = post
+        self._exact, self._by_doc = {}, {}
+        for slot in numbers:
+            key = self._hash[slot]
+            held = self._exact.get(key)
+            if held is None:
+                self._exact[key] = slot
+            elif isinstance(held, list):
+                held.append(slot)
+            else:
+                self._exact[key] = [held, slot]
+            members = self._by_doc.get(self._docs[slot])
+            if members is None:
+                members = self._by_doc[self._docs[slot]] = array("I")
+            members.append(slot)
+        self._dead = set()
+
+    # ---- reads
+    def entries(self) -> dict:
+        """Block id -> (document id, its distinct tokens in text order): what the index holds."""
+        words, docs, tok = self._words, self._docs, self._tok
+        return {block_id: (docs[slot], tuple(words[t] for t in tok[slot]))
+                for block_id, slot in self._slot.items()}
+
+    def _known(self, slot):
+        """The normalized text of a slot: kept, or read from the store (`fetch`)."""
+        if self._text is not None:
+            return self._text[slot]
+        text = self._fetch(self._ids[slot])
+        return None if text is None else normalize_text(text)
 
     def detect(self, text: str, restate_threshold: float = 0.8,
                exclude_doc_id: str | None = None) -> tuple[str, Optional[str], Optional[str]]:
         normalized = normalize_text(text)
         tokens = set(normalized.split())
+        ids, length, tok, size = self._ids, self._length, self._tok, self._size
 
         excluded = self._by_doc.get(exclude_doc_id, ()) if exclude_doc_id is not None else ()
-        exact_ids = self._exact.get(normalized, ())
-        exact = sorted(set(exact_ids).difference(excluded)) if excluded else sorted(exact_ids)
-        if exact:
-            return "quotes", exact[0], None
+        held = self._exact.get(hash(normalized))
+        if held is not None:
+            slots = held if isinstance(held, list) else [held]
+            if excluded:
+                slots = set(slots).difference(excluded)
+            exact = sorted(ids[s] for s in slots
+                           if length[s] == len(normalized) and self._known(s) == normalized)
+            if exact:
+                return "quotes", exact[0], None
 
-        candidates: set[str] = set()
+        vocab, df, post = self._vocab, self._df, self._post
+        query = {vocab[word] for word in tokens if word in vocab}   # the query's known tokens
+        candidates: set[int] = set()
         # A Jaccard match at threshold t can omit at most floor((1-t)*|query|) query tokens.
         # Probe one more than that many least-common tokens: every qualifying candidate must share
         # at least one probe, while common prose tokens no longer turn each lookup into a full scan.
         probe_count = max(1, math.floor((1.0 - restate_threshold) * len(tokens)) + 1)
-        probes = sorted(tokens, key=lambda token: (len(self._postings.get(token, ())), token))[
+        probes = sorted(tokens, key=lambda word: (df[vocab[word]] if word in vocab else 0, word))[
             :probe_count
         ]
-        for token in probes:
-            candidates.update(self._postings.get(token, ()))
+        for word in probes:
+            tid = vocab.get(word)
+            if tid is not None:
+                held = post[tid]
+                if held.__class__ is int:
+                    candidates.add(held)
+                else:
+                    candidates.update(held)
+        if self._dead:
+            candidates.difference_update(self._dead)
         if excluded:
             candidates.difference_update(excluded)
-        ordered = sorted(candidates)
-        for block_id in ordered:
-            known = self._norm[block_id]
+        # A block that is a substring of the query is no longer than it, and each of its tokens but
+        # the first and the last (which may be cut) is a whole token of the query. The blocks that
+        # pass are tried in block id order, as the set index tried every candidate.
+        query_length, most = len(normalized), len(query) + 2
+        overlaps = {}                                # slot -> tokens shared with the query
+        inside = []
+        for slot in candidates:
+            if 0 < length[slot] <= query_length and size[slot] <= most:
+                overlap = overlaps[slot] = len(query.intersection(tok[slot]))
+                if size[slot] - overlap <= 2:
+                    inside.append(slot)
+        inside.sort(key=ids.__getitem__)
+        for slot in inside:
+            known = self._known(slot)
             if known and known in normalized:
-                return "quotes", block_id, None
+                return "quotes", ids[slot], None
 
         match = _ATTRIB.search(text)
         if match:
             return "attributes", None, _slug(match.group(1))
 
+        # The best Jaccard score, the smallest block id among equal scores: the block the set index
+        # found first in block id order, without sorting the candidates.
         best_id, best_score = None, 0.0
         query_size = len(tokens)
-        if len(candidates) > 512:
-            eligible = set()
-            for known_size, members in self._by_size.items():
-                largest = max(query_size, known_size)
-                # Use the same ratio comparison as the per-block bound. Products
-                # and rounded integer bounds differ at floating-point thresholds.
-                if not largest or min(query_size, known_size) / largest >= restate_threshold:
-                    eligible.update(candidates.intersection(members))
-            ordered = sorted(eligible)
-        for block_id in ordered:
-            known_tokens = self._tokens[block_id]
-            known_size = len(known_tokens)
+        for slot in candidates:
+            known_size = size[slot]
             largest = max(query_size, known_size)
-            # Jaccard cannot exceed the smaller set's size divided by the larger.
-            # Quote and attribution precedence have already been evaluated.
+            # Jaccard cannot exceed the smaller set's size divided by the larger. Use the same ratio
+            # comparison as before: products and rounded integer bounds differ at floating-point
+            # thresholds. Quote and attribution precedence have already been evaluated.
             if largest and min(query_size, known_size) / largest < restate_threshold:
                 continue
-            overlap = len(tokens.intersection(known_tokens))   # known_tokens holds no repeats
+            overlap = overlaps.get(slot)
+            if overlap is None:
+                overlap = len(query.intersection(tok[slot]))  # a block's tokens hold no repeats
             union_size = query_size + known_size - overlap
             score = overlap / union_size if union_size else 0.0
-            if score > best_score:
-                best_id, best_score = block_id, score
+            if score > best_score or (score == best_score and best_id is not None
+                                      and ids[slot] < best_id):
+                best_id, best_score = ids[slot], score
         if best_id is not None and best_score >= restate_threshold:
             return "restates", best_id, None
         return "original", None, None

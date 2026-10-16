@@ -247,6 +247,10 @@ def apply(conn) -> int:
             # t-577: source_revision looks sources up by parent_session on every analytics read.
             indexes['idx_obs_source_parent'] = ('CREATE INDEX IF NOT EXISTS idx_obs_source_parent '
                                                 'ON obs_source(parent_session)')
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='obs_issue'").fetchone():
+            # t-679: the collector looks up each source's open issues on every poll of every source.
+            indexes['idx_obs_issue_open'] = ('CREATE INDEX IF NOT EXISTS idx_obs_issue_open '
+                                             'ON obs_issue(source_id, code) WHERE resolved_at IS NULL')
         present = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='index' "
                                                 "AND name IN (%s)" % ",".join("?" * len(indexes)), tuple(indexes))}
         missing = [statement for name, statement in indexes.items() if name not in present]

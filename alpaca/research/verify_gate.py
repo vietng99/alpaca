@@ -298,13 +298,29 @@ def seal_tree(root, kept_dir: str, *, pathspec: tuple = (".", ":(exclude).alpaca
     return None if taken is None else keep_tree(root, kept_dir, taken)
 
 
-def take_tree(root, *, pathspec: tuple = (".", ":(exclude).alpaca")):
+def take_tree(root, *, pathspec: tuple = (".", ":(exclude).alpaca"), base=None, env=None, extra_config=(),
+              skip_gitlinks=False, diff_args=(), want_tree=False):
     """(head, patch bytes) of `seal_tree`, held in memory and written nowhere, or None outside a
-    git work tree. Raises ValueError when the patch is over the kept cap or git fails."""
+    git work tree. Raises ValueError when the patch is over the kept cap or git fails. `base` is
+    the commit the patch is taken against (`HEAD` when None): an attached repository's work
+    branch is committed work, which a diff against its own HEAD would show as nothing
+    (op-062 t-650). `env` is the whole environment git runs in (the process environment when None) and
+    `extra_config` a tuple of `key=value` settings passed as `-c`: the attached repository's seal passes a
+    clean environment, so the git that stages the files reads no config the filter check did not read.
+    The copy of the index is made with O_EXCL and O_NOFOLLOW and the seal refuses when that name is taken,
+    so a link planted at the guessable name is not written through (t-650 fix round 1, A7).
+    `skip_gitlinks` leaves the submodule paths of the index out of `git add -A`: git looks into a tracked
+    submodule there with the submodule's own config, which runs its clean filter, and the diff ignores
+    submodules anyway (fix round 1, A1).
+    `diff_args` are extra `git diff` options placed before the base (the attached repository's seal pins the
+    prefixes, colour and relative mode so no `diff.*` key of the clone changes the paths in the patch), and
+    `want_tree` returns `(head, patch, tree id)` where the tree id is `git write-tree` of the staged copy of
+    the index: the tree the patch is meant to produce when it is applied to `base` (op-062 t-650 fix round
+    2, B3 and B2). Both default to the old behaviour, so a plain project's argv and return value are unchanged."""
     from alpaca import proof
     if not os.path.isdir(os.path.join(root, ".git")) and not os.path.isfile(os.path.join(root, ".git")):
         return None
-    env = dict(os.environ)
+    env = dict(os.environ if env is None else env)
     env.pop("GIT_INDEX_FILE", None)
     env.update(GIT_CONFIG_NOSYSTEM="1", GIT_TERMINAL_PROMPT="0")
 
@@ -313,8 +329,8 @@ def take_tree(root, *, pathspec: tuple = (".", ":(exclude).alpaca")):
         if extra_env:
             e.update(extra_env)
         return subprocess.run(("git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false")
-                              + args, cwd=root, capture_output=True, env=e, timeout=300,
-                              text=not binary)
+                              + tuple(x for kv in extra_config for x in ("-c", kv)) + args,
+                              cwd=root, capture_output=True, env=e, timeout=300, text=not binary)
 
     head = git("rev-parse", "--verify", "HEAD")
     if head.returncode != 0:
@@ -329,20 +345,48 @@ def take_tree(root, *, pathspec: tuple = (".", ":(exclude).alpaca")):
     real_index = git("rev-parse", "--git-path", "index").stdout.strip()
     if real_index and not os.path.isabs(real_index):
         real_index = os.path.join(root, real_index)
+    if os.path.lexists(index_copy):
+        raise ValueError("the seal's index copy %s already exists; remove it and seal again"
+                         % os.path.basename(index_copy))
+    fd = None
+    if real_index and os.path.isfile(real_index):
+        try:                                    # a name taken in the meantime, or a link: never written through
+            fd = os.open(index_copy, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+                         | getattr(os, "O_CLOEXEC", 0), 0o600)
+        except OSError:
+            raise ValueError("the seal's index copy %s could not be created exclusively; remove it and seal again"
+                             % os.path.basename(index_copy)) from None
     try:
-        if real_index and os.path.isfile(real_index):
-            shutil.copyfile(real_index, index_copy)
+        if fd is not None:
+            with os.fdopen(fd, "wb") as out, open(real_index, "rb") as src:
+                shutil.copyfileobj(src, out)
         extra = {"GIT_INDEX_FILE": index_copy}
-        add = git("add", "-A", "--", *pathspec, extra_env=extra)
+        add_spec = tuple(pathspec)
+        if skip_gitlinks:
+            listed = git("ls-files", "-z", "-s", extra_env=extra, binary=True)
+            if listed.returncode != 0:
+                raise ValueError("git ls-files for the tree patch failed")
+            for row in listed.stdout.split(b"\0"):
+                meta, _, name = row.partition(b"\t")
+                if meta.startswith(b"160000 "):
+                    add_spec += (":(exclude,literal)" + name.decode("utf-8", "surrogateescape"),)
+        add = git("add", "-A", "--", *add_spec, extra_env=extra)
         # an excluded path that the checkout ignores (a `.alpaca/` line in .gitignore) makes git
         # name it and exit 1 after it has staged every other path; that is not a failure here
         if add.returncode != 0 and "ignored by one of your .gitignore files" not in add.stderr:
             raise ValueError("git add for the tree patch failed: %s" % add.stderr.strip()[:200])
         diff = git("diff", "--cached", "--binary", "--no-ext-diff", "--no-textconv",
-                   "--ignore-submodules=all", "HEAD", "--", *pathspec, extra_env=extra, binary=True)
+                   "--ignore-submodules=all", *diff_args, base or "HEAD", "--", *pathspec, extra_env=extra,
+                   binary=True)
         if diff.returncode != 0:
             raise ValueError("git diff for the tree patch failed")
         patch = diff.stdout
+        tree_id = None
+        if want_tree:
+            wrote = git("write-tree", extra_env=extra)
+            tree_id = wrote.stdout.strip() if wrote.returncode == 0 else ""
+            if not tree_id:
+                raise ValueError("git write-tree for the tree patch failed")
     finally:
         try:
             os.remove(index_copy)
@@ -350,7 +394,7 @@ def take_tree(root, *, pathspec: tuple = (".", ":(exclude).alpaca")):
             pass
     if len(patch) > proof.KEPT_FILE_CAP:
         raise ValueError("the tree patch is over the kept cap: commit the work first")
-    return head, patch
+    return (head, patch, tree_id) if want_tree else (head, patch)
 
 
 def keep_tree(root, kept_dir: str, taken: tuple) -> dict:
@@ -693,6 +737,12 @@ def consistency(conn, root, ident, seal_event, open_ev, end_ev) -> list:
     want_tree = tree.get("patch_sha256") if tree else None
     if end.get("tree_patch_sha256") != want_tree:
         problems.append("its end names another tree than the seal describes")
+    # an attach seal also sealed the attached repo's work-branch diff (op-062 t-650): the end must
+    # name the same app patch. A seal without one and an end without the key leave the check as it was.
+    app = tree.get("app") if tree and isinstance(tree.get("app"), dict) else None
+    if app or "app_patch_sha256" in end:
+        if end.get("app_patch_sha256") != (app.get("patch_sha256") if app else None):
+            problems.append("its end names another app patch than the seal describes")
     got = _recompute(conn, vf)
     if got["outcome"] != end.get("outcome"):
         problems.append("its verdict events fold to %s" % got["outcome"])

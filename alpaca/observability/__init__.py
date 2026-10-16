@@ -6,6 +6,7 @@ Consumers checkpoint separately and may retry without holding up source ingestio
 """
 from __future__ import annotations
 
+import collections
 import contextlib
 import datetime as dt
 import fcntl
@@ -127,9 +128,16 @@ def issue(conn, code, *, source_id=None, detail='', identity=None):
 
 
 def _resolve(conn, source_id, codes):
-    for code in codes:
-        conn.execute('UPDATE obs_issue SET resolved_at=? WHERE source_id=? AND code=? AND resolved_at IS NULL',
-                     (util.now_iso(), source_id, code))
+    """Close the source's open issues of `codes`. Every poll of every source calls this, and almost
+    always nothing is open: one indexed read (`idx_obs_issue_open`) then answers, with no UPDATE,
+    which in autocommit is a write transaction even when it changes no row (t-679: two unindexed
+    UPDATEs per source per pass were two thirds of the live collector's CPU)."""
+    marks = ','.join('?' * len(codes))
+    if not conn.execute('SELECT 1 FROM obs_issue WHERE source_id=? AND code IN (%s) AND resolved_at IS NULL LIMIT 1'
+                        % marks, (source_id, *codes)).fetchone():
+        return
+    conn.execute('UPDATE obs_issue SET resolved_at=? WHERE source_id=? AND code IN (%s) AND resolved_at IS NULL'
+                 % marks, (util.now_iso(), source_id, *codes))
 
 
 def _prefix(fh, length):
@@ -197,10 +205,61 @@ def _before_commit(*_):
     """Fault-injection seam: observations and cursor must roll back together."""
 
 
+#: t-679: the stat of a source this process verified to hold no new content at its cursor, by
+#: (root, source_id): ((dev, ino, size, mtime_ns, ctime_ns), generation, byte_offset). A poll that
+#: finds nothing writes nothing, so the stored stat hint (`obs:source-stat:`) stays the one of the
+#: last batch; a stat that changed without new content (a link or touch, or lines that landed between
+#: the fstat and the read of the pass that took them) then sent every later poll through a read and
+#: hash of the whole file. The entry stands in for the stored hint, under the same trust (an
+#: unchanged stat), and while the stat stays the same a poll is one stat call. Only the collector
+#: holding the lock writes cursors; `_run` drops a root's entries when its record file is replaced
+#: (`_record_identity`) and a source's entry when its poll fails. Bounded; a fresh process verifies
+#: each source once.
+_VERIFIED = collections.OrderedDict()
+MAX_VERIFIED = 65536
+_VERIFIED_RECORD = {}
+
+
+def _record_identity(root):
+    """Forget the verified stats of `root` when its record file is not the one they were taken
+    against (a restore or a replaced copy may hold other cursors)."""
+    from alpaca import paths
+    try:
+        info = os.stat(paths.db_path(str(root)))
+        identity = (info.st_dev, info.st_ino)
+    except OSError:
+        identity = None
+    if _VERIFIED_RECORD.get(str(root)) != identity:
+        for key in [key for key in _VERIFIED if key[0] == str(root)]:
+            del _VERIFIED[key]
+        _VERIFIED_RECORD[str(root)] = identity
+
+
+def _remember_verified(key, known):
+    _VERIFIED[key] = known
+    _VERIFIED.move_to_end(key)
+    while len(_VERIFIED) > MAX_VERIFIED:
+        _VERIFIED.popitem(last=False)
+
+
 def _collect_source(conn, source, budget, root):
     sid = source['source_id']
     if not source['locator']:
         return 0
+    verified_key = (str(root), sid)
+    seen = _VERIFIED.get(verified_key)
+    if seen is not None:
+        # t-679: a source this process verified, with the same stat now, needs no open, no query and
+        # no issue check (only `_run` opens this source's issues, and it forgets the entry then). No
+        # file is read here, so a link at the locator or above it reads nothing: a link has a stat
+        # of its own, and one that leads to the verified file leads to the bytes already verified.
+        try:
+            now = os.stat(source['locator'], follow_symlinks=False)
+        except OSError:
+            now = None
+        if now is not None and stat.S_ISREG(now.st_mode) and \
+                (now.st_dev, now.st_ino, now.st_size, now.st_mtime_ns, now.st_ctime_ns) == seen[0]:
+            return 0
     if source['provider']=='pool':
         from alpaca.capture_io import checked_path
         checked_path(root,source['locator'])
@@ -210,12 +269,21 @@ def _collect_source(conn, source, budget, root):
         if not stat.S_ISREG(st.st_mode):
             raise OSError('source is not a regular file')
         identity = '%s:%s' % (st.st_dev, st.st_ino)
-        old = conn.execute('SELECT * FROM obs_generation WHERE source_id=? ORDER BY generation DESC LIMIT 1', (sid,)).fetchone()
         cursor = conn.execute('SELECT * FROM obs_cursor WHERE source_id=?', (sid,)).fetchone()
-        fingerprint = _id(st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
-        if cursor and db.meta_get(conn,'obs:source-stat:'+sid) == fingerprint and cursor['byte_offset'] == st.st_size:
-            _resolve(conn,sid,('source-unreadable','collector-error'))
-            return 0
+        stamp = (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+        fingerprint = None
+        if cursor and cursor['byte_offset'] == st.st_size:
+            known = (stamp, cursor['generation'], cursor['byte_offset'])
+            if _VERIFIED.get(verified_key) != known:
+                fingerprint = _id(*stamp)
+            if fingerprint is None or db.meta_get(conn,'obs:source-stat:'+sid) == fingerprint:
+                _remember_verified(verified_key, known)
+                _resolve(conn,sid,('source-unreadable','collector-error'))
+                return 0
+        _VERIFIED.pop(verified_key, None)
+        if fingerprint is None:
+            fingerprint = _id(*stamp)
+        old = conn.execute('SELECT * FROM obs_generation WHERE source_id=? ORDER BY generation DESC LIMIT 1', (sid,)).fetchone()
         offset = cursor['byte_offset'] if cursor else 0
         generation = old['generation'] if old else 1
         line = cursor['line_number'] if cursor else 0
@@ -280,6 +348,8 @@ def _collect_source(conn, source, budget, root):
         # Keeping the old stat hint merely forces another safe prefix verification.
         if old and not reset and not batch and not problems:
             _resolve(conn,sid,('source-unreadable','collector-error'))
+            if cursor and offset == st.st_size == cursor['byte_offset'] and generation == cursor['generation']:
+                _remember_verified(verified_key, (stamp, generation, offset))
             return 0
         with db.transaction(conn):
             if not old or reset:
@@ -334,20 +404,28 @@ def collector_lock(root):
 
 def _register_local(root, conn):
     """Discover only project-owned pool files and explicitly registered transcript paths."""
-    known = {(r['session'],r['provider'],r['kind']) for r in _sources(conn)}
-    sessions = [dict(r) for r in conn.execute('SELECT sid,transcript FROM sessions')]
+    # t-679: every pass runs this. It reads the few columns each step needs in one query per step,
+    # not the whole parsed source list (10,000 rows on the live record) twice plus two queries per
+    # session; the provider is the session's `operator:` meta value, 'claude' when there is none.
+    known = {(r[0],'pool',r[1]) for r in conn.execute("SELECT session,kind FROM obs_source WHERE provider='pool'")}
+    sessions = [dict(r) for r in conn.execute(
+        "SELECT p.sid,p.transcript,p.provider,o.source_id,o.locator,o.capabilities FROM "
+        "(SELECT s.sid,s.transcript,CASE WHEN m.key IS NULL THEN 'claude' ELSE m.value END AS provider "
+        " FROM sessions s LEFT JOIN meta m ON m.key='operator:'||s.sid) p "
+        "LEFT JOIN obs_source o ON o.session=p.sid AND o.provider=p.provider AND o.kind='transcript'")]
     for session in sessions:
         if session['transcript']:
-            provider = db.meta_get(conn,'operator:'+session['sid'],'claude')
-            registered = conn.execute("SELECT locator,capabilities FROM obs_source WHERE session=? AND provider=? AND kind='transcript'", (session['sid'],provider)).fetchone()
+            provider = session['provider']
+            registered = session if session['source_id'] is not None else None
             if registered and json.loads(registered['capabilities']).get('restore_disabled'):
                 continue
             if registered is None or registered['locator'] != str(Path(session['transcript']).expanduser().resolve()):
                 expect_source(root,session['sid'],provider,locator=session['transcript'],capabilities={'native_transcript':True})
-    for row in _sources(conn):
-        if row['capabilities'].get('restore_disabled'):
+    for row in conn.execute("SELECT source_id,native_id,capabilities FROM obs_source "
+                            "WHERE provider='codex' AND locator IS NULL ORDER BY source_id").fetchall():
+        if json.loads(row['capabilities']).get('restore_disabled'):
             continue
-        if not row['locator'] and row['native_id'] and row['provider']=='codex':
+        if row['native_id']:
             from alpaca.transcripts import discover_codex
             try:
                 found = discover_codex(root,row['native_id'])
@@ -369,6 +447,28 @@ def _register_local(root, conn):
             if (path.stem,'pool',kind) not in known:
                 expect_source(root,path.stem,'pool',locator=str(path),kind=kind,required=False,
                               capabilities={'tool_pre_post':kind=='tools','hook_outcomes':kind=='hook-outcomes'})
+
+
+def _pollable(conn):
+    """The sources a pass polls, in `_sources` order, as `_POLLED` tuples: the columns `_collect_source`
+    reads, with no parse of the capabilities and no dict for a source in backoff (t-679: building and
+    parsing 10,000 rows was the largest cost of an idle pass)."""
+    if not _table(conn, 'obs_source'):
+        return []
+    return [tuple(r) for r in conn.execute('SELECT %s FROM obs_source ORDER BY source_id' % ','.join(_POLLED))]
+
+
+_POLLED = ('source_id', 'session', 'parent_session', 'provider', 'kind', 'locator', 'native_id')
+
+
+_RETRY = 'obs:retry:'
+
+
+def _retries(conn):
+    """Every source's retry backoff by source id, in one read of the meta key range (t-679: one
+    query per source per pass before; 5,850 of the live record's 10,000 sources sit in a backoff)."""
+    return {key[len(_RETRY):]: json.loads(value) for key, value in conn.execute(
+        'SELECT key,value FROM meta WHERE key>=? AND key<?', (_RETRY, _RETRY[:-1] + ';'))}
 
 
 def _process_identity(pid):
@@ -530,13 +630,17 @@ def _run(root, *, max_records=1000, consumers=True, source_batch=200, event_batc
             if db.meta_get(conn,'obs:host-id') != host:
                 db.meta_set(conn,'obs:host-id',host)
         _register_local(root,conn)
-        sources = _sources(conn)
+        _record_identity(root)
+        sources = _pollable(conn)
+        retries = _retries(conn)
         rotation = int(db.meta_get(conn,'obs:rotation','0')) % max(1,len(sources))
         sources = sources[rotation:] + sources[:rotation]
-        for source in sources:
-            retry = json.loads(db.meta_get(conn,'obs:retry:'+source['source_id'],'{}'))
-            if retry.get('after') and _time(retry['after']) > _time():
+        now = _time()
+        for row in sources:
+            retry = retries.get(row[0], {})
+            if retry.get('after') and _time(retry['after']) > now:
                 continue
+            source = dict(zip(_POLLED, row))
             if result['records'] >= max_records:
                 break
             try:
@@ -544,6 +648,7 @@ def _run(root, *, max_records=1000, consumers=True, source_batch=200, event_batc
                 if retry:
                     db.meta_set(conn,'obs:retry:'+source['source_id'],'{}')
             except (OSError,sqlite3.Error,RuntimeError,ValueError) as exc:
+                _VERIFIED.pop((str(root),source['source_id']), None)
                 result['errors'] += 1
                 failures = retry.get('failures',0)+1
                 db.meta_set(conn,'obs:retry:'+source['source_id'],json.dumps({'failures':failures,'after':(_time()+dt.timedelta(seconds=min(900,5*2**min(failures,8)))).isoformat()}))

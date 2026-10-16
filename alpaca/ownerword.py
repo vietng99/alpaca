@@ -40,7 +40,9 @@ The transcript must be the one the session's first `session-start` event recorde
 directly under /srv/claude-accounts/.
 
 Refusal tokens: OWNER-WORD-NOT-HUMAN, OWNER-WORD-NO-TRANSCRIPT, OWNER-WORD-NOT-FOUND,
-OWNER-WORD-UNBOUND, OWNER-WORD-NOT-TERMINAL, OWNER-WORD-SESSION.
+OWNER-WORD-UNBOUND, OWNER-WORD-NOT-TERMINAL, OWNER-WORD-SESSION, OWNER-WORD-NOT-NEWEST,
+OWNER-WORD-LEVEL-RAISE (a session level raise with no owner `/autodrive` call for that level,
+alpaca.posture.level.owner_raise).
 
 HONEST LIMITS (design section 8). The same Unix user can write any file, a transcript included,
 and the record database directly; owner words prove the text sits in the file Claude Code writes
@@ -57,7 +59,7 @@ import os
 import re
 import sys
 
-from alpaca import db, paths
+from alpaca import db, paths, util
 from alpaca.gates import verdict as vc
 
 AGENT_MARKERS = ("CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "ALPACA_SESSION_ID", "CODEX_THREAD_ID",
@@ -77,6 +79,9 @@ R_NOT_FOUND = "OWNER-WORD-NOT-FOUND"
 R_UNBOUND = "OWNER-WORD-UNBOUND"
 R_NOT_TERMINAL = "OWNER-WORD-NOT-TERMINAL"
 R_SESSION = "OWNER-WORD-SESSION"
+R_NOT_NEWEST = "OWNER-WORD-NOT-NEWEST"
+#: a level raise with no owner `/autodrive` call for exactly that level (alpaca.posture.level)
+R_LEVEL_RAISE = "OWNER-WORD-LEVEL-RAISE"
 
 #: ids of the record that are not batch items, so a segment stops at them
 _GENERIC_ID = r"(?:q\d+|ord-\d+|rc-\d+|dec-[0-9a-f]{12})"
@@ -147,6 +152,31 @@ def real_sessions(environ=None):
 
 def agent_markers(environ=None):
     return list(_real(environ)["markers"])
+
+
+def _stdin_is_tty():
+    """True when this process's standard input is a terminal. The one place tests replace (an in-process patch;
+    no environment variable switches it, because a variable is a switch an agent can also set)."""
+    try:
+        return bool(sys.stdin.isatty())
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def owner_terminal(environ=None, isatty=None):
+    """True when the process runs in the owner's own terminal: no session id and no agent marker in the environment
+    as the CLI found it, and standard input is a terminal. These are the three things the terminal path of
+    `human_write` needs (the module text, TERMINAL PATH). A caller that wipes the markers but has no terminal (a
+    child process of an agent, with stdin from /dev/null or a pipe) is not the owner's terminal."""
+    if real_session(environ) is not None or agent_markers(environ):
+        return False
+    return bool((isatty or _stdin_is_tty)())
+
+
+def agent_call(environ=None, isatty=None):
+    """True when the call is not from the owner's own terminal (see `owner_terminal`): an agent session, or a
+    process with no terminal. The setup writers (flat onboard, plain attach init, new --attach) treat these alike."""
+    return not owner_terminal(environ, isatty)
 
 
 def require_real_session(session, environ=None):
@@ -279,8 +309,10 @@ def _entry_text(entry):
     return None
 
 
-def owner_messages(path):
-    """Every owner message of the transcript at `path`, in file order: {line, timestamp, text}."""
+def owner_messages(path, contains=None):
+    """Every owner message of the transcript at `path`, in file order: {line, timestamp, text}.
+    With `contains`, only the lines whose raw bytes hold that text are parsed: a cheap filter for a
+    caller that looks for one command in a long transcript (the posture mirror runs per tool call)."""
     out = []
     try:
         fh = open(path, encoding="utf-8", errors="replace")
@@ -288,7 +320,7 @@ def owner_messages(path):
         return out
     with fh:
         for number, raw in enumerate(fh, 1):
-            if '"human"' not in raw:
+            if '"human"' not in raw or (contains and contains not in raw):
                 continue
             try:
                 entry = json.loads(raw)
@@ -304,10 +336,65 @@ def owner_messages(path):
     return out
 
 
+def _assistant_text(entry):
+    """The text of one assistant entry of the transcript, or None when it is not one: Claude Code
+    writes each content block of an answer as its own `assistant` line, so a long message is several
+    entries. A sidechain (subagent) entry never counts."""
+    if not isinstance(entry, dict) or entry.get("type") != "assistant":
+        return None
+    if entry.get("isSidechain") or entry.get("isMeta") or entry.get("isCompactSummary"):
+        return None
+    message = entry.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return None
+    texts = [b["text"] for b in content
+             if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str)]
+    return "\n".join(texts) if texts else None
+
+
+def assistant_texts(path, since=None, until=None):
+    """Every assistant text entry of the transcript at `path`, in file order, typed after `since` and
+    before `until` (both optional, strictly): {line, timestamp, text}."""
+    out = []
+    try:
+        fh = open(path, encoding="utf-8", errors="replace")
+    except OSError:
+        return out
+    with fh:
+        for number, raw in enumerate(fh, 1):
+            if '"assistant"' not in raw:
+                continue
+            try:
+                entry = json.loads(raw)
+            except ValueError:
+                continue
+            text = _assistant_text(entry)
+            if text is None:
+                continue
+            row = {"line": number, "timestamp": entry.get("timestamp"), "text": text}
+            if _after(row, since, until):
+                out.append(row)
+    return out
+
+
 def session_messages(conn, sid, root, environ=None):
     """(transcript path, owner messages) of session `sid` under the transcript rules."""
     path = transcript_path(conn, sid, root, environ)
     return path, owner_messages(path)
+
+
+def typed_at(message):
+    """When owner message `message` was typed, as an aware datetime, or None when unstamped."""
+    return _ts(message.get("timestamp"))
+
+
+def typed_after(message, since, until=None):
+    """True when owner message `message` was typed after `since` and, when given, before
+    `until` (both ISO timestamps or None)."""
+    return _after(message, since, until)
 
 
 def _after(message, since, until):
@@ -397,11 +484,17 @@ def read_answer(text, subject, others=(), extra_yes=(), strict=False):
     return next(iter(found)) if len(found) == 1 else None
 
 
-def is_batch_phrase(text):
-    """True when the whole message is one of the whole-batch phrases."""
+def is_sole_phrase(text, phrases):
+    """True when the whole message, lower-cased, with spaces collapsed and one trailing run of `.` or
+    `!` dropped, is one of `phrases`. The batch rule with a phrase set of the caller's choosing."""
     norm = " ".join((text or "").lower().split())
     norm = re.sub(r"[.!]+$", "", norm).strip()
-    return norm in BATCH_PHRASES
+    return norm in phrases
+
+
+def is_batch_phrase(text):
+    """True when the whole message is one of the whole-batch phrases."""
+    return is_sole_phrase(text, BATCH_PHRASES)
 
 
 # ------------------------------------------------------------------ human_write
@@ -423,18 +516,25 @@ def _terminal(subject, environ, isatty, read):
 
 def human_write(conn, session, by, *, subject, answer, quote, root=None, form="id", since=None,
                 until=None, bound_session=None, others=(), extra_yes=(), min_words=1,
-                strict_ids=False, environ=None, isatty=None, read=None):
+                strict_ids=False, phrases=None, accepts=None, environ=None, isatty=None, read=None, newest=False):
     """Prove the owner said `answer` about `subject`, or raise OwnerWordRefusal. Returns the
     `owner_word` row {path, transcript, line, timestamp, quote} (plus `answer` and `text`) the
     caller stores on its event. Nothing is written here.
 
     `by` must be a human identity. `form` is `id` (the answer forms of 1.2), `batch` (the whole
     batch phrase, `subject` only names the batch) or `quote` (a substring of one owner message
-    with at least `min_words` words: owner orders). `since` and `until` bound the typing time;
+    with at least `min_words` words: owner orders) or `sole` (the batch window rule with the phrase
+    set `phrases`, or the test `accepts(text)` when the caller passes one: the first owner message after `since` is
+    exactly one of them, and `answer` is what that phrase means, "yes" or "no") or `whole` (like `sole`, but any owner message in the window may
+    be the phrase, not only the first: the owner may say a sentence and type the phrase when asked).
+    `since` and `until` bound the typing time;
     `bound_session` is the session a batch item id may be answered from (the one that asked);
     `others` are the other ids of the same message (batch items); `extra_yes` adds assent words
     (order close). `strict_ids` reads the id form with the strict segments of `_segments` (batch
-    items). `environ`, `isatty` and `read` are for tests."""
+    items). `newest` (session path, forms sole, whole and id) also needs the message that answers to be the
+    newest owner message of the session, by place in the file and never by the clock: an owner message typed
+    after it may take it back, so it must be read first (OWNER-WORD-NOT-NEWEST). In the whole form the newest
+    message must itself be one of `phrases`. `environ`, `isatty` and `read` are for tests."""
     if str(by or "").strip() not in HUMAN_IDENTITIES:
         raise OwnerWordRefusal(R_NOT_HUMAN, "%r is not a human identity (%s)"
                                % (by, ", ".join(sorted(HUMAN_IDENTITIES))))
@@ -463,6 +563,40 @@ def human_write(conn, session, by, *, subject, answer, quote, root=None, form="i
         return word
     path, messages = session_messages(conn, real, root, environ)
     window = [m for m in messages if _after(m, since, until)]
+    if form == "sole":
+        if not phrases and accepts is None:
+            raise OwnerWordRefusal(R_UNBOUND, "the sole form needs a phrase set")
+        if not window or window[0]["text"].strip() != needle:
+            if not any(m["text"].strip() == needle for m in messages):
+                raise OwnerWordRefusal(R_NOT_FOUND, "no owner message of session %s is that "
+                                       "text" % real)
+            raise OwnerWordRefusal(R_UNBOUND, "a lone word counts only in the first owner message "
+                                   "after the ask")
+        if not (accepts(needle) if accepts is not None else is_sole_phrase(needle, phrases)):
+            raise OwnerWordRefusal(R_UNBOUND, "the first message after the ask is not one of: "
+                                   + ", ".join(sorted(phrases or ())))
+        m = window[0]
+        if newest:
+            _newest_or_refuse(m, messages)
+        return {"path": "session", "transcript": path, "line": m["line"],
+                "timestamp": m["timestamp"], "quote": needle, "answer": answer}
+    if form == "whole":
+        # one whole owner message, typed in the window, that is one of `phrases` (the owner may say a sentence first and
+        # type the phrase when asked): the agent's quote must be that phrase and some owner message must be exactly it
+        if not phrases:
+            raise OwnerWordRefusal(R_UNBOUND, "the whole form needs a phrase set")
+        if not is_sole_phrase(needle, phrases):
+            raise OwnerWordRefusal(R_UNBOUND, "the quote is not one of: " + ", ".join(sorted(phrases)))
+        hits = [m for m in window if is_sole_phrase(m["text"], phrases)]
+        if not hits:
+            raise OwnerWordRefusal(R_NOT_FOUND, "no owner message of session %s, typed after the first chat's last "
+                                   "step, is one of: %s" % (real, ", ".join(sorted(phrases))))
+        m = hits[0]
+        if newest:
+            m = hits[-1]
+            _newest_or_refuse(m, messages)
+        return {"path": "session", "transcript": path, "line": m["line"],
+                "timestamp": m["timestamp"], "quote": needle, "answer": answer}
     if form == "batch":
         if not window or window[0]["text"].strip() != needle:
             if not any(m["text"].strip() == needle for m in messages):
@@ -491,11 +625,22 @@ def human_write(conn, session, by, *, subject, answer, quote, root=None, form="i
     if want == "text" and answer != "text" and read_back[1] != str(answer).strip():
         raise OwnerWordRefusal(R_UNBOUND, "the message answers %s with a different text" % subject)
     m = inside[0]
+    if newest:
+        m = inside[-1]
+        _newest_or_refuse(m, messages)
     word = {"path": "session", "transcript": path, "line": m["line"], "timestamp": m["timestamp"],
             "quote": needle, "answer": want}
     if want == "text":
         word["text"] = read_back[1]
     return word
+
+
+def _newest_or_refuse(message, messages):
+    """Refuse (OWNER-WORD-NOT-NEWEST) unless `message` is the last of `messages`, the owner messages of one read of
+    the transcript in file order. The place in the file decides, never a timestamp: two lines may share one."""
+    if not messages or messages[-1]["line"] != message["line"]:
+        raise OwnerWordRefusal(R_NOT_NEWEST, "the owner wrote again after that message (transcript line %s); read "
+                               "the newer message first" % (messages[-1]["line"] if messages else "none"))
 
 
 # ------------------------------------------------------------------ asks
@@ -504,7 +649,7 @@ ASK_KIND = "owner-ask"
 
 def record_ask(conn, session, subject, text, *, op=None, extra=None):
     """Append one owner-ask event: the owner is shown `text` about `subject`. Returns the event."""
-    data = {"subject": subject, "text": text}
+    data = {"subject": subject, "text": text, "at": util.now_iso_precise()}
     if extra:
         data.update(extra)
     return db.append_event(conn, session=session, actor="alpaca", kind=ASK_KIND, op=op,
@@ -517,9 +662,20 @@ def latest_ask(conn, subject):
                         (ASK_KIND, subject)).fetchone()
 
 
+def ask_floor(row):
+    """The time after which an owner message answers the ask `row`. An event's `ts` has whole seconds; `at` (set by
+    record_ask) has microseconds. A message typed in the same second but before the ask must not count as typed
+    after it, so the floor is `at` when the ask has one (an ask recorded before `at` existed falls back to `ts`)."""
+    try:
+        at = json.loads(row["data"]).get("at")
+    except (TypeError, ValueError, AttributeError):
+        at = None
+    return at if isinstance(at, str) and _ts(at) is not None else row["ts"]
+
+
 def ask_ts(conn, subject):
     row = latest_ask(conn, subject)
-    return row["ts"] if row else None
+    return ask_floor(row) if row else None
 
 
 def writer(conn, session, by, quote, *, subject, answer="yes", root=None, since=None,

@@ -53,7 +53,10 @@ def test_session_start_exports_the_session_id_to_later_bash_calls(project, tmp_p
     for _ in range(2):      # startup, then a resume: one line, not two
         rc, _out, err = run_hook("alpaca.hooks.session_start", payload, cwd=project, env_extra=env)
         assert rc == 0, err
-    assert env_file.read_text() == "export ALPACA_SESSION_ID=abcd1234-0000\n"
+    from alpaca import sandbox
+    assert env_file.read_text() == ("export ALPACA_SESSION_ID=abcd1234-0000\n"
+                                    + sandbox.env_hook_line(os.path.realpath(project), "abcd1234-0000"))
+    assert os.path.exists(sandbox.wired_path(os.path.realpath(project), "abcd1234-0000"))
     got = subprocess.run(["bash", "-c", ". %s && printf %%s \"$ALPACA_SESSION_ID\"" % env_file],
                          capture_output=True, text=True)
     assert got.stdout == "abcd1234-0000"
@@ -110,3 +113,25 @@ def test_session_start_keeps_its_boot_context_when_the_gap_notice_cannot_be_read
     assert rc == 0, err
     ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
     assert "Alpaca BOOT" in ctx and "PRICING GAP" not in ctx
+
+
+def test_session_start_wires_the_sandbox_env_file_once_and_it_sets_the_temp_root(project, tmp_path):
+    """One static line in the Claude env file sources `.alpaca/sandbox/env/<sid>.sh` when it exists
+    (alpaca/sandbox.py); the line is harmless while no sandbox binds the session."""
+    from alpaca import sandbox
+    root = os.path.realpath(project)
+    env_file = tmp_path / "claude-env.sh"
+    env = {"CLAUDE_PROJECT_DIR": project, "CLAUDE_ENV_FILE": str(env_file),
+           "PYTHONPATH": os.path.dirname(os.path.dirname(os.path.dirname(__file__)))}
+    payload = {"session_id": "sbx-sess-1", "cwd": project, "source": "startup"}
+    for _ in range(2):
+        rc, _out, err = run_hook("alpaca.hooks.session_start", payload, cwd=project, env_extra=env)
+        assert rc == 0, err
+    assert env_file.read_text().count(sandbox.env_hook_line(root, "sbx-sess-1")) == 1
+    quiet = subprocess.run(["bash", "-c", ". %s && printf %%s \"${TMPDIR:-unset}\"" % env_file],
+                           capture_output=True, text=True, env={k: v for k, v in os.environ.items() if k != "TMPDIR"})
+    assert quiet.stdout == "unset"
+    os.makedirs(os.path.dirname(sandbox.env_path(root, "sbx-sess-1")), exist_ok=True)
+    open(sandbox.env_path(root, "sbx-sess-1"), "w").write("export TMPDIR=/somewhere\n")
+    loud = subprocess.run(["bash", "-c", ". %s && printf %%s \"$TMPDIR\"" % env_file], capture_output=True, text=True)
+    assert loud.stdout == "/somewhere"

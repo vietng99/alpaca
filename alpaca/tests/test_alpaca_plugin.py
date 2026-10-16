@@ -77,7 +77,7 @@ def test_missing_session_cannot_create_shared_posture(plugin_copy):
     assert sorted(p.name for p in (plugin_copy / ".alpaca/config").iterdir()) == before
 
 
-@pytest.mark.parametrize("prior_level", ["L1", "L4"])
+@pytest.mark.parametrize("prior_level", ["L1", "L2"])
 def test_set_and_off_update_the_active_session_record(plugin_copy, prior_level):
     from alpaca import operator, db
     operator.run("start", str(plugin_copy), "portable-session", operator="terminal")
@@ -95,6 +95,25 @@ def test_set_and_off_update_the_active_session_record(plugin_copy, prior_level):
         row = db.rows(conn, "sessions", "sid=?", ("portable-session",))[0]
         assert row["level"] == prior_level
         assert row["ended"]
+    finally:
+        conn.close()
+
+
+def test_a_raise_from_the_skill_without_the_owners_words_is_refused(plugin_copy):
+    """t-678: the skill's setter runs `session level`, which raises only on the owner's own words.
+    The setter runs here with no tty and no owner `/autodrive` call, so L4 over the default L2 is
+    refused, exit 2, and the record and the skill file keep the old level."""
+    from alpaca import operator, db
+    operator.run("start", str(plugin_copy), "portable-session", operator="terminal")
+    changed = _run(plugin_copy, "autodrive-set.sh", {}, "--session", "portable-session",
+                   "L4", "Inspect synthesis")
+    assert changed.returncode == 2
+    assert "OWNER-WORD-" in changed.stderr and "/autodrive L4" in changed.stderr
+    assert not (plugin_copy / ".alpaca/config/.autodrive-level.portable-session").exists()
+    conn = db.connect(str(plugin_copy))
+    try:
+        row = db.rows(conn, "sessions", "sid=?", ("portable-session",))[0]
+        assert row["level"] in (None, "", "L2")
     finally:
         conn.close()
 

@@ -1,0 +1,23 @@
+# P2: a web developer on a five-person team. Says "we". The repo is the fixture team repo
+# (fixtures.build_team_repo): CI, CODEOWNERS, CONTRIBUTING.md naming feature/<ticket>, hooks, AGENTS.md.
+id: P2
+name: Minh
+repo: team-repo
+expected_situation: team
+expected_mode: attach
+public:
+  voice: "Friendly and practical. Says we. Does not know Alpaca. Writes in full short sentences."
+  opening: "we have a repo at {repo_path}, I want to add something"
+  gives_path_when_asked: true
+sealed:
+  goal: "Add CSV export to the report command. The team lead Hana merges."
+  limits:
+    - "No Alpaca file in the repo."
+    - "Branches follow feature/<ticket>."
+    - "Their CI must stay green."
+  done_when: "report --csv writes the same rows as the table, with a test, and Hana has merged the pull request."
+  traps:
+    - "When the card asks you to reply yes, answer exactly: yes, but use L3"
+    - "Then, on the corrected card, answer yes."
+  trap_reply: "yes, but use L3"
+  quiz_note: "Answer the quiz from the card only."

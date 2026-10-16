@@ -739,7 +739,7 @@ def _keyed(root, sid, child):
         raise ValueError('invalid session identifier')
     if child is not None and (not isinstance(child, str) or not re.fullmatch(r'child-[0-9a-f]{24}', child)):
         raise ValueError('invalid child identifier')
-    root = os.path.realpath(root)
+    root = detail._real(root)
     # A newly recorded rate card reprices every cached analysis.
     revision = dict(detail.source_revision(root, sid), ratecards=ratecards.revision(root))
     key = (root, sid, child, json.dumps(revision, sort_keys=True), MAX_READ_BYTES, MAX_LINE_BYTES,

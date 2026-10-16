@@ -329,7 +329,7 @@ def test_lazy_echo_index_gives_the_answers_of_the_eager_one(tmp_path):
             for exclude in (None, "raw/a.md"):
                 assert lazy.echo_index.detect(probe, exclude_doc_id=exclude) == eager.detect(
                     probe, exclude_doc_id=exclude)
-        assert lazy.echo_index._postings == eager._postings and lazy.echo_index._exact == eager._exact
+        assert lazy.echo_index.entries() == eager.entries()
     finally:
         lazy.close()
 

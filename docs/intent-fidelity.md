@@ -71,11 +71,18 @@ Writes that need owner words: `batch answer`, `brief sign --quote`, `order add`,
 `task title` with `--by owner` or `--by human` (needs `--quote`). The other review card kinds
 keep the older `--by` rule (design section 8).
 
+`session level L<n>` and `session start --level L<n>` need owner words only for a raise above the
+level in force for the session. Inside an agent session the owner's words are an `/autodrive L<n>`
+call for exactly that level, typed after the latest level decision; no `--quote` is passed, the
+transcript is read. With no agent session, the person at a terminal types `L<n>` when asked. A
+drop, OFF or the same level needs no owner words (`alpaca/posture/level.py`, `request`).
+
 `decide` without `--quote` still records the decision, but it is not owner-proved. A grandfather
 list covers decisions that predate the rule (`ownerword-grandfathered`).
 
 A refusal carries one of these tokens: OWNER-WORD-NOT-HUMAN, OWNER-WORD-NO-TRANSCRIPT,
-OWNER-WORD-NOT-FOUND, OWNER-WORD-UNBOUND, OWNER-WORD-NOT-TERMINAL, OWNER-WORD-SESSION. A `--session`
+OWNER-WORD-NOT-FOUND, OWNER-WORD-UNBOUND, OWNER-WORD-NOT-TERMINAL, OWNER-WORD-SESSION,
+OWNER-WORD-LEVEL-RAISE (a level raise with no owner `/autodrive` call for that level). A `--session`
 that differs from the real session is refused.
 
 ## 3. The signed brief
@@ -302,7 +309,7 @@ actions are human decisions (CLAUDE.md boot rule 3). This op does not change tha
 | SELFCHECK-NO-BRIEF, -BUILDER-NOTES, -NO-PACKET, -PACKET-CHANGED, -RESULT, -QUOTE-NOT-FOUND, -BRIEF-SHA, -PASS-REFUSED, -NOT-SEPARATE, -MISSING, -HOLDING | `alpaca/selfcheck.py` |
 | QUOTE-SOURCE-MISMATCH, QUOTE-SOURCE-UNSIGNED, ORIGIN-DECISION-UNKNOWN | origin labels |
 | REVIEW-MOVE-NOT-A-HUMAN, REVIEW-OUT-OF-BRIEF-DECISION | `alpaca/review.py` |
-| OWNER-WORD-* (six) | section 2 |
+| OWNER-WORD-* (seven) | section 2 |
 
 The two door link names are `owner-orders` and `intent-selfcheck`.
 
@@ -320,7 +327,8 @@ checks the registration and the bytes, not the wording.
 
 - The same Unix user can write a transcript and the record database, so an owner word proves where
   the text sits, not who typed it.
-- `session level` drop-and-raise is visible but not prevented.
+- `session level` refuses a raise without owner words, but the hooks still mirror a level written
+  by hand into `.alpaca/config/.autodrive-level.<session>` without that check.
 - A Codex session records owner words only at the terminal, and the terminal path leaves no file to
   read again.
 - Module-level callers can move other card kinds with any actor.

@@ -17,8 +17,9 @@ from alpaca.migrate import schema_sql
 SCHEMA = schema_sql()
 
 
-def connect_readonly(root_dir: str) -> sqlite3.Connection:
-    """Read committed state without migrations or project initialization.
+def connect_readonly(root_dir: str, timeout: float = 10) -> sqlite3.Connection:
+    """Read committed state without migrations or project initialization. `timeout` is how long a
+    read waits for a lock another process holds (a per-call hook passes a short one).
 
     SQLite may maintain WAL shared-memory coordination files for a live WAL database;
     no logical record writes are permitted. Never use immutable=1 on a live WAL record.
@@ -27,7 +28,7 @@ def connect_readonly(root_dir: str) -> sqlite3.Connection:
     from pathlib import Path
     p = Path(paths.db_path(root_dir)).absolute()
     if p.exists():
-        conn = sqlite3.connect(p.as_uri() + "?mode=ro", uri=True, timeout=10,
+        conn = sqlite3.connect(p.as_uri() + "?mode=ro", uri=True, timeout=timeout,
                                isolation_level=None)
     else:
         conn = sqlite3.connect(":memory:", isolation_level=None)
@@ -97,7 +98,31 @@ def last_event(conn):
     r = conn.execute("SELECT * FROM events ORDER BY id DESC LIMIT 1").fetchone()
     return dict(r) if r else None
 
+def rehearsal_marked(data):
+    """`data` with rehearsal: true when the process runs inside a first-chat rehearsal (ALPACA_REHEARSAL is set by the
+    rehearsal driver's wrapper). Read where an event is written, so every writer is marked, the attach verbs and the
+    notes and decisions an apply writes included. Nothing reads the mark to decide anything (production learns no
+    bypass); it lets a reader tell a rehearsal's events from an owner's. The mark is not part of what an event
+    means: a reader that validates an event's data strictly takes it out first with `without_rehearsal` (the task
+    plan does), so the mark never changes how an event is judged (op-062 D1)."""
+    if os.environ.get("ALPACA_REHEARSAL") and (data is None or isinstance(data, dict)):
+        return dict(data or {}, **{REHEARSAL_KEY: True})
+    return data
+
+
+REHEARSAL_KEY = "rehearsal"
+
+
+def without_rehearsal(data):
+    """`data` as the writer meant it: a copy of an event's data object without the rehearsal mark. Anything that is
+    not an object comes back unchanged."""
+    if isinstance(data, dict) and REHEARSAL_KEY in data:
+        return {k: v for k, v in data.items() if k != REHEARSAL_KEY}
+    return data
+
+
 def _append_event_row(conn, session, actor, kind, op, ref, data, clock=None, where=None) -> dict:
+    data = rehearsal_marked(data)
     ts = clock() if clock is not None else util.now_iso()
     fields = {"ts": ts, "session": session, "actor": actor, "kind": kind,
               "op": op, "ref": ref, "data": util.canonical_json(data or {})}

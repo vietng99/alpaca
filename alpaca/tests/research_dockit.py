@@ -297,9 +297,24 @@ def scratch_env(base: str, shim: str) -> dict:
     return env
 
 
+def owner_skips_setup(dest: str) -> None:
+    """The owner skips the first chat of the new project at their own terminal: no agent marker, a terminal on
+    standard input, and the id typed at the prompt (op-062 t-656). A project `alpaca new` makes has its first chat
+    due, and while it is open an agent call runs only the first-chat verbs (alpaca/first_chat.py); the guide's
+    scratch commands model a person who made a scratch project and skipped setup."""
+    from alpaca import db, onboard_flow
+    conn = db.connect(dest)
+    try:
+        onboard_flow.skip_verb(conn, dest, "cli", "onboard-skip", environ={}, isatty=lambda: True,
+                               read=lambda prompt="": "onboard-skip")
+    finally:
+        conn.close()
+
+
 def scratch_project(dest: str, env: dict, shim: str, repo: str = REPO) -> None:
-    """`alpaca new` into `dest` from `repo` (stdin closed), then an `alpaca` on PATH that runs the
-    new project's own bin/alpaca. Raises RuntimeError when `alpaca new` fails."""
+    """`alpaca new` into `dest` from `repo` (stdin closed), the owner's skip of its first chat, then an
+    `alpaca` on PATH that runs the new project's own bin/alpaca. Raises RuntimeError when `alpaca new`
+    fails."""
     made = subprocess.run([sys.executable, "-m", "alpaca", "new", "--name", "Scratch", "--dir", dest,
                            "--who", "tester:owner", "--yes", "--no-bootstrap", "--no-serve"],
                           cwd=repo, env=env, capture_output=True, text=True, timeout=900,
@@ -307,6 +322,7 @@ def scratch_project(dest: str, env: dict, shim: str, repo: str = REPO) -> None:
     if made.returncode != 0:
         raise RuntimeError("alpaca new failed (%d): %s%s" % (made.returncode, made.stdout[-2000:],
                                                             made.stderr[-2000:]))
+    owner_skips_setup(dest)
     os.makedirs(shim, exist_ok=True)
     path = os.path.join(shim, "alpaca")
     with open(path, "w", encoding="utf-8") as fh:

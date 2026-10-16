@@ -22,6 +22,7 @@ from .api import (TEXT_OUTCOMES, CandidateReceipt, Coverage, Filters, QueryResul
 from .clock import now_iso
 from .config import Config, tomllib
 from .ingest.drain import TranscriptUnavailable  # noqa: F401  the collector catches it (_transcript_source)
+from .ingest.drain import TranscriptMalformed  # noqa: F401  the collector raises it (t-684)
 from .store.asof import AsOf, block_where
 from .store.db import DB, open_db_readonly
 

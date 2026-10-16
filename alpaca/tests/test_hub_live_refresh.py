@@ -69,7 +69,7 @@ def test_rev_blob_names_the_pricing_revision_and_a_new_rate_card_moves_it(projec
 def test_pricing_revision_is_read_only_when_the_input_signature_moves(project, monkeypatch):
     calls = []
     signature = ["a"]
-    monkeypatch.setattr(serve, "_data_sig", lambda root: signature[0])
+    monkeypatch.setattr(serve.Live, "_input_sig", lambda self, *_: signature[0])
     monkeypatch.setattr(serve.ratecards, "revision", lambda root, **kw: calls.append(1) or "p1")
     live = serve.Live(project)
     live.refresh(fold=False)

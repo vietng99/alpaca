@@ -19,7 +19,11 @@ slots:
   - id: sandbox
     fills: >-
       what sandbox and security limits apply: which folders and hosts the work may reach, what it
-      may install, what stays off limits
+      may install, what stays off limits. Always allowed, so you need not name them: this project
+      root, the .alpaca folder, the session scratchpad, ~/.claude, and the harness's own temp folder
+      /tmp/sbx plus the first 8 characters of the session id (TMPDIR and pytest's temp root; made
+      private, removed when the session ends). Your answer gives the proposed path list; the write
+      guard enforces only a list you confirm in your own words (alpaca sandbox set)
     becomes: the sandbox and security rule of the runbook
   - id: spend
     fills: >-

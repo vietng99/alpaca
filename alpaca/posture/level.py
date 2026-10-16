@@ -31,12 +31,16 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 from alpaca import db, paths, project, util
 from alpaca.phase import defaults
 
 #: the actor a mirror records under when the skill state, not a named owner, drove the change.
 ACTOR = "autodrive"
+
+#: the actor a raise records under when the owner's own `/autodrive` call proves it (account_raise).
+OWNER_ACTOR = "owner"
 
 #: the decision kind the level mirror lands under. A level change is one decision event (Q15):
 #: there is no separate override ledger, so the change lives on the board as this one row.
@@ -132,9 +136,10 @@ def levels(conn, sessions, *, root=None) -> dict:
     return out
 
 
-def set(conn, session, n, goal, actor=ACTOR, *, root=None) -> dict:
+def set(conn, session, n, goal, actor=ACTOR, *, root=None, owner_word=None, pointer="") -> dict:
     """Mirror the level a skill set for `session` into the record as a decision row (M2.6)
-    carrying the verbatim goal.
+    carrying the verbatim goal. `owner_word` (an alpaca.ownerword row) and `pointer` ride on the
+    decision when the owner's own words in the session transcript prove the change (`account_raise`).
 
     Validates the level band (a level off L1-L6 raises ValueError), appends one hash-chained
     decision event and its page, and updates the per-session projection (sessions.level) that the
@@ -154,8 +159,8 @@ def set(conn, session, n, goal, actor=ACTOR, *, root=None) -> dict:
     rec = decisions.record(
         conn, kind=DECISION_KIND, context=context,
         options=["L1", "L2", "L3", "L4", "L5", "L6"],
-        choice=label, consequence=consequence, pointer="",
-        actor=actor or ACTOR, session=session, root=root)
+        choice=label, consequence=consequence, pointer=pointer or "",
+        actor=actor or ACTOR, session=session, root=root, owner_word=owner_word)
     if db.patch(conn, "sessions", "sid", session, {"level": label}) is None:
         db.upsert(conn, "sessions", "sid",
                   {"sid": session, "started": util.now_iso(), "level": label})
@@ -171,13 +176,14 @@ def set(conn, session, n, goal, actor=ACTOR, *, root=None) -> dict:
     return out
 
 
-def set_local(conn, session, n, goal, actor=ACTOR, *, root=None):
+def set_local(conn, session, n, goal, actor=ACTOR, *, root=None, owner_word=None, pointer=""):
     """Set explicit project posture and keep the local skill mirror in agreement. `n` may be OFF:
     the record then holds the default-level and the skill file holds OFF."""
     off = str(n).strip().upper() == OFF
     if off:
         n, goal = default_level(root), OFF_GOAL
-    rec = set(conn, session, n, goal, actor=actor, root=root)
+    rec = set(conn, session, n, goal, actor=actor, root=root, owner_word=owner_word,
+              pointer=pointer)
     directory = paths.config_dir(root)
     util.write_text(os.path.join(directory, ".autodrive-level.%s" % session),
                     (OFF if off else "L%d" % rec["level"]) + "\n")
@@ -248,7 +254,8 @@ def account_drop(conn, session, *, root=None):
     config dir, so the record never saw it and the L6 Stop refusal held. Posture stays
     project-local: this reads only this session's file and only honors it when it is a DROP
     (OFF, or a rank below the level in force) written after the latest level decision. Dropping to
-    a safer level is always allowed; a raise from the account dir is never honored. Returns the
+    a safer level is always allowed and needs no owner words; a raise from the account dir is
+    `account_raise`'s question and is honored only on the owner's own typed command. Returns the
     rank (or OFF) to mirror, or None.
     """
     p = os.path.join(account_dir(), ".autodrive-level.%s" % session)
@@ -266,6 +273,205 @@ def account_drop(conn, session, *, root=None):
     except OSError:
         return None
     return rank
+
+
+#: the owner's `/autodrive` command in one owner message: the skill invocation Claude Code writes
+#: for a typed slash command, or a prompt whose whole text starts with the command (a message
+#: queued mid-turn keeps the typed text).
+#: The Alpaca plugin ships its own `autodrive` skill, which Claude Code names `/alpaca:autodrive`.
+_SKILL_NAME = re.compile(r"<command-name>\s*/(?:alpaca:)?autodrive\s*</command-name>")
+_SKILL_ARGS = re.compile(r"<command-args>(.*?)</command-args>", re.S)
+_PLAIN = re.compile(r"\A/(?:alpaca:)?autodrive(?:\s+(.*))?\Z", re.S)
+_LEVEL_TOKEN = re.compile(r"L([1-6])", re.I)
+
+
+def owner_command(text):
+    """What one owner message asks of `/autodrive`: (rank, goal), (OFF, goal), (None, "") for an
+    `/autodrive` call with no valid level, or None when the message is not an `/autodrive` call.
+    The goal is the text after the level, one pair of surrounding quotes dropped. A message that
+    only mentions the command (`why did /autodrive L6 not work?`) is not a call."""
+    body = (text or "").strip()
+    if _SKILL_NAME.search(body):
+        m = _SKILL_ARGS.search(body)
+        args = m.group(1).strip() if m else ""
+    else:
+        m = _PLAIN.match(body)
+        if m is None:
+            return None
+        args = (m.group(1) or "").strip()
+    parts = args.split(None, 1)
+    if not parts:
+        return None, ""
+    token = parts[0].strip()
+    if token.upper() == OFF:
+        rank = OFF
+    elif _LEVEL_TOKEN.fullmatch(token):
+        rank = int(token[1])
+    else:
+        return None, ""
+    goal = parts[1].strip() if len(parts) > 1 else ""
+    if len(goal) >= 2 and goal[0] == goal[-1] and goal[0] in "\"'":
+        goal = goal[1:-1].strip()
+    return rank, goal
+
+
+def account_raise(conn, session, *, root=None):
+    """A level raise the OWNER made through the shared skill, read from the account dir.
+
+    The shared `/autodrive` skill writes the owner's `/autodrive L<n>` to the account dir, so the
+    record never saw it and gates ran at the default-level. Raising your own level is not allowed
+    (CLAUDE.md rule 6), so the account file alone never raises: it counts only when
+      * this session's file holds a rank ABOVE the level in force, written after the latest level
+        decision for the session (the same file-age rule as `account_drop`), and
+      * this session's transcript (the one its first session-start recorded, at the place Claude
+        Code writes it: `alpaca.ownerword.transcript_path`) holds an owner message, under the
+        owner-word filter (a typed prompt or a queued command of human origin, never a sidechain,
+        meta, compact-summary or `claude -p` entry), that is an `/autodrive` call typed after the
+        latest level decision, and the LATEST such call names exactly the file's rank.
+    Returns (rank, goal, owner_word) or None. The owner_word row is the one the other owner-word
+    writes store: the transcript path, the line, the timestamp and the whole message as the quote,
+    so `ownerword.decision_is_owner` re-reads it. Reading never writes.
+    """
+    p = os.path.join(account_dir(), ".autodrive-level.%s" % session)
+    rank = _read_level_file(p)
+    if rank is None or rank == OFF:
+        return None
+    if rank <= in_force(conn, session, root=root):
+        return None
+    since_epoch = latest_decision_epoch(conn, session)
+    try:
+        if since_epoch is not None and os.path.getmtime(p) <= since_epoch:
+            return None
+    except OSError:
+        return None
+    from alpaca import ownerword
+    try:
+        path = ownerword.transcript_path(conn, session, _root(root))
+    except ownerword.OwnerWordRefusal:
+        return None
+    found = _owner_call_for(conn, session, path, rank)
+    if found is None:
+        return None
+    goal, word = found
+    return rank, goal, word
+
+
+def _latest_owner_call(conn, session, path):
+    """The latest `/autodrive` call among the owner messages of the transcript at `path` typed
+    after the latest level decision for `session`: (message, asked rank or OFF or None, goal), or
+    None when there is none."""
+    from alpaca import ownerword
+    since = _latest_decision_ts(conn, session)
+    latest = None
+    for m in ownerword.owner_messages(path, contains="autodrive"):
+        asked = owner_command(m["text"])
+        if asked is None or not ownerword.typed_after(m, since):
+            continue
+        # the latest by typing time, not by file line: a resumed session can copy an older
+        # message below a newer one; on equal times the later line wins
+        at = ownerword.typed_at(m)
+        if latest is None or (at is not None and (latest[0] is None or at >= latest[0])):
+            latest = (at, m, asked)
+    if latest is None:
+        return None
+    _at, m, (asked, goal) = latest
+    return m, asked, goal
+
+
+def _owner_call_for(conn, session, path, rank):
+    """(goal, owner_word) when the latest owner `/autodrive` call in the transcript at `path`,
+    typed after the latest level decision, names exactly `rank`; else None. The owner_word row is
+    the one the other owner-word writes store, so `ownerword.decision_is_owner` re-reads it."""
+    latest = _latest_owner_call(conn, session, path)
+    if latest is None:
+        return None
+    m, asked, goal = latest
+    if asked != rank:
+        return None
+    word = {"path": "session", "transcript": path, "line": m["line"],
+            "timestamp": m["timestamp"], "quote": m["text"].strip(),
+            "answer": OFF if rank == OFF else "L%d" % rank}
+    return goal, word
+
+
+def owner_raise(conn, session, rank, *, root=None, environ=None, isatty=None, read=None):
+    """Prove the OWNER asked to raise `session` to `rank`, or raise ownerword.OwnerWordRefusal.
+    Returns (goal, owner_word): the goal the owner typed with the command ("" when none, and
+    always "" on the terminal path) and the owner_word row the decision stores. Writes nothing.
+
+    Raising your own level is not allowed (CLAUDE.md rule 6). The two owner-word paths of
+    `alpaca.ownerword` apply:
+      * inside an agent session (`ownerword.real_session` names one), `session` must be that
+        session (OWNER-WORD-SESSION), its transcript must be the one its first session-start
+        recorded (OWNER-WORD-NO-TRANSCRIPT), and the latest owner `/autodrive` call in it, typed
+        after the latest level decision for the session, must name exactly L<rank>
+        (OWNER-WORD-LEVEL-RAISE). This is the same test `account_raise` applies.
+      * with no agent session, the terminal path: no agent marker in the environment, stdin a
+        terminal, and the person types L<rank> when asked (OWNER-WORD-NOT-TERMINAL otherwise).
+    `environ`, `isatty` and `read` are for tests."""
+    from alpaca import ownerword
+    label = OFF if rank == OFF else "L%d" % rank
+    real = ownerword.real_session(environ)
+    if real is None:
+        word = ownerword.human_write(conn, session, OWNER_ACTOR, subject=label, answer="yes",
+                                     quote="", root=_root(root), environ=environ, isatty=isatty,
+                                     read=read)
+        return "", word
+    if session != real:
+        raise ownerword.OwnerWordRefusal(
+            ownerword.R_SESSION, "this call runs in session %s but names session %s; only the "
+            "owner of a session raises its level" % (real, session))
+    path = ownerword.transcript_path(conn, session, _root(root), environ)
+    found = _owner_call_for(conn, session, path, rank)
+    if found is None:
+        raise ownerword.OwnerWordRefusal(
+            ownerword.R_LEVEL_RAISE, "no owner message of session %s typed after its latest level "
+            "decision is an /autodrive call for %s" % (session, label))
+    return found
+
+
+def request(conn, session, n, goal, actor=ACTOR, *, root=None, environ=None, isatty=None,
+            read=None):
+    """Record a level someone ASKED for (`session level`, `session start --level`).
+
+    A drop, OFF at or below the level in force, or the level already in force records as `set_local` always did: dropping to a
+    safer level needs no owner words. A raise above the level in force for the session records
+    only on the owner's own words (`owner_raise`), under the actor `owner` with that owner_word
+    row and a pointer to it; the goal is the one the owner typed with the command, else `goal`.
+    Otherwise ownerword.OwnerWordRefusal is raised and nothing is written. A level off L1-L6
+    raises ValueError."""
+    if str(n).strip().upper() == OFF:
+        # OFF is the default level. Below it, OFF would lift the level: that is a raise, and it
+        # needs the owner's own `/autodrive off` (or OFF typed at a terminal) like any other.
+        if default_level(root) <= in_force(conn, session, root=root):
+            return set_local(conn, session, OFF, goal, actor=actor, root=root)
+        owner_goal, word = owner_raise(conn, session, OFF, root=root, environ=environ,
+                                       isatty=isatty, read=read)
+        pointer = ("%s:%s" % (word["transcript"], word["line"]) if word.get("path") == "session"
+                   else "terminal: the owner typed OFF")
+        return set_local(conn, session, OFF, goal, actor=OWNER_ACTOR, root=root, owner_word=word,
+                         pointer=pointer)
+    rank = defaults.level_num(n)
+    if not (MIN_LEVEL <= rank <= MAX_LEVEL):
+        raise ValueError("autodrive level out of the L1-L6 band: %r" % (n,))
+    if rank <= in_force(conn, session, root=root):
+        return set_local(conn, session, rank, goal, actor=actor, root=root)
+    owner_goal, word = owner_raise(conn, session, rank, root=root, environ=environ,
+                                   isatty=isatty, read=read)
+    if word.get("path") == "session":
+        pointer = "%s:%s" % (word["transcript"], word["line"])
+    else:
+        pointer = "terminal: the owner typed L%d" % rank
+    return set_local(conn, session, rank, owner_goal or goal, actor=OWNER_ACTOR, root=root,
+                     owner_word=word, pointer=pointer)
+
+
+def _latest_decision_ts(conn, session):
+    """The ISO timestamp of the latest level decision for `session`, or None."""
+    r = conn.execute(
+        "SELECT ts FROM decisions WHERE session=? AND kind=? ORDER BY id DESC LIMIT 1",
+        (session, DECISION_KIND)).fetchone()
+    return r["ts"] if r is not None else None
 
 
 def latest_decision_epoch(conn, session):
@@ -292,13 +498,21 @@ def mirror(conn, session, *, root=None, actor=ACTOR):
     when nothing changed. Called from the SessionStart, UserPromptSubmit, PostToolUse and Stop
     hooks, so a level change reaches the record on the next boundary or tool call, and before the
     Stop hook decides whether to refuse a stop. OFF mirrors as the default-level. A drop written to
-    the account dir (`account_drop`) wins over the project-local file and rewrites it.
+    the account dir (`account_drop`) wins over the project-local file and rewrites it. A raise
+    written to the account dir (`account_raise`) lands only on the owner's own `/autodrive` call in
+    this session's transcript; it is recorded under the actor `owner` with that owner_word row and
+    rewrites the project-local file the same way.
     """
     rank, goal = skill_state(session, root=root)
     drop = account_drop(conn, session, root=root)
     if drop is not None:
         # rewrite the project-local file too, so the next mirror does not read the old level back
         return set_local(conn, session, drop, "", actor=actor, root=root)
+    raised = account_raise(conn, session, root=root)
+    if raised is not None:
+        n, owner_goal, word = raised
+        return set_local(conn, session, n, owner_goal, actor=OWNER_ACTOR, root=root,
+                         owner_word=word, pointer="%s:%s" % (word["transcript"], word["line"]))
     if rank is None:
         return None                              # no /autodrive call: default-level, no op opened
     if rank == OFF:

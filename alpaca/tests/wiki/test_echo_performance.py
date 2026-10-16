@@ -7,10 +7,10 @@ def test_short_query_does_not_materialize_large_candidate_unions():
     query = ' '.join('q%d' % i for i in range(100))
     for i in range(20):
         index.add(str(i), query + ' ' + ' '.join('extra%d-%d' % (i, j) for j in range(2000)))
-    class LargeTokens(set):
-        def __ror__(self, other):
-            raise AssertionError('large candidate union allocated for a provably dissimilar transcript')
-    index._tokens = {key:LargeTokens(value) for key, value in index._tokens.items()}
+    class Tokens(list):
+        def __getitem__(self, slot):
+            raise AssertionError('the tokens of a provably dissimilar transcript were read')
+    index._tok = Tokens(index._tok)
     assert index.detect(query) == ('original', None, None)
 
 
@@ -38,10 +38,10 @@ def test_current_document_candidates_do_not_require_individual_metadata_scans():
     query = 'common query marker token'
     for i in range(2000):
         index.add('self-%d' % i, query+' extra-%d' % i, 'current')
-    class DocumentLookup(dict):
-        def get(self, *args):
+    class DocumentLookup(list):
+        def __getitem__(self, *args):
             raise AssertionError('per-block document lookup during current-document exclusion')
-    index._doc = DocumentLookup(index._doc)
+    index._docs = DocumentLookup(index._docs)
     assert index.detect(query, exclude_doc_id='current') == ('original', None, None)
     index.add('external', 'token marker query common extra', 'other')
     assert index.detect(query, exclude_doc_id='current') == ('restates', 'external', None)
@@ -59,12 +59,13 @@ def test_large_dissimilar_corpus_skips_individual_token_reads():
     extra = ' '.join('extra%d' % i for i in range(100))
     for i in range(3000):
         index.add('large-%d' % i, query+' '+extra+' marker-%d' % i)
-    class Tokens(dict):
-        def __getitem__(self, key):
-            if key.startswith('large-'):
+    large = {index._slot['large-%d' % i] for i in range(3000)}
+    class Tokens(list):
+        def __getitem__(self, slot):
+            if slot in large:
                 raise AssertionError('provably dissimilar candidate token set was read')
-            return super().__getitem__(key)
-    index._tokens = Tokens(index._tokens)
+            return super().__getitem__(slot)
+    index._tok = Tokens(index._tok)
     assert index.detect(query) == ('original', None, None)
     index.add('match', query+' extra', 'other')
     assert index.detect(query) == ('restates', 'match', None)
@@ -84,9 +85,11 @@ def test_bulk_load_builds_the_same_index_as_add():
     for block_id, text, doc_id in rows:
         added.add(block_id, text, doc_id)
     loaded.load(rows)
-    for name in ('_doc', '_by_doc', '_by_size', '_norm', '_tokens', '_exact', '_postings'):
-        assert dict(getattr(loaded, name)) == dict(getattr(added, name)), name
+    assert loaded.entries() == added.entries()
+    for name in ('_ids', '_docs', '_size', '_length', '_hash', '_text', '_tok', '_vocab', '_df', '_post',
+                 '_exact', '_by_doc'):
+        assert getattr(loaded, name) == getattr(added, name), name
     text = rows[5][1]
     assert loaded.detect(text, 0.8, rows[5][2]) == added.detect(text, 0.8, rows[5][2])
     loaded.remove('b5'); added.remove('b5')
-    assert dict(loaded._by_doc) == dict(added._by_doc) and dict(loaded._by_size) == dict(added._by_size)
+    assert loaded.entries() == added.entries() and loaded._by_doc == added._by_doc

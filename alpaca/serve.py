@@ -51,6 +51,14 @@ SPEED_SAMPLES = 4096         # memory guard on the hub speed reads kept (t-590);
 #: The reader went away mid-response: counted as a disconnect, never as a server failure (t-590).
 CLIENT_GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
 POLL_S = 0.7                 # watcher cadence; also the debounce floor for pushes
+SCAN_MIN_S = 5.0             # the watcher re-reads the file inputs (transcript stats and the library walk)
+                             # at most this often; the record part is read every tick (t-670)
+VIEW_GRACE_S = 300           # a viewer request (`Live.touch`) or a closed event stream keeps the watcher at
+                             # viewer cadence this long; past it, with no stream open, the hub is unwatched
+IDLE_POLL_S = 5.0            # unwatched: the watcher ticks this often; a viewer's return wakes it at once
+SCAN_IDLE_S = 60             # unwatched: the file inputs and the library are read at most this often
+FOLD_IDLE_S = 900            # unwatched: the analytics fold runs at most this often (GAPS_MIN_S); a returning
+                             # viewer gets the last fold at once and the new one as a push (t-670)
 FOLD_MIN_S = 60              # the watcher refolds analytics at most this often (a fold reads every
                              # transcript: 16 s of CPU on this record, and live sessions change
                              # its inputs every few seconds, so an unthrottled watcher never rests)
@@ -58,6 +66,8 @@ FOLD_STALL_S = 3 * FOLD_MIN_S  # a fold still running after this long reports th
 BOARD_MIN_S = 15             # the watcher rebuilds the status board at most this often; each new
                              # board is a live push that makes open pages re-render, so match the
                              # pages' own 15 s refresh
+BOARD_IDLE_S = 60            # unwatched: the board is rebuilt at most this often (busy sessions move the
+                             # record every second; no page is open to take the push) (t-680)
 GAPS_MIN_S = 900             # without a viewer, recompute the index for the pricing gap notice this often
 INDEX_VIEW_S = 600           # a viewer's index request keeps the watcher warming the index this long
 DATA_WAIT_S = 60             # an analytics request waits this long for the first fold
@@ -508,40 +518,46 @@ def _overview_head(root):
         conn.close()
 
 
-def _data_sig(root):
-    """Revision of exactly the inputs consumed by the analytics fold.
+def _record_parts(conn):
+    """The record's share of the input signature: the event-chain head, the session rows and meta.
 
     SQLite's main database file can stay unchanged while committed events live in its WAL, so a
     main-file mtime is not a record revision. The event-chain head is durable in the same query
-    path that the fold reads. Transcripts are taken by size and nanosecond mtime; the two small
-    config files, which a hand edit can rewrite at the same length, are content hashed.
+    path that the fold reads. Every read here is keyed or small, so the watcher takes it every
+    POLL_S on any record size: the event head is the count, the newest id and that row's hash.
+    No index covers `hash`, and a MAX over it read every event row on every tick (t-670: about
+    200 ms of mostly system time a tick on a 2.3 GB record).
+    """
+    event_head = conn.execute(
+        "SELECT (SELECT COUNT(*) FROM events), COALESCE((SELECT MAX(id) FROM events), 0), "
+        "COALESCE((SELECT hash FROM events ORDER BY id DESC LIMIT 1), '')"
+    ).fetchone()
+    session_state = conn.execute(
+        "SELECT COUNT(*), COALESCE(MAX(sid), ''), COALESCE(MAX(started), ''), "
+        "COALESCE(MAX(ended), ''), COALESCE(MAX(last_beat), ''), COALESCE(SUM(beats), 0) "
+        "FROM sessions"
+    ).fetchone()
+    # The analytics fold consumes per-session operator labels and hook-cost
+    # summaries from meta. Hash the durable key/value set so a hook's
+    # post-fold timing write triggers the next refresh even without an event.
+    return [("events", tuple(event_head)), ("sessions", tuple(session_state)),
+            ("meta", [tuple(row) for row in conn.execute("SELECT key, value FROM meta ORDER BY key")])]
+
+
+def _file_parts(root, conn=None):
+    """The files' share of the input signature: every transcript the fold parses (size and
+    nanosecond mtime) and each Codex capture's source revision.
+
+    This is one stat (and a realpath) per transcript input, so its cost grows with the transcript
+    count: the watcher reads it at most every SCAN_MIN_S (`Live._input_sig`).
     """
     parts = []
-    if os.path.isfile(paths.db_path(root)):
-        conn = db.connect_readonly(root)
-        try:
-            event_head = conn.execute(
-                "SELECT COUNT(*), COALESCE(MAX(id), 0), COALESCE(MAX(hash), '') FROM events"
-            ).fetchone()
-            session_state = conn.execute(
-                "SELECT COUNT(*), COALESCE(MAX(sid), ''), COALESCE(MAX(started), ''), "
-                "COALESCE(MAX(ended), ''), COALESCE(MAX(last_beat), ''), COALESCE(SUM(beats), 0) "
-                "FROM sessions"
-            ).fetchone()
-            parts.append(("events", tuple(event_head)))
-            parts.append(("sessions", tuple(session_state)))
-            # The analytics fold consumes per-session operator labels and hook-cost
-            # summaries from meta. Hash the durable key/value set so a hook's
-            # post-fold timing write triggers the next refresh even without an event.
-            parts.append(("meta", [tuple(row) for row in conn.execute(
-                "SELECT key, value FROM meta ORDER BY key")]))
-            transcripts = build_index._transcripts(root, conn)
-            from alpaca.analytics.detail import source_revision
-            for sid in sorted(transcripts):
-                if db.meta_get(conn, "operator:" + sid) == "codex":
-                    parts.append(("codex-capture", sid, source_revision(root, sid)))
-        finally:
-            conn.close()
+    if conn is not None:
+        transcripts = build_index._transcripts(root, conn)
+        from alpaca.analytics.detail import source_revision
+        for sid in sorted(transcripts):
+            if db.meta_get(conn, "operator:" + sid) == "codex":
+                parts.append(("codex-capture", sid, source_revision(root, sid)))
     else:
         transcripts = {}
         tdir = paths.transcript_dir(root)
@@ -557,13 +573,46 @@ def _data_sig(root):
         except OSError:
             rev = None
         parts.append(("transcript", sid, role, os.path.realpath(path), rev))
-    # `build_index._fold` loads this project configuration. Include the template
-    # instance identity too, because `project.load` overlays it for templates.
+    return parts
+
+
+def _config_parts(root):
+    """The two small config files, content hashed: a hand edit can rewrite them at the same length.
+    `build_index._fold` loads this project configuration, and the board reads the profile it names;
+    the template instance identity is included too, because `project.load` overlays it."""
+    parts = []
     for rel in ("project.yaml", os.path.join(".alpaca", "instance.json")):
         path = os.path.join(root, rel)
         if os.path.isfile(path):
             parts.append(("config", rel, _file_revision(path)))
-    return util.sha256_hex(util.canonical_json(parts))
+    return parts
+
+
+def _input_parts(root, files=True):
+    """(record and config parts, digest of the file parts) of the input signature; the digest is
+    None when `files` is false. Without a record there are only the config parts."""
+    def digest(parts):
+        return util.sha256_hex(util.canonical_json(parts))
+    if os.path.isfile(paths.db_path(root)):
+        conn = db.connect_readonly(root)
+        try:
+            return (_record_parts(conn) + _config_parts(root),
+                    digest(_file_parts(root, conn)) if files else None)
+        finally:
+            conn.close()
+    return _config_parts(root), (digest(_file_parts(root)) if files else None)
+
+
+def _signature(record, files):
+    """The input signature from the record parts and the digest of the file parts."""
+    return util.sha256_hex(util.canonical_json([record, files]))
+
+
+def _data_sig(root):
+    """Revision of exactly the inputs consumed by the analytics fold: the record parts
+    (`_record_parts`), the config files (`_config_parts`) and the file parts (`_file_parts`), all
+    read now."""
+    return _signature(*_input_parts(root))
 
 
 # ---- profile live state (never a projection) ------------------------------
@@ -652,6 +701,7 @@ class Live:
         self.board_json = "{}"
         self.board_rev = ""
         self._online_board_rev = ""
+        self._work_of = None                   # (board_json, its work sessions) for _liveness_rev
         self.pricing_rev = ""                  # ratecards.revision: recorded rate cards reprice analytics
         self._pricing_sig = None
         self._index = None                     # ((data_rev, pricing_rev), json body, etag) of the index
@@ -683,7 +733,14 @@ class Live:
         self._index_requested_at = 0.0         # last /hub/analytics-index.json request (HTTP handler only)
         self._warm_pending = False             # a warm was due but skipped; the watcher re-checks it
         self._data_sig = None
+        self._input_files = None               # the digest of the file parts the watcher last read
+        self._input_files_at = 0.0             # when it read them (monotonic)
+        self._board_input = None               # the record and config signature of this tick: the board's input
+        self._tick_sig = None                  # the input signature the watcher last read, and its board part:
+        self._tick_board = None                # a tick with neither the board nor the fold due reuses them (t-680)
+        self._wake = threading.Event()         # a viewer's return ends the watcher's unwatched sleep
         self._lib_sig = None
+        self._lib_at = 0.0                     # when the watcher last walked the library (monotonic)
         self._job_sig = None
         self.job_gen = 0
         self.health = {"state": "starting", "detail": "first analytics fold pending"}
@@ -730,12 +787,18 @@ class Live:
         stream cannot open, so a poll of the board data, of a profile route or of health counts
         the same as an open stream.
         """
+        unwatched = not self.watched()
         with self.lock:
             self.idle_since = time.time()
+        if unwatched:
+            self._wake.set()
 
     def client_enter(self):
+        unwatched = not self.watched()
         with self.lock:
             self.clients += 1
+        if unwatched:
+            self._wake.set()
 
     def client_exit(self):
         with self.lock:
@@ -747,6 +810,12 @@ class Live:
         with self.lock:
             return 0 if self.clients > 0 else time.time() - self.idle_since
 
+    def watched(self):
+        """True while a viewer is here: an open event stream, or a viewer request (or a closed
+        stream) within VIEW_GRACE_S. An unwatched hub keeps its watcher at the IDLE cadences: no
+        page is open to show a push, and the first request or stream wakes it (t-670)."""
+        return self.idle_for() < VIEW_GRACE_S
+
     def _board_live(self):
         """The cached record projection with request-time liveness on each work session."""
         from alpaca import sessions_view
@@ -757,6 +826,24 @@ class Live:
         for session in (current.get("sessions") or {}).get("work") or []:
             session["active"] = sessions_view.is_active(dict(session, **{"class": sessions_view.WORK}), now)
         return board
+
+    def _liveness_rev(self):
+        """What board_snapshot's revision adds to the cached board: the board revision and the
+        request-time liveness of each work session. It moves exactly when that revision does, at
+        a fraction of its cost: the work sessions are parsed once per board, not the whole board
+        every tick (t-680)."""
+        from alpaca import sessions_view
+        with self.lock:
+            board_json, board_rev = self.board_json, self.board_rev
+        cached = self._work_of
+        if cached is None or cached[0] is not board_json:
+            board = json.loads(board_json)
+            work = [dict(session) for session in
+                    (((board.get("pulse") or {}).get("now") or {}).get("sessions") or {}).get("work") or []]
+            self._work_of = cached = (board_json, work)
+        now = datetime.datetime.fromtimestamp(time.time(), datetime.timezone.utc).isoformat()
+        return board_rev, tuple(sessions_view.is_active(dict(session, **{"class": sessions_view.WORK}), now)
+                                for session in cached[1])
 
     def live_work(self):
         """/hub/live-work.json as (body, etag): the work sessions of /board/data.json's pulse, with the
@@ -897,25 +984,38 @@ class Live:
 
     def refresh(self, throttle=False, fold=True):
         """Recompute what changed. The watcher passes throttle=True so the analytics fold runs at
-        most every FOLD_MIN_S and the board at most every BOARD_MIN_S; a direct call recomputes
+        most every FOLD_MIN_S and the board at most every BOARD_MIN_S (FOLD_IDLE_S and BOARD_IDLE_S
+        unwatched), and the inputs are read only when one of them is due; a direct call recomputes
         at once, except that a direct call made while the watcher's fold is still running skips its own
         fold (one fold at a time). fold=False skips the analytics fold (the server's fast first
         refresh)."""
         changed = board_moved = False
         with self.lock:
             self.checked_at = time.time()
-        try:
-            dsig = _data_sig(self.root)
-        except Exception as e:
-            self.failure("input_revision", e)
-            detail = "dashboard input revision failed: %s; retrying" % type(e).__name__
-            state = "stale" if self.data_rev else "error"
-            changed = self._set_health(state, detail) or changed
-            sys.stderr.write("alpaca serve: %s\n" % detail)
-            dsig = None
-        with self.lock:
             retry_degraded = self.health.get("state") != "fresh"
+        watched = self.watched()
         now = time.time()
+        board_due = not throttle or now - self._board_at >= (BOARD_MIN_S if watched else BOARD_IDLE_S)
+        fold_due = fold and (not throttle or now - self._fold_at >= (
+            FOLD_MIN_S if watched else FOLD_IDLE_S)) and not self._folding()
+        # A throttled tick reads the inputs only when what they feed may run: the record and config
+        # parts when the board or the fold is due, the transcript stats only when the fold is. Busy
+        # sessions move the record every second, and the board waits BOARD_MIN_S and the fold
+        # FOLD_MIN_S anyway; between, the last signature stands (t-680).
+        if board_due or fold_due or self._tick_sig is None:
+            self._board_input = None
+            try:
+                dsig = self._input_sig(throttle, watched, fold_due)
+                self._tick_sig, self._tick_board = dsig, self._board_input
+            except Exception as e:
+                self.failure("input_revision", e)
+                detail = "dashboard input revision failed: %s; retrying" % type(e).__name__
+                state = "stale" if self.data_rev else "error"
+                changed = self._set_health(state, detail) or changed
+                sys.stderr.write("alpaca serve: %s\n" % detail)
+                dsig = self._tick_sig = self._tick_board = None
+        else:
+            dsig, self._board_input = self._tick_sig, self._tick_board
         index_moved = False
         # A recorded rate card is an event, so the pricing revision can only move when the input
         # signature (which covers the event-chain head) moves. It reprices every session analysis.
@@ -931,8 +1031,10 @@ class Live:
             except Exception as e:
                 self.failure("pricing", e)
         # The status board first: it is the cockpit's payload and takes a fraction of a second.
-        if dsig is not None and (dsig != (self._board_sig or self._data_sig) or not self.board_rev) and (
-                not throttle or now - self._board_at >= BOARD_MIN_S):
+        # The board renders from the record and the config files only, so a transcript that moved
+        # does not rebuild it (t-670).
+        bsig = self._board_input or dsig
+        if dsig is not None and board_due and (bsig != (self._board_sig or self._data_sig) or not self.board_rev):
             try:
                 # The status board payload is the same projection `alpaca export` writes,
                 # rendered from the record on this watcher thread. Its generation stamp is volatile
@@ -949,7 +1051,7 @@ class Live:
                     if brev != self.board_rev:
                         self.board_json, self.board_rev = bj, brev
                         changed = board_moved = True
-                self._board_sig = dsig
+                self._board_sig = bsig
                 self._board_at = now
             except Exception as e:
                 self.failure("projection", e)
@@ -957,8 +1059,7 @@ class Live:
                 state = "stale" if self.board_rev else "error"
                 changed = self._set_health(state, detail) or changed
                 sys.stderr.write("alpaca serve: board failed: %s\n" % detail)
-        if fold and dsig is not None and (dsig != self._data_sig or not self.data_rev or retry_degraded) and (
-                not throttle or now - self._fold_at >= FOLD_MIN_S) and not self._folding():
+        if fold_due and dsig is not None and (dsig != self._data_sig or not self.data_rev or retry_degraded):
             self._fold_at = now
             if throttle:
                 # The watcher hands the fold to its own thread (one at a time), so the board,
@@ -974,12 +1075,18 @@ class Live:
                     self.data_ready.set()
                 changed = fold_changed or changed
                 index_moved = fold_index or index_moved
-        try:
-            items = scan_library(self.root)
-            lsig = _lib_sig(items)
-        except Exception as error:
-            self.failure("library", error)
-            items, lsig = None, self._lib_sig
+        items, lsig = None, self._lib_sig
+        walk_at = time.monotonic()
+        # The library walk visits every file of the tree: a throttled tick walks it at most every
+        # SCAN_MIN_S (SCAN_IDLE_S unwatched), a direct refresh always.
+        if not throttle or not self.lib_rev or walk_at - self._lib_at >= (SCAN_MIN_S if watched else SCAN_IDLE_S):
+            try:
+                items = scan_library(self.root)
+                lsig = _lib_sig(items)
+                self._lib_at = walk_at
+            except Exception as error:
+                self.failure("library", error)
+                items, lsig = None, self._lib_sig
         if items is not None and (lsig != self._lib_sig or not self.lib_rev):
             lj = json.dumps(items, ensure_ascii=True)
             rev = util.sha256_hex(lj)
@@ -1002,7 +1109,7 @@ class Live:
                 self.cond.notify_all()
         # The browser can remain on SSE without polling. A liveness expiry must push
         # a board revision even when the underlying record and its export never changed.
-        online_revision = self.board_snapshot()[1]
+        online_revision = self._liveness_rev()
         if online_revision != self._online_board_rev:
             self._online_board_rev = online_revision
             changed = True
@@ -1014,6 +1121,26 @@ class Live:
             self._warm_index()
         if board_moved and self.clients:
             self._warm_overview()
+
+    def _input_sig(self, throttle=False, watched=True, files_due=True):
+        """`_data_sig` as the watcher takes it. The record parts are read on every call, so a new
+        event, session or meta write moves the signature on the next tick. The file parts (one stat
+        per transcript input) are read on a direct refresh and at most every SCAN_MIN_S on a
+        throttled tick (SCAN_IDLE_S unwatched); in between the last ones read stand in, so a
+        transcript-only change reaches the signature at most that late. The fold it gates runs at
+        most every FOLD_MIN_S anyway. The record and config parts alone are the board's input,
+        left in `_board_input` (t-670). A throttled tick passes files_due false while the fold is
+        not due, and the last file parts stand in as well (t-680)."""
+        now = time.monotonic()
+        scan = SCAN_MIN_S if watched else SCAN_IDLE_S
+        reuse = throttle and self._input_files is not None and (now - self._input_files_at < scan or not files_due)
+        record, files = _input_parts(self.root, files=not reuse)
+        self._board_input = _signature(record, None)
+        if reuse:
+            files = self._input_files
+        else:
+            self._input_files, self._input_files_at = files, now
+        return _signature(record, files)
 
     def _warm_overview(self):
         """Compute the next overview on a background thread when the board moves and a viewer is
@@ -1653,7 +1780,9 @@ class Live:
 
     def watch(self):
         while True:
-            time.sleep(POLL_S)
+            # Unwatched, the tick slows to IDLE_POLL_S; a viewer's request or stream sets _wake.
+            self._wake.wait(POLL_S if self.watched() else IDLE_POLL_S)
+            self._wake.clear()
             self.refresh(throttle=True)
 
     def rev_blob(self):

@@ -411,6 +411,29 @@ _PROMPT = {
 }
 
 
+def _attach_hook():
+    """alpaca.attach.proofhook, or None when it cannot be loaded. A project that is not in attach mode
+    gets None from every function of it, so the proof code below is what it was for such a project."""
+    try:
+        from alpaca.attach import proofhook
+    except Exception:
+        return None
+    return proofhook
+
+
+def _app_git_lines(conn, root, subj) -> list:
+    """The `- app git:` header line of an attach task (op-062 t-650, R6), else []. Never cached: the
+    worktree changes with every commit."""
+    hook = _attach_hook()
+    if hook is None:
+        return []
+    try:
+        line = hook.header_line(root, subj["id"], conn)
+    except Exception:
+        return []
+    return ["- app git: %s" % line] if line else []
+
+
 def _header(conn, root, subj, win) -> list:
     head, branch, dirty = _git(root)
     git_line = "not a git checkout"
@@ -430,6 +453,7 @@ def _header(conn, root, subj, win) -> list:
         "- host: %s" % (platform.node() or "(unknown)"),
         "- project: %s" % os.path.basename(os.path.abspath(root)),
         "- git: %s" % git_line,
+    ] + _app_git_lines(conn, root, subj) + [
         "",
         "The %s section and the sections from %s to %s are written by the person or agent who "
         "did the work. Appendix A is "
@@ -834,7 +858,12 @@ def _not_kept(root, path):
     parts = os.path.relpath(real, base).split(os.sep)
     runtime = os.path.basename(paths.runtime_dir(base))
     if any(part.startswith(".") and not (i == 0 and part == runtime) for i, part in enumerate(parts)):
-        return HIDDEN_NOT_KEPT
+        # under an attached repository its own dot folders (`.github/`, `.husky/`) are code a reviewer
+        # needs; the copy goes in `.closed`, never served (`_served_copy`), and the credential names
+        # stay refused (op-062 t-650)
+        hook = _attach_hook()
+        if not (hook and hook.is_attach_path(root, real) and hook.dot_part_allowed(root, real)):
+            return HIDDEN_NOT_KEPT
     try:                                        # no link followed, and a pipe never waited on
         fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
                      | getattr(os, "O_CLOEXEC", 0))
@@ -854,6 +883,9 @@ def _served_copy(root, path) -> bool:
     browser serves the file itself from where it is (`paths.browser_serves`, the browser's own
     rule). Any other copy goes in the kept folder's `CLOSED_KEPT` folder, which no reader serves
     (op008/followups review B-2)."""
+    hook = _attach_hook()
+    if hook and hook.is_attach_path(root, path):
+        return False                            # product code of the attached repo is never served (op-062 t-650)
     return paths.browser_serves(root, os.path.realpath(path))
 
 
@@ -1146,8 +1178,49 @@ def seal(conn, root, ident, *, session=None, verify=False) -> dict:
             taken = verify_gate.take_tree(root, pathspec=spec)
         except ValueError as exc:
             raise Refusal([str(exc)])
-    keep_evidence(root, subj, got["evidence"])
-    tree = None if taken is None else verify_gate.keep_tree(root, kept_dir(root, subj), taken)
+    # an attach task (op-062 t-650, R6): the attached repo's head and branch go in the seal, and in
+    # verification scope its work-branch diff is taken too, before the first write. A seal that cannot
+    # read the worktree, or whose repo config runs commands, is refused here. A task with an attach record,
+    # a branch file or a worktree is never sealed as a plain task (the hook raises instead of answering
+    # None), and the diff is taken before the block, so both name the head the diff was taken at.
+    att, app_taken, sealing = None, None, False
+    hook = _attach_hook()
+    if hook is None:
+        if os.path.lexists(os.path.join(root, ".alpaca", "attach")):
+            raise Refusal(["ATTACH-KEPT the attach code could not be loaded, so this project cannot be sealed"])
+    else:
+        try:
+            if scope and role not in ("attempt", "repair"):
+                app_taken = hook.take_app_patch(root, ident)
+            att = hook.seal_block(root, ident, conn)
+            if att and app_taken is not None and app_taken[0] != att["head"]:
+                raise ValueError("ATTACH-WORKTREE the worktree of %s moved during the seal; seal again" % ident)
+            if att and app_taken is not None and app_taken[2] != att["base"]:
+                raise ValueError("ATTACH-WORKTREE the record of %s changed during the seal (the diff is against "
+                                 "%s, the seal names %s); seal again" % (ident, app_taken[2][:12], att["base"][:12]))
+            sealing = hook.attach_project(root)
+            if sealing:
+                bad = hook.kept_folder_problem(root, kept_dir(root, subj))
+                if bad:
+                    raise ValueError("ATTACH-WORKTREE %s" % bad)
+            if app_taken is not None and not att:
+                raise ValueError("ATTACH-WORKTREE the attach block of %s vanished during the seal" % ident)
+            if app_taken is not None and taken is None:
+                raise ValueError("ATTACH-WORKTREE the studio has no commit, so the tree patch and the app "
+                                 "patch cannot be sealed together; commit the studio files first")
+        except ValueError as exc:
+            raise Refusal([str(exc)])
+    if sealing:
+        # an attach project keeps its files in a fresh folder written by descriptor and swapped in last
+        # (alpaca/attach/sealkeep.py): a refusal here comes before the record event and leaves the latest
+        # seal's kept folder as it was
+        try:
+            tree = hook.keep(root, subj, got["evidence"], taken, app_taken)
+        except ValueError as exc:
+            raise Refusal([str(exc)])
+    else:
+        keep_evidence(root, subj, got["evidence"])
+        tree = None if taken is None else verify_gate.keep_tree(root, kept_dir(root, subj), taken)
     payload = {
         "path": _rel(root, path),
         "sha256": contract.sha256_bytes(path),
@@ -1158,9 +1231,15 @@ def seal(conn, root, ident, *, session=None, verify=False) -> dict:
     if scope:
         payload["verify_scope"] = scope
         payload["tree"] = tree
+    if att:
+        payload["attach"] = att
     db.append_event(conn, session=session or "cli", actor="agent", kind=KIND,
                     op=subj.get("op"), ref=subj["id"], data=payload)
-    util.write_text(path + ".seal.json", json.dumps(payload, indent=1, sort_keys=True) + "\n")
+    seal_text = json.dumps(payload, indent=1, sort_keys=True) + "\n"
+    if sealing:
+        hook.write_seal_copy(root, path, seal_text)
+    else:
+        util.write_text(path + ".seal.json", seal_text)
     return payload
 
 

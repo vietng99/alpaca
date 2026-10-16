@@ -130,8 +130,11 @@ def test_no_engine_file_loads_a_module_by_a_computed_name():
     alpaca/cli.py's loop over its own VERB_MODULES tuple: every `bin/alpaca` process imports every
     verb module, the hub's `serve` and `hub_publish` among them, and those two are the cut of
     section 12.5 (not pinned, because another session edits them); the guard and rule S15 still name
-    them, and the proof lists this as part of residual R12 (c)."""
-    allowed = {"alpaca/research/session_engine.py", "alpaca/cli.py"}
+    them, and the proof lists this as part of residual R12 (c). `alpaca/attach/cli.py` is the same loop for
+    the attach verb group (`MODULES`, a literal tuple, loaded by `_module`): `ops.py` imports `attach.worktree`
+    inside the claim hook, `attach.baseline` is in that closure, and its `run` imports `finish` from that file
+    (op-062 t-648; no engine step runs an `alpaca attach` verb)."""
+    allowed = {"alpaca/research/session_engine.py", "alpaca/cli.py", "alpaca/attach/cli.py"}
     bad = []
     for rel in sorted(f for f in eng.engine_set(REPO, with_pyc=False) if f.endswith(".py")):
         r = os.path.relpath(rel, REPO)
@@ -445,7 +448,7 @@ def test_wrappers_pass_isolated():
     settings = json.load(open(os.path.join(REPO, ".claude", "settings.json"), encoding="utf-8"))
     commands = [h["command"] for entries in settings["hooks"].values() for g in entries
                 for h in g["hooks"]]
-    assert len(commands) == 12          # temp_guard joined the Bash PreToolUse hooks (op-020)
+    assert len(commands) == 13          # temp_guard joined the Bash PreToolUse hooks (op-020), sandbox_guard the write tools (op-059 t-695)
     assert all("bin/alpaca-python --isolated -m alpaca.hooks." in c for c in commands), commands
     assert any("research_guard" in c for c in commands) and any("subagent_start" in c for c in commands)
 

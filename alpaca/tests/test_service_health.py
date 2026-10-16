@@ -283,7 +283,7 @@ def test_cached_board_activity_expires_without_refresh_or_record_writes(project,
 
 def test_activity_expiry_pushes_a_board_revision_without_a_new_record(project, monkeypatch):
     monkeypatch.setattr(serve.time, 'time', lambda: 1000.0)
-    monkeypatch.setattr(serve, '_data_sig', lambda root: 'stable')
+    monkeypatch.setattr(serve.Live, '_input_sig', lambda self, *_: 'stable')
     live = serve.Live(project)
     live._data_sig = 'stable'
     live.data_rev = 'folded'

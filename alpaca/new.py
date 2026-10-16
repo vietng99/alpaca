@@ -2,6 +2,7 @@
 
     alpaca new [--name NAME] [--dir DIR] [--who NAME:ROLE] [--what TEXT]
                [--no-git] [--no-bootstrap] [--no-serve] [--python PY]
+               [--attach SOURCE [--attach-gates-file PATH] [--attach-base BRANCH]]
 
 Asks for the project name and the working directory when they are not given (a relative DIR is
 read from the folder the command was run in), then:
@@ -16,6 +17,11 @@ read from the folder the command was run in), then:
      copy, each with the copy's own interpreter and root;
   6. starts the copy's hub (`bin/alpaca serve --detach`) and prints its localhost URL.
 
+With `--attach SOURCE` (a git URL or a local path) the studio runs beside an existing repository:
+after onboarding, and before doctor, the copy runs `alpaca attach init SOURCE`, which clones the
+repository into app/ (never into the studio's own files), senses its gates and writes the `attach:`
+block of project.yaml. The refusal of a non-empty DIR stays: the clone goes into a fresh studio.
+
 Every copy is its own installation, pinned to the Alpaca version it was made from.
 """
 import getpass
@@ -23,6 +29,7 @@ import importlib.util
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 
@@ -80,10 +87,13 @@ def _caller_dir():
 
 def _child_env():
     """The copy's commands run as that copy: nothing inherited may point them back at this one."""
+    from alpaca.watchdog.gitw import LOCAL_ENV
     env = dict(os.environ)
+    # LOCAL_ENV: variables that point git at another repository (a git hook exports GIT_DIR); with one
+    # set, `git init` in the copy would act on that repository and leave the copy with no .git of its own
     for key in ("ALPACA_ROOT", "ALPACA_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "CLAUDE_PROJECT_DIR",
                 "PYTHONPATH", "PYTHONHOME", "ALPACA_CALLER_CWD", "ALPACA_REGRESSION_SUITE_ACTIVE",
-                "VIRTUAL_ENV"):
+                "VIRTUAL_ENV", *LOCAL_ENV):
         env.pop(key, None)
     return env
 
@@ -158,14 +168,48 @@ def fill_readme(root, name):
     return True
 
 
+# How long a child gets to finish after a Ctrl-C before it is killed. subprocess.run waits 0.25 s, which cut
+# `alpaca attach init` off in the middle of its rollback (S8 of the t-675 report: 5 of 5 probe runs): the rollback
+# deletes the clone tree and then a handful of small files, and a clone of a large repository takes seconds to
+# delete on a slow disk. 60 s is far above that and still bounded: a child that ignores the Ctrl-C does not hold
+# the terminal for more than a minute, and a second Ctrl-C ends the wait at once.
+INTERRUPT_GRACE = 60.0
+
+
 def _run(args, cwd, env, label, check=True):
     print("alpaca new: %s" % label, flush=True)
-    res = subprocess.run(args, cwd=cwd, env=env, text=True, capture_output=True)
-    if res.returncode and check:
-        tail = (res.stdout + res.stderr).strip().splitlines()[-15:]
+    proc = subprocess.Popen(args, cwd=cwd, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    # Popen.communicate waits 0.25 s on its own before a Ctrl-C reaches this code, which delays the forward and
+    # can swallow a quick second Ctrl-C (t-681 confirm-r1, M1); zero hands the interrupt over at once.
+    proc._sigint_wait_secs = 0
+    try:
+        try:
+            stdout, stderr = proc.communicate()
+        except KeyboardInterrupt:
+            # the terminal sent the Ctrl-C to the child as well; a Ctrl-C sent to this process alone has not
+            # reached it, so it is forwarded, then the child is given time to undo what it did (INTERRUPT_GRACE)
+            _forward_interrupt(proc)
+            try:
+                proc.communicate(timeout=INTERRUPT_GRACE)
+            except (subprocess.TimeoutExpired, KeyboardInterrupt):
+                pass                                  # out of time, or a second Ctrl-C: the finally below kills it
+            raise
+    finally:
+        if proc.poll() is None:
+            proc.kill()                               # whatever ended this call, no child is left running
+            proc.wait()
+    if proc.returncode and check:
+        tail = (stdout + stderr).strip().splitlines()[-15:]
         print("\n".join("  " + line for line in tail))
-        raise RuntimeError("%s failed (exit %d)" % (label, res.returncode))
-    return res.stdout
+        raise RuntimeError("%s failed (exit %d)" % (label, proc.returncode))
+    return stdout
+
+
+def _forward_interrupt(proc):
+    try:
+        proc.send_signal(signal.SIGINT)
+    except OSError:
+        pass                                          # it has already ended
 
 
 def _alpaca(root, bootstrapped):
@@ -189,6 +233,33 @@ def hub_url(root, env, alpaca):
     return m.group(1) if m else None
 
 
+def _caller_path(raw):
+    """A path the caller typed, made absolute against the folder `alpaca new` was run in: the copy's
+    commands run in the copy, where a relative path would mean something else."""
+    return os.path.abspath(os.path.join(_caller_dir(), os.path.expanduser(raw)))
+
+
+def _attach_source(raw):
+    """The `--attach` source for the copy: a local folder becomes an absolute path, a URL stays as typed."""
+    path = _caller_path(raw)
+    return path if os.path.isdir(path) else raw
+
+
+def _attach_refusal(args):
+    """Why the --attach options cannot be used, or None. Each one is tested by `is not None`: a value that
+    is empty or blank is refused here, never dropped and never reported ok with no attach."""
+    given = (("the --attach source", args.attach), ("--attach-gates-file", args.attach_gates_file),
+             ("--attach-base", args.attach_base))
+    for label, value in given:
+        if value is not None and not value.strip():
+            return "%s is empty; give it a value or leave it out (an unset shell variable gives an empty one)" % label
+    if args.attach is None and (args.attach_gates_file is not None or args.attach_base is not None):
+        return "--attach-gates-file and --attach-base need --attach SOURCE; they do nothing without it"
+    if args.attach is not None and args.attach.strip().startswith("-"):
+        return "the --attach source starts with '-' and would be read as a git option"
+    return None
+
+
 @cli.command("new")
 def cmd_new(args):
     interactive = sys.stdin.isatty() and not args.yes
@@ -196,6 +267,22 @@ def cmd_new(args):
     if not name:
         print("GATE alpaca-new: FAIL (a project name is required: --name NAME)")
         return cli.USAGE
+    # "--attach" is asked for when it is given at all: an empty value (an unset shell variable) is a request
+    # too, so every test below is `is not None`, never a truth test
+    attach = args.attach is not None
+    refusal = _attach_refusal(args)
+    if refusal:
+        # refused before the copy is made, so no partial studio is left behind (attach init refuses it too)
+        print("GATE alpaca-new: FAIL (%s)" % refusal)
+        return cli.FAIL
+    if attach:
+        from alpaca import onboard_flow
+        refused = onboard_flow.setup_write_refusal(None, None, "new-attach")
+        if refused:
+            # the owner makes the choice in the first chat, after a setup card and a typed yes; a caller that is not the
+            # owner's own terminal does not attach on its own, and refusing here leaves no half-made studio behind
+            print("GATE alpaca-new: FAIL (%s) [%s]" % (refused[1], refused[0]))
+            return cli.FAIL
     default_dir = os.path.join(_caller_dir(), slug(name))
     raw_dir = args.dir or (_ask("Working directory", default_dir) if interactive else default_dir)
     target = os.path.abspath(os.path.join(_caller_dir(), os.path.expanduser(raw_dir)))
@@ -221,14 +308,31 @@ def cmd_new(args):
             print("alpaca new: README.md has no project-name block; left as shipped")
         if not args.no_git and shutil.which("git"):
             _run(["git", "init", "-q"], target, env, "git init")
+        if attach:
+            # the clone is kept out of the studio's commits by the studio's own .git/info/exclude (P2)
+            from alpaca.attach import gitops
+            if gitops.studio_kind(target) != "own":
+                raise RuntimeError("--attach needs a studio with a git repository of its own; %s has none "
+                                   "(do not combine --attach with --no-git or with git not installed)" % target)
         if not args.no_bootstrap:
             boot = ["bash", "setup/bootstrap.sh"]
             if args.python:
                 boot += ["--python", args.python]
             _run(boot, target, env, "bootstrap (local .venv, pinned requirements)")
         alpaca = _alpaca(target, not args.no_bootstrap)
-        _run(alpaca + ["onboard", "--name", name, "--who", args.who or _default_who(),
+        # provisional: the project is set up now, and the first chat (look at the owner's repo, one setup card,
+        # the owner's yes) is still due; `onboard apply` revises this setup after the yes
+        _run(alpaca + ["onboard", "--provisional", "--name", name, "--who", args.who or _default_who(),
               "--what", args.what or "%s, built with Alpaca." % name], target, env, "onboard")
+        if attach:
+            # options first, the source last behind "--": a source such as -h would otherwise be read by the
+            # child's argument parser as its own help option, which prints help and exits 0
+            _run(alpaca + ["attach", "init"]
+                 + (["--gates-file=" + _caller_path(args.attach_gates_file)]
+                    if args.attach_gates_file is not None else [])
+                 + (["--base=" + args.attach_base] if args.attach_base is not None else [])
+                 + ["--", _attach_source(args.attach)],
+                 target, env, "attach (clone the repository into the studio, sense its gates)")
         # doctor exits non-zero on a WARN too (a fresh copy has no transcript dir until its first
         # session), so the result is its ERROR lines, not its exit status
         doctor = _run(alpaca + ["doctor"], target, env, "doctor", check=False)
@@ -246,6 +350,7 @@ def cmd_new(args):
     elif not args.no_serve:
         print("Hub: start it with `bin/alpaca serve --detach`, then `bin/alpaca serve --status` prints its URL")
     print("Next: cd %s && claude   (or codex)" % target)
+    print("      Then tell it about your project: paste a git URL or a folder path, or say \"start empty\".")
     return cli.FAIL if errors else cli.PASS
 
 
@@ -261,6 +366,13 @@ def _parser(sub):
     p.add_argument("--no-git", action="store_true", help="skip git init")
     p.add_argument("--no-bootstrap", action="store_true", help="skip creating the local .venv")
     p.add_argument("--no-serve", action="store_true", help="do not start the hub")
+    p.add_argument("--attach", metavar="SOURCE",
+                   help="attach an existing repository (git URL or local path): clone it into app/ and "
+                        "write the attach: block; Alpaca files never go into it")
+    p.add_argument("--attach-gates-file", metavar="PATH",
+                   help="JSON list of {name, command (argv list), timeout} gates, instead of sensing them")
+    p.add_argument("--attach-base", metavar="BRANCH",
+                   help="integration branch of the attached repository (default: its HEAD branch)")
 
 
 cli.register_parser("new", _parser)

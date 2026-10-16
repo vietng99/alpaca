@@ -1402,11 +1402,13 @@ def _run_command(cx, *, stage_dir, wt, tag, repeat, stage, command, workdir, env
     cwd, values, token (this run's results token, never recorded) and log_over (the log passed
     _MAX_LOG_BYTES)."""
     knobs = dict(_knob_values(cx.contract) if knobs is None else knobs)
-    tree_rb = os.path.normpath(os.path.join(wt.path, _runbook_folder(cx.contract)))
+    studio = _studio_pack(cx.contract)
+    # a studio pack is not in the tree: commands start at the tree root, and RUNBOOK_DIR is the frozen copy
+    tree_rb = os.path.normpath(wt.path if studio else os.path.join(wt.path, _runbook_folder(cx.contract)))
     evidence = os.path.join(stage_dir, "evidence")
     values = dict(knobs)
-    values.update(RUNBOOK_DIR=tree_rb, STAGE=stage, ATTEMPT=repeat, EVIDENCE_DIR=evidence,
-                  WORKTREE=wt.path, CONTRACT_DIR=_files_dir(cx), REPEAT=repeat)
+    values.update(RUNBOOK_DIR=_frozen_runbook_dir(cx) if studio else tree_rb, STAGE=stage, ATTEMPT=repeat,
+                  EVIDENCE_DIR=evidence, WORKTREE=wt.path, CONTRACT_DIR=_files_dir(cx), REPEAT=repeat)
     extra = {"WORKTREE": wt.path, "CONTRACT_DIR": _files_dir(cx), "EVIDENCE_DIR": evidence,
              "REPEAT": str(repeat)}
     if seed is not None:
@@ -1968,8 +1970,39 @@ def _runbook_data(contract) -> dict:
     return {"knobs": knobs, "stages": [s for s in contract.stages if isinstance(s, dict)]}
 
 
+def _studio_pack(contract) -> bool:
+    """True for a pack frozen from an attached project's studio (op-062 t-653): it is not in the run tree.
+
+    The contract object records `pack_source: studio`, but the decision is read from the two paths a frozen
+    contract always holds, so no field of `types.Contract` carries it: `repo.path` is a folder below the project
+    and the runbook (a project-relative path) is not under it. A freeze accepts a pack only inside the
+    repository or, in an attached project, in the studio, so a runbook outside a relative `repo.path` can be
+    nothing else. (Before t-653 that case was refused at the freeze and never reached a run.)"""
+    repo = os.path.normpath(str(getattr(contract, "repo_path", None) or "."))
+    if os.path.isabs(repo) or repo == ".":
+        return False
+    rb = os.path.normpath(str(getattr(contract, "runbook", None) or ""))
+    return not (rb == repo or rb.startswith(repo + os.sep))
+
+
+def _studio_folder(contract):
+    """`@studio/<the runbook's folder in the studio>` for a studio pack: the name its frozen copy has under
+    contract/files/, and a place that is not in any run tree. None for any other pack. ValueError when the
+    runbook path is not inside the project."""
+    if not _studio_pack(contract):
+        return None
+    folder = os.path.dirname(os.path.normpath(str(contract.runbook or "").replace("\\", "/")))
+    if os.path.isabs(folder) or folder in ("", ".", "..") or folder.startswith("../"):
+        raise ValueError("the studio pack folder %r is not inside the project" % folder)
+    return "@studio/" + folder
+
+
 def _runbook_folder(contract) -> str:
-    """The runbook's folder relative to the root of the repository the run works on."""
+    """The runbook's folder relative to the root of the repository the run works on (for a studio pack, its
+    `_studio_folder`)."""
+    studio = _studio_folder(contract)
+    if studio is not None:
+        return studio
     rb = str(contract.runbook or "").replace("\\", "/")
     repo = str(contract.repo_path or ".").replace("\\", "/").strip("/")
     if repo not in ("", ".") and rb.startswith(repo + "/"):

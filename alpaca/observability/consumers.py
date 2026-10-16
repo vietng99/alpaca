@@ -62,6 +62,13 @@ OUTCOME_QUIET_S = 3600.0
 #: for ever; each retry appended a `drain-failed` (73,618 of them for 976 pruned subagent files).
 #: A source that comes back is observed again and re-queued (`queue_snapshot`).
 GONE_AFTER_FAILURES = 5
+#: t-684: a transcript that is there but torn (a record cut part way in the middle of the file,
+#: `drain.TranscriptMalformed`) fails the wiki consumer for this many tries in a row (merge decision
+#: D2: a transient read retries the batch); after them the session goes to its own snapshot job with
+#: an open `transcript-malformed` issue, and the consumer advances. Five torn transcripts held the
+#: live consumer at event 238470 for 3 days (293 failures). A session with that issue open is handed
+#: to its job at once; the job's success closes the issue.
+MALFORMED_AFTER_FAILURES = GONE_AFTER_FAILURES
 
 
 # Metadata only, bounded independently of transcript sizes. A fresh process
@@ -103,8 +110,8 @@ def _absent(root, session, conn):
 
 class _SharedAbsorber(threading.local):
     """The collector's one wiki `Absorber`, lent to every capture of the process: the wiki consumer's
-    batches and the preservation jobs (merge review B1). Its echo index (about 30 s and 3.6 GiB on
-    the live store) is read once and then kept current by the absorber's own writes; when another
+    batches and the preservation jobs (merge review B1). Its echo index (about 40 s and 1.7 GB on
+    a copy of the live store's 1,091,479 active blocks, t-685; 6.8 GB before) is read once and then kept current by the absorber's own writes; when another
     connection committed to the store since the last lend (`PRAGMA data_version`, as main's
     snapshot batch did per job), the index, the projection inventory and the vocabulary are read
     again. A lend for another root or another wiki configuration, a store file that was replaced,
@@ -328,7 +335,7 @@ def _run_in_wiki_lane(root, session, fn, *args, batch=None, **kwargs):
 
 
 def _capture_wiki(root, rows, sessions, *, absorber_factory=None, unavailable=None,
-                  deadline_s=CAPTURE_DEADLINE_S, progress=None):
+                  malformed=None, deadline_s=CAPTURE_DEADLINE_S, progress=None):
     """Capture notes and changed transcripts through `service.capture`; remember only successful
     projections.
 
@@ -338,7 +345,11 @@ def _capture_wiki(root, rows, sessions, *, absorber_factory=None, unavailable=No
     RuntimeError, so the caller's checkpoint or job stays and the batch is retried (idempotent).
     A caller that passes a list as `unavailable` takes over sessions whose registered source and
     retained copy are both absent: each is appended there and its transcript is not attempted, and
-    the caller must record it as a gap. Malformed or present-but-broken sources still raise.
+    the caller must record it as a gap; that holds too for a source that went while capture read
+    it. A caller that passes a list as `malformed` takes over sessions whose transcript is there
+    but torn (`drain.TranscriptMalformed`): each is appended there, nothing of it lands, and the
+    caller decides whether it fails the batch. Otherwise a torn source raises
+    `TranscriptMalformed`; a present-but-broken source always raises `TranscriptUnavailable`.
     The snapshot queue uses the same cache, so unchanged native content is not
     normalized again for every old operation event or preservation request.
     """
@@ -404,13 +415,36 @@ def _capture_wiki(root, rows, sessions, *, absorber_factory=None, unavailable=No
                 _PROJECTED.move_to_end((root, fact['session']))
                 while len(_PROJECTED) > MAX_PROJECTED:
                     _PROJECTED.popitem(last=False)
-    if result['missing_transcripts']:
+    blocking = []
+    if result['missing_transcripts'] and (unavailable is not None or malformed is not None):
+        conn = db.connect_readonly(root)
+        try:
+            for item in result['missing_transcripts']:
+                session = str(item['session'])
+                if unavailable is not None and _absent(root, session, conn):
+                    unavailable.append(session)          # went between the check and the read
+                elif malformed is not None and item.get('malformed'):
+                    malformed.append(session)
+                else:
+                    blocking.append(item)
+        finally:
+            conn.close()
+    else:
+        blocking = result['missing_transcripts']
+    if blocking:
         # Names the sessions only, never a locator: the consumer records the type name alone.
-        raise service.TranscriptUnavailable('registered transcript unavailable: ' + ', '.join(
-            sorted({str(item['session']) for item in result['missing_transcripts']})))
+        torn = all(item.get('malformed') for item in blocking)
+        raise (_malformed_error() if torn else service.TranscriptUnavailable)(
+            'registered transcript %s: ' % ('malformed' if torn else 'unavailable')
+            + ', '.join(sorted({str(item['session']) for item in blocking})))
     if result['deferred']:
         raise RuntimeError('wiki capture incomplete')
     return result
+
+
+def _malformed_error():
+    from alpaca.wiki.service import TranscriptMalformed
+    return TranscriptMalformed
 
 
 def _wiki(root, rows):
@@ -421,9 +455,12 @@ def _wiki(root, rows):
     issue and one queued snapshot retry per session, committed before this returns, so before
     `consume` advances the checkpoint. The issue names the session only, never the private
     locator, and a restored original clears it through the normal `run_snapshot_jobs` success
-    path. A present-but-broken or malformed transcript fails the consumer so the checkpoint stays
-    and the batch is retried (the retry is idempotent). Gaps found in a batch that then fails are
-    still recorded, since they hold either way. The capture has no deadline of its own
+    path. A present-but-broken transcript fails the consumer so the checkpoint stays and the batch
+    is retried (the retry is idempotent). So does a torn one (`drain.TranscriptMalformed`) for
+    `MALFORMED_AFTER_FAILURES` tries; then, or at once when its `transcript-malformed` issue is
+    already open, it is handed to its own snapshot job with that issue (`_malformed_handoff`) and the
+    checkpoint advances (t-684). Gaps and hand-offs found in a batch that then fails are still
+    recorded, since they hold either way. The capture has no deadline of its own
     (`WIKI_CAPTURE_DEADLINE_S`) and borrows the process's shared absorber (`_SharedAbsorber`), so
     the echo index is read once per process, not once per batch; a watch collector reads it before
     the first batch, outside the budget (`warm_wiki`), and the batch waits as `warming` meanwhile.
@@ -438,11 +475,12 @@ def _wiki(root, rows):
 
 def _wiki_batch(root, rows, progress=None):
     """`_wiki`'s work, on the `wiki` lane's thread (whose `_SHARED` absorber it lends)."""
-    gaps = []
+    gaps, torn, handed = [], [], []
     try:
-        _capture_wiki(root, rows, [row["session"] for row in rows], unavailable=gaps,
+        _capture_wiki(root, rows, [row["session"] for row in rows], unavailable=gaps, malformed=torn,
                       absorber_factory=lambda: _SHARED.lend(os.path.realpath(root)),
                       deadline_s=WIKI_CAPTURE_DEADLINE_S, progress=progress)
+        handed = _malformed_handoff(root, torn) if torn else []
     except BaseException:
         _SHARED.forget_projections()
         raise
@@ -450,6 +488,13 @@ def _wiki_batch(root, rows, progress=None):
         _SHARED.settle()
         if gaps:
             _record_gaps(root, rows, gaps)
+        if handed:
+            _record_gaps(root, rows, handed, code='transcript-malformed',
+                         detail='wiki: registered transcript holds a malformed record for session %s;'
+                                ' snapshot retry queued')
+    held = sorted(set(torn) - set(handed))
+    if held:
+        raise _malformed_error()('registered transcript malformed: ' + ', '.join(held))
     # FR-18: the same bounded consolidation step as the SessionEnd hook, under the same key
     # (`consolidate_after_capture`, default false). It proposes and admits nothing, and its failure
     # never fails this consumer (architecture.md 9.2).
@@ -458,18 +503,34 @@ def _wiki_batch(root, rows, progress=None):
                                        session=rows[-1]["session"], deadline_s=CONSOLIDATE_DEADLINE_S)
 
 
-def _record_gaps(root, rows, gaps):
+def _malformed_handoff(root, sessions):
+    """The torn sessions (`drain.TranscriptMalformed`) the wiki consumer hands to their snapshot jobs
+    now: all of them once the consumer failed `MALFORMED_AFTER_FAILURES` times in a row at this
+    checkpoint, else those whose `transcript-malformed` issue is still open."""
+    from . import _id
+    conn = db.connect_readonly(root)
+    try:
+        row = conn.execute("SELECT failures FROM obs_consumer_checkpoint WHERE consumer='wiki'").fetchone()
+        if row is not None and (row[0] or 0) >= MALFORMED_AFTER_FAILURES:
+            return list(sessions)
+        return [session for session in sessions if conn.execute(
+            'SELECT 1 FROM obs_issue WHERE issue_id=? AND resolved_at IS NULL',
+            (_id(None, 'transcript-malformed', session),)).fetchone()]
+    finally:
+        conn.close()
+
+
+def _record_gaps(root, rows, gaps, *, code='transcript-unavailable',
+                 detail='wiki: registered transcript unavailable for session %s; snapshot retry queued'):
     last = {}
     for row in rows:
         last[row["session"]] = max(last.get(row["session"], 0), row["id"])
     conn = db.connect(root)
     try:
         with db.transaction(conn):
-            for session in gaps:
+            for session in dict.fromkeys(gaps):
                 queue_snapshot(conn, session, event_id=last.get(session, 0))
-                issue(conn, 'transcript-unavailable', identity=session,
-                      detail='wiki: registered transcript unavailable for session ' + session
-                      + '; snapshot retry queued')
+                issue(conn, code, identity=session, detail=detail % session)
     finally:
         conn.close()
 
@@ -795,6 +856,8 @@ def run_snapshot_jobs(root, conn, *, limit=8, stop_requested=None):
                 conn.execute('UPDATE obs_issue SET resolved_at=? WHERE issue_id=? AND resolved_at IS NULL',(util.now_iso(),_id(None,'transcript-unavailable',job['session'])))
                 # A transcript that came back after a TranscriptGone close also closes that gap.
                 conn.execute('UPDATE obs_issue SET resolved_at=? WHERE issue_id=? AND resolved_at IS NULL',(util.now_iso(),_id(None,'transcript-gone',job['session'])))
+                # And a torn transcript the wiki consumer handed to this job, once it reads clean.
+                conn.execute('UPDATE obs_issue SET resolved_at=? WHERE issue_id=? AND resolved_at IS NULL',(util.now_iso(),_id(None,'transcript-malformed',job['session'])))
             result['completed'] += 1
         # Large catch-up batches must report actual progress between jobs,
         # rather than appearing stale while the supervised process is working.

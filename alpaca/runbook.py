@@ -48,6 +48,9 @@ CHECK_TYPES = ("exit-code", "file-exists", "regex-in-file", "json-field", "plugi
 KNOB_TYPES = ("int", "float", "str", "bool", "enum")
 OPS = ("==", "!=", "<", "<=", ">", ">=")
 BUILTIN_VARS = ("RUNBOOK_DIR", "STAGE", "ATTEMPT", "EVIDENCE_DIR")
+#: known only in a project that attaches to a repository (op-062 t-653): the absolute path of the task's
+#: work folder. A separate constant, so BUILTIN_VARS and every project without `attach:` are unchanged.
+ATTACH_VARS = ("ATTACH_WORKTREE",)
 MAX_ATTEMPTS = 20
 PLUGIN_TIMEOUT = 60
 #: the allowed (lowest, highest) of a number field; the kit schema reads these too
@@ -227,6 +230,9 @@ RESEARCH_ERROR_CODES = (
     "STAGE-UNUSED", "GATES-ORDER", "TIMEOUT-MISSING", "THEN-ASK-OWNER", "KNOB-MOVES-BAR",
     "PACK-OUTSIDE-REPO", "PROPOSAL-FIELD-RESERVED", "FILE-MISSING", "BASE-NOT-COMMIT", "COVERS-NONE",
 )
+#: a refusal that exists only in a project with an `attach:` block (op-062 t-653); a separate tuple, so the
+#: codes every project can meet stay as they were
+ATTACH_ERROR_CODES = ("KNOB-SHADOWS-BUILTIN",)
 #: the keyed lists of the block and the key each merges on (section 7.2); every other list is
 #: replaced whole
 KEYED_LISTS = {"metrics": "id", "categories": "id", "coupled": "id", "proposal": "field",
@@ -256,7 +262,7 @@ class _Report:
         self.errors, self.warnings = [], []
 
     def error(self, code, where, message):
-        assert code in ERROR_CODES + RESEARCH_ERROR_CODES, code
+        assert code in ERROR_CODES + RESEARCH_ERROR_CODES + ATTACH_ERROR_CODES, code
         self.errors.append(_finding(code, where, message))
 
     def warn(self, code, where, message):
@@ -383,6 +389,15 @@ def fail_recognized(fail):
 
 
 class _Checker:
+    #: whether the project that holds this runbook is attached to a repository (op-062 t-653); read once
+    _attached = None
+
+    def attached(self):
+        """True when the project above this runbook has an `attach:` block; asked once per check."""
+        if self._attached is None:
+            self._attached = _attach_on(_project_root(self.base))
+        return self._attached
+
     def __init__(self, data, base_dir, check_files, report):
         self.data, self.base, self.check_files, self.r = data, base_dir, check_files, report
         self.knobs = {}
@@ -522,6 +537,10 @@ class _Checker:
         allowed = BUILTIN_VARS
         if self.fmt == RESEARCH_FORMAT:
             allowed = BUILTIN_VARS + RESEARCH_VARS + tuple(extra)
+        if texts and self.fmt in FORMATS and self.attached():
+            # format 1 and 2 only: they are what `alpaca attach stage` runs. The research engine never sets
+            # the value, so a format 3 command would expand it to an empty string in the shell (op-062 t-653)
+            allowed = allowed + ATTACH_VARS
         for text in texts:
             for name in VAR.findall(text):
                 if name not in self.knobs and name not in allowed:
@@ -628,6 +647,10 @@ class _Checker:
                 continue
             self.keys(knob, self.table(KNOB_KEYS, "knob"), where)
             ident = self.ident(knob, where, pattern=KNOB_ID, seen=seen, kind="knob id")
+            if ident in ATTACH_VARS and self.fmt in FORMATS and self.attached():
+                self.r.error("KNOB-SHADOWS-BUILTIN", where + ".id", "knob %s has the name of the built-in variable "
+                             "${%s}; in an attached project the variable is the task's work folder, and a knob "
+                             "may not stand in for it" % (ident, ident))
             self.text(knob, "description", where)
             self.flag(knob, "owner_only", where)
             if self.fmt >= 2:
@@ -1703,6 +1726,28 @@ def _project_root(base_dir):
         folder = up
 
 
+def _attach_call(name, *args, **kwargs):
+    """The answer of `alpaca.attach.runbooks.<name>` for an attached project, or None when the attach
+    package is not there, the project is not attached, or anything goes wrong. A plain project, and the
+    partner kit that carries this checker alone, never reach the attach package (op-062 t-653)."""
+    try:
+        module = __import__("alpaca.attach.runbooks", fromlist=["attach_on"])
+        return getattr(module, name)(*args, **kwargs)
+    except Exception:
+        return None
+
+
+def _attach_on(project_root):
+    """True when the project at `project_root` has a valid `attach:` block."""
+    return bool(project_root) and _attach_call("attach_on", project_root) is True
+
+
+def _pack_outside_allowed(project_root, repo_abs, folder):
+    """True when a pack in `folder` may lie outside the repository at `repo_abs`: the project is attached,
+    `repo_abs` is the attached repository itself, and `folder` is a plain folder of the studio."""
+    return bool(project_root) and _attach_call("pack_outside_allowed", project_root, repo_abs, folder=folder) is True
+
+
 def _listed(node, key):
     value = node.get(key) if isinstance(node, dict) else None
     return value if isinstance(value, list) else []
@@ -1918,7 +1963,8 @@ class _Research(_Checker):
         if path is None and "path" in repo:
             return
         root = self.resolved_repo()
-        if root and not _within(os.path.realpath(self.base), os.path.realpath(root)):
+        if root and not _within(os.path.realpath(self.base), os.path.realpath(root)) \
+                and not _pack_outside_allowed(_project_root(self.base), root, os.path.realpath(self.base)):
             self.r.error("PACK-OUTSIDE-REPO", where + ".path", "the runbook folder %s does not lie inside "
                          "repo.path %s; a pack is committed inside the repository its runs work on"
                          % (self.base, root))
@@ -3133,6 +3179,20 @@ def _inside(path, folder):
     return os.path.commonpath([path, folder]) == folder
 
 
+def _passes_through(path, real_folder):
+    """True when `path` runs through the folder whose real path is `real_folder`, in whatever spelling: some
+    leading part of the path (the whole path included) has that real path. The work folder may be named
+    through a link, or the stage's folder may be its real spelling while the folder is given in a linked one."""
+    cur = os.path.abspath(path)
+    while True:
+        if os.path.realpath(cur) == real_folder:
+            return True
+        up = os.path.dirname(cur)
+        if up == cur:
+            return False
+        cur = up
+
+
 def _compare(left, op, right):
     if op in ("==", "!="):
         if isinstance(left, bool) or isinstance(right, bool):
@@ -3147,15 +3207,19 @@ def _compare(left, op, right):
 
 
 def evaluate(chk, *, workdir, runbook_dir=None, exit_code=None, knobs=None, stage="", attempt=1,
-             evidence_dir=None):
+             evidence_dir=None, attach_worktree=None):
     """(verdict code, reason) for one check after its stage ran.
 
     workdir is the stage's working folder (relative check paths start there); runbook_dir is the
     runbook's folder (a plugin script path starts there; default workdir); exit_code is the stage
-    command's exit status, None when it did not run; knobs holds the knob values of this attempt."""
+    command's exit status, None when it did not run; knobs holds the knob values of this attempt;
+    attach_worktree is the task's work folder in an attached project (op-062 t-653), and
+    ${ATTACH_WORKTREE} resolves only when it is given."""
     runbook_dir = os.path.abspath(runbook_dir or workdir)
     values = dict(knobs or {})
     values.update(RUNBOOK_DIR=runbook_dir, STAGE=stage, ATTEMPT=attempt, EVIDENCE_DIR=evidence_dir or "")
+    if attach_worktree:
+        values["ATTACH_WORKTREE"] = os.path.abspath(attach_worktree)
     kind = chk.get("type")
     if kind == "exit-code":
         want = chk.get("expect", 0)
@@ -3165,11 +3229,33 @@ def evaluate(chk, *, workdir, runbook_dir=None, exit_code=None, knobs=None, stag
             return verdict.PASS, "exit %d" % exit_code
         return verdict.FAIL, "exit %d, expected %d" % (exit_code, want)
     if kind in ("file-exists", "regex-in-file", "json-field"):
+        if "${ATTACH_WORKTREE}" in chk["path"] and "ATTACH_WORKTREE" not in values:
+            # never resolved as an empty string: that would turn ${ATTACH_WORKTREE}/out.json into /out.json.
+            # A knob of that name is a value (a project without attach: may carry one), so it still resolves.
+            return verdict.BLOCKED, "ATTACH_WORKTREE is not set, so %s cannot be resolved" % chk["path"]
         rel = substitute(chk["path"], values)
         path = os.path.normpath(os.path.join(workdir, rel))
         # the schema checks the path as written; a ${NAME} is known only now, so check again
-        if not (_inside(path, runbook_dir) or (
-                evidence_dir and chk["path"].startswith("${EVIDENCE_DIR}") and _inside(path, evidence_dir))):
+        if attach_worktree:
+            # op-062 t-653 (plan 6.7, PM t-653.2): with the task's work folder given, every alternative is judged
+            # on real paths, because a worker wrote files in that folder and a link among them must not carry a
+            # check out of it, whichever folder is the runbook folder. A path written with ${ATTACH_WORKTREE}
+            # is accepted only when its real path lies in the real work folder. Any other path needs its real
+            # path in the real runbook folder (written with ${EVIDENCE_DIR}: in the real evidence folder), and
+            # when it is written inside the work folder it must also stay inside it after links.
+            real, real_wt = os.path.realpath(path), os.path.realpath(attach_worktree)
+            if chk["path"].startswith("${ATTACH_WORKTREE}"):
+                contained = _inside(real, real_wt)
+            elif _passes_through(path, real_wt) and not _inside(real, real_wt):
+                contained = False
+            else:
+                contained = _inside(real, os.path.realpath(runbook_dir)) or bool(
+                    evidence_dir and chk["path"].startswith("${EVIDENCE_DIR}")
+                    and _inside(real, os.path.realpath(evidence_dir)))
+        else:
+            contained = _inside(path, runbook_dir) or bool(
+                evidence_dir and chk["path"].startswith("${EVIDENCE_DIR}") and _inside(path, evidence_dir))
+        if not contained:
             return verdict.BLOCKED, ("%s resolves to %s, outside the runbook folder%s" % (
                 chk["path"], path, " and the evidence folder" if evidence_dir else ""))
     if kind == "file-exists":

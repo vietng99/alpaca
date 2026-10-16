@@ -50,7 +50,7 @@ from alpaca import db, manifest, upgrade, util
 from alpaca.clock import FixedClock
 from alpaca.gates import contract, verdict as vc
 from alpaca.phase import doors
-from alpaca.tests.conftest import REPO
+from alpaca.tests.conftest import REPO, git_ignored_top
 
 SETUP = os.path.join(REPO, "setup")
 GEN_MANIFEST = os.path.join(SETUP, "gen_manifest.py")
@@ -66,9 +66,15 @@ def _ignore_with_memory(src):
     """Byte caches by pattern, plus every [memory] path of `src`'s manifest anchored at `src`, so a
     memory path nested under a mechanism dir (a host-local tool install) never enters a copy."""
     memory = manifest.memory_ignore(src)
+    top = os.path.abspath(src)
+    # what git ignores at the top (.te -> .alpaca, .rune2-dev, research-refs) never travels (t-672)
+    ignored_top = git_ignored_top(src)
 
     def _ignore(dirpath, names):
-        return set(_IGNORE(dirpath, names)) | set(memory(dirpath, names))
+        out = set(_IGNORE(dirpath, names)) | set(memory(dirpath, names))
+        if os.path.abspath(dirpath) == top:
+            out |= ignored_top & set(names)
+        return out
 
     return _ignore
 

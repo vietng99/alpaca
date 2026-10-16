@@ -120,3 +120,142 @@ def test_no_file_points_at_the_old_skill_paths():
             if stale.search(line) and "test_product_skills.py" not in rel:
                 hits.append("%s:%d: %s" % (rel, number, line.strip()[:120]))
     assert hits == [], "\n".join(hits)
+
+
+# ---- the first chat skills (op-062 t-656) -------------------------------------------------------------------
+
+def _cli_commands(text):
+    """Every `bin/alpaca ...` command in the inline code and the code blocks of a skill, as token lists."""
+    spans = [" ".join(m.split()) for m in re.findall(r"`([^`]+)`", text)]
+    spans += re.findall(r"```[a-z]*\n(.*?)```", text, re.S)
+    out = []
+    for span in spans:
+        for line in span.split("\n"):
+            if line.strip().startswith("bin/alpaca "):
+                out.append(line.strip().split())
+    return out
+
+
+def _subparsers(parser):
+    for action in parser._actions:
+        if hasattr(action, "_name_parser_map"):
+            return action._name_parser_map
+    return {}
+
+
+def _options(parser):
+    return {opt for action in parser._actions for opt in action.option_strings}
+
+
+def _command_problems(text):
+    """What is wrong with the `bin/alpaca` commands of `text`: an unknown verb, subverb or flag."""
+    from alpaca import cli
+    for mod in cli.VERB_MODULES:
+        __import__("alpaca.%s" % mod)
+    parser, sub = cli.build_parser()
+    for _name, reg in cli._EXTRA_PARSERS:
+        reg(sub)
+    verbs = _subparsers(parser)
+    problems = []
+    for tokens in _cli_commands(text):
+        verb = tokens[1]
+        if verb not in verbs:
+            problems.append("unknown verb: %s" % " ".join(tokens))
+            continue
+        vparser, rest = verbs[verb], tokens[2:]
+        subs = _subparsers(vparser)
+        if rest and subs and not rest[0].startswith(("-", "<", "[", '"')):
+            if rest[0] not in subs:
+                problems.append("unknown subverb: %s" % " ".join(tokens))
+                continue
+            vparser, rest = subs[rest[0]], rest[1:]
+        known = _options(vparser) | {"-h", "--help"}
+        problems += ["unknown flag %s: %s" % (tok, " ".join(tokens)) for tok in rest
+                     if re.fullmatch(r"--[a-z][a-z-]*(=.*)?", tok) and tok.split("=")[0] not in known]
+    return problems
+
+
+def test_every_alpaca_command_in_the_first_chat_skills_names_a_real_verb_subverb_and_flag():
+    for name in ("alpaca-first-chat", "alpaca-onboard"):
+        text = open(os.path.join(CLAUDE_SKILLS, name, "SKILL.md"), encoding="utf-8").read()
+        assert len(_cli_commands(text)) >= 5, name
+        assert _command_problems(text) == [], name
+
+
+def test_the_command_check_catches_a_wrong_verb_subverb_and_flag():
+    bad = ("`bin/alpaca onboarding look x`\n`bin/alpaca onboard glance x`\n"
+           "`bin/alpaca onboard look x --scrath d`\n`bin/alpaca onboard look x --scratch d --quote q`")
+    problems = _command_problems(bad)
+    assert len(problems) == 3 and "unknown verb" in problems[0] and "unknown subverb" in problems[1] and "--scrath" in problems[2]
+
+
+def test_the_first_chat_skill_holds_the_rules_the_verbs_rely_on():
+    text = open(os.path.join(CLAUDE_SKILLS, "alpaca-first-chat", "SKILL.md"), encoding="utf-8").read()
+    flat = " ".join(text.split())
+    assert "never AskUserQuestion" in flat and "unchanged as one message" in flat
+    for situation in ("take over", "team repo", "audit only", "migrate or rewrite", "start empty"):
+        assert situation in flat, situation
+    assert "never has more than four questions" in flat
+    for part in ("what I understood", "what I found", "where Alpaca sits", "the checks", "the first steps",
+                 "how a change reaches the repo", "how much I do alone", "what stays with the owner", "how to undo it",
+                 "the settings"):
+        assert part in flat, part
+    assert "Nothing is configured, cloned into the studio or attached before the owner's typed yes" in flat
+    assert "a click is not an owner word" in flat and "Run `bin/alpaca attach init` on your own" in flat
+    for token in ("ONBOARD-NOT-A-YES", "ONBOARD-CARD-NOT-SHOWN", "LOOK-AUTH", "ONBOARD-NOT-NEWEST"):
+        assert token in flat, token
+    # op-062 t-656 fix round 3: the first-chat gate at the dispatcher and the honest limit the code cannot close
+    assert "Do not wrap a command in `script`" in flat and "as if the owner ran it" in flat
+    assert "refused with ONBOARD-FIRST-CHAT-OPEN. Tell the owner what the command would do" in flat
+
+
+def test_the_first_chat_skills_read_plainly():
+    """No em dash, plain quotes, and none of the words the plain-writing ban list names."""
+    from alpaca.gates import literal_guard as lg
+    tiers = {"words": [], "phrases": [], "placeholders": [], "structures": []}
+    parsed = lg.parse_ban_list(lg.shipped_preset_path("plain-writing"))
+    for tier in lg.STYLE_TIERS:
+        tiers[tier].extend(parsed[tier])
+    for name in ("alpaca-first-chat", "alpaca-onboard"):
+        text = open(os.path.join(CLAUDE_SKILLS, name, "SKILL.md"), encoding="utf-8").read()
+        assert "\N{EM DASH}" not in text and "\N{LEFT DOUBLE QUOTATION MARK}" not in text, name
+        assert "\N{RIGHT SINGLE QUOTATION MARK}" not in text, name
+        body = text.split("---\n", 2)[2]
+        hits = lg.lint(body, tiers)
+        assert hits == [], (name, [(m.tier, m.matched) for m in hits])
+
+
+def _first_chat_flat():
+    text = open(os.path.join(CLAUDE_SKILLS, "alpaca-first-chat", "SKILL.md"), encoding="utf-8").read()
+    return text, " ".join(text.split())
+
+
+def test_the_first_chat_skill_glosses_every_alpaca_word_at_its_first_use_in_each_message():
+    """Rehearsal round 1 (P3, R11): a summary turn used "baseline" bare. The skill carries the glossary the card uses,
+    with the rule, and the glossary holds baseline, gate, op, task, level, study, upstream and base."""
+    from alpaca import onboard_card as oc
+    text, flat = _first_chat_flat()
+    assert set(oc.GLOSSARY) >= {"studio", "baseline", "gate", "op", "task", "level", "study", "upstream", "base"}
+    for word, gloss in oc.GLOSSARY.items():
+        assert "- %s: %s" % (word, gloss) in text, word
+    assert "In each message you write, the first time you use one of the words below" in flat
+    assert "even when an earlier message already did" in flat
+
+
+def test_the_first_chat_skill_runs_the_study_scouts_and_the_map_check_in_the_attach_first_win():
+    """Rehearsal round 1 (R9 = 1): the host ran `attach study` and stopped, so the first summary showed an empty map."""
+    text, flat = _first_chat_flat()
+    first_win = flat[flat.index("In attach mode"):flat.index("If the owner wants to skip")]
+    order = [first_win.index(t) for t in ("`bin/alpaca attach study`", "study scouts", "`bin/alpaca attach study check`",
+                                          "`bin/alpaca attach study ingest`", "Turn 4 shows the map")]
+    assert order == sorted(order)
+    assert "[ptr: app@<path>:<line>]" in first_win and "A first summary that does not show the map is not finished" in first_win
+
+
+def test_the_first_chat_skill_takes_a_yes_with_filler_and_records_who_merges():
+    from alpaca import onboard_card as oc
+    text, flat = _first_chat_flat()
+    for phrase in oc.YES_FILLER:
+        assert "`%s`" % phrase in flat, phrase
+    assert "the words left must be exactly `yes`" in flat and "Any other word keeps the reply a change" in flat
+    assert 'answer merges --option a --value "<the words that name the person>"' in flat

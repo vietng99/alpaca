@@ -1,4 +1,4 @@
-import os, shutil, pytest
+import contextlib, os, shutil, pytest
 
 # Tests copy the repository, project.yaml and its disk: block included, and run the session hooks
 # in those copies; a detached disk sweep (alpaca/disk.py) must never start from a test run.
@@ -6,6 +6,21 @@ os.environ["ALPACA_DISK_SWEEP"] = "0"
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
+
+
+def git_ignored_top(root=REPO):
+    """The top-level names of `root` that git ignores (runtime folders such as .te, .rune2-dev and
+    research-refs). A copy of the harness that stands for a fresh clone leaves them out: a clone has
+    none of them, and .te links to the live .alpaca, so copying through it once filled /tmp
+    (op-059 t-671, t-672). Empty when `root` is not a git work tree."""
+    import subprocess
+    names = sorted(os.listdir(root))
+    try:
+        out = subprocess.run(["git", "-C", root, "check-ignore", "--stdin"], input="\n".join(names),
+                             capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    return {line.strip() for line in out.stdout.splitlines() if line.strip()}
 
 
 def shipped_project_yaml(repo=REPO):
@@ -89,10 +104,42 @@ def no_ambient_session(monkeypatch):
     from alpaca import cli
     for name in cli.ENV_SESSION_VARS:
         monkeypatch.delenv(name, raising=False)
+    # the agent markers too (CLAUDECODE, CODEX_*): an attach or an owner word treats a call that carries one as
+    # an agent's, so a suite run inside a session would otherwise change what those tests see
+    from alpaca import ownerword
+    for name in ownerword.AGENT_MARKERS:
+        monkeypatch.delenv(name, raising=False)
+    # the owner's own terminal has a terminal on standard input (ownerword.owner_terminal); pytest does not, so an
+    # in-process test that models the owner at a terminal gets one here. A test that models an agent sets a marker or a
+    # session, and a test that models a child process with no terminal patches this back to False. Nothing in the
+    # environment switches it (a variable is a switch an agent could set as well).
+    monkeypatch.setattr(ownerword, "_stdin_is_tty", lambda: True)
     # the research guard marks the shell of a subagent with ALPACA_RESEARCH_AGENT while its
     # session drives a run; a suite run by such a subagent must not inherit it, or every driving
     # verb a test runs would refuse as RUN-DRIVER-IS-SUBAGENT. A test that wants it sets it.
     monkeypatch.delenv("ALPACA_RESEARCH_AGENT", raising=False)
+
+
+@contextlib.contextmanager
+def owner_pty():
+    """Standard input (file descriptor 0) is a pseudo-terminal inside the block, as it is when the owner types in a
+    terminal. A verb run in this process gets its terminal from `no_ambient_session`; a child process inherits descriptor
+    0, so a test whose child must count as the owner's terminal runs inside this block. Restored on exit."""
+    master, slave = os.openpty()
+    saved = os.dup(0)
+    os.dup2(slave, 0)
+    try:
+        yield
+    finally:
+        os.dup2(saved, 0)
+        for fd in (saved, master, slave):
+            os.close(fd)
+
+
+@pytest.fixture
+def pty_stdin():
+    with owner_pty():
+        yield
 
 
 @pytest.fixture(autouse=True)

@@ -1,0 +1,82 @@
+SETUP PROPOSAL card-fe5b63fc for webapp-audit                                   2026-10-14
+Nothing is set up until you reply. It takes about 3 minutes to read.
+Alpaca records what I do, checks each change, and stops me at the points below.
+
+1. WHAT I UNDERSTOOD (tell me any line that is wrong)
+- Your goal, in your words: "where passwords are checked and whether they are stored safely"
+- Done when (my first guess; we confirm it before any change): a written answer that names the
+  files and lines where login happens and where passwords are stored, each with a pointer.
+- Situation: audit only. You said "can you audit this repo for me".
+- Where checks run: on a CI; the repo holds its files (.github/workflows/test.yml) [6]. Its
+  result is not one of my checks.
+
+2. WHAT I FOUND (in a read-only copy outside this folder; your repo is unchanged)
+- Written in JavaScript (180 files) and TypeScript (60 files); built with npm [1] [2]
+- 320 files, all yours (no vendor folder found) [3]
+- 640 commits on main by 2 people, 2024-01-10 to 2026-10-09 [4]
+- Found: CI files, tests. Not found: git hooks, CLAUDE.md or AGENTS.md, CODEOWNERS,
+  CONTRIBUTING.md [6]
+
+3. WHERE ALPACA SITS: attach mode
+Your code stays in its own repo with its own history. Alpaca keeps its notes, records and
+reports in the studio (the folder you made with alpaca new). A copy of your repo goes into app/
+inside the studio, and the studio's own git ignores that folder. Your repo gets no Alpaca file.
+Why attach: you only want a read of the code, and a copy kept apart cannot change it.
+
+4. CHECKS
+Each of these is a gate (a command that must pass before a change can leave the studio). I run
+every gate on your current main first, so a gate that already fails there is not blamed on new
+work.
+- build: the project builds, with `npm run build`. Not tried yet: it runs your build, so it runs
+  only after your yes [1]
+- test: the tests pass, with `npm test`. Not tried yet: it runs your tests, so it runs only
+  after your yes [1]
+
+5. FIRST STEPS AFTER YOUR YES (your yes approves a and b)
+a. Copy your repo into app/ and record the baseline (the result of every check on your code as
+   it is today), taken on main at 0123456: about 2 to 3 minutes, no input from you.
+b. Run the study (a first read of your code, written down as a map): modules, how to build,
+   risky areas, each line pointing at a file; about 20 to 45 minutes for 320 own files, no input
+   from you.
+c. Write the answer to your question as the first op (one goal with its own tasks and reports):
+   about 15 minutes of questions, then the written result.
+
+6. HOW A CHANGE REACHES YOUR REPO
+No change leaves the studio. Sending changes is switched off for this setup; I send nothing to
+GitHub. Your repo shows nothing now. If you let changes leave later, it shows this; tell me any
+line to change:
+- Commit identity: Alpaca agent <alpaca-agent@localhost> (my default; it names Alpaca)
+- Pull request footer: on, the body says it was made with an agent assistant (my default)
+- Branch prefix: alpaca/ (my default; it names Alpaca)
+
+7. HOW MUCH I DO ALONE: L2
+The level (how much I may do before I ask you, from L1 to L6) is L2. I make one bounded change
+at a time and show it to you before the next. Why L2: you only want a read of the code. Say
+"raise the level" when you trust the work; I never raise it myself.
+
+8. WHAT STAYS WITH YOU
+Everything outside this folder, and raising the level.
+
+9. UNDO
+Before your yes there is nothing to undo (the read-only copy goes away after setup). After it:
+delete this studio folder. Your repo is never changed.
+
+10. SETTINGS I WILL WRITE
+upstream (the repo your code comes from) https://github.com/acme/webapp, base (the branch your
+changes start from and are checked against) main, branch prefix alpaca/, commit identity Alpaca
+agent, pull request footer on, gates build, test; level L2; people: Alpaca Development as owner
+[7]; plain-writing check on for Alpaca's own reports (suggested by me; your code is not
+affected).
+
+Sources (repo paths at commit 0123456)
+[1] repo:package.json
+[2] cmd: git ls-files, grouped by file extension; examples repo:server/index.js,
+    repo:server/auth.js, repo:web/app.ts
+[3] cmd: git ls-files | wc -l = 320; git ls-files node_modules | wc -l = 0
+[4] cmd: git log main --format=%an%x09%ad --date=short (2 authors, 640 commits)
+[6] look scan of CI, hook, test, CODEOWNERS, CONTRIBUTING and agent files: found
+    .github/workflows/test.yml, server/auth.test.js
+[7] host: git config user.name
+
+Reply "yes" to set this up as written, or tell me which line to change.
+(The long form works too: card-fe5b63fc yes)

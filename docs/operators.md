@@ -28,9 +28,12 @@ Claude session. An existing ID can be resumed with `session start`; its original
 start time and recorded posture are retained. Starting a session does not launch
 a dashboard. Add `--dashboard` or run `bin/alpaca serve` when desired.
 
-If the pad says the project is not onboarded, ask the onboarding questions (who is
-working on it, what is being worked on, the open tasks, and whether to enable the
-plain-writing preset), then run `bin/alpaca onboard ...` once and `bin/alpaca doctor`. When
+If the pad says the first chat is due or the project is not onboarded, run the first chat
+(`.claude/skills/alpaca-first-chat/SKILL.md`): look at the repository the owner names with
+`bin/alpaca onboard look`, ask the printed questions, record the answers, show the one setup card from
+`bin/alpaca onboard propose` unchanged, and run `bin/alpaca onboard apply` and `bin/alpaca doctor` only after
+`bin/alpaca onboard confirm` accepts the owner's typed reply. In a Codex session `confirm` prints the card and asks
+the person to type its id in a terminal of their own. When
 `project.yaml` names a domain profile, read that profile's instructions for the
 active step.
 
@@ -114,6 +117,23 @@ the action you report; it does not measure every native tool call. Keep sensitiv
 command arguments out of `--ref`. A level change must reflect the owner's
 authorization; posture alone does not grant separate unattended authority.
 
+`session level` (and `session start --level`) records a drop, OFF or the level
+already in force for anyone. A raise above the level in force records only on the
+owner's own words, and is then recorded under the actor `owner`:
+
+- In a Claude Code session, the session transcript must hold the owner's
+  `/autodrive L<n>` call for exactly that level, typed after the latest level
+  decision. The command reads the transcript; nothing is passed for it.
+- With no agent session in the environment (the owner's own terminal), the
+  command asks the person to type `L<n>` to confirm. A Codex session has no
+  transcript Alpaca reads for owner words, so a Codex raise is run by the owner
+  in a terminal of their own.
+
+Otherwise the command exits 2 with `status: BLOCKED`, a `reason`
+(`OWNER-WORD-LEVEL-RAISE`, `OWNER-WORD-NOT-TERMINAL`, `OWNER-WORD-SESSION` or
+`OWNER-WORD-NO-TRANSCRIPT`) and nothing recorded. A refused `session start
+--level` still starts the session, at the level already in force.
+
 ### Stopping an L6 run
 
 At L6 the Stop hook refuses a stop until one of these exits holds:
@@ -129,7 +149,7 @@ bin/alpaca --session codex-example session level OFF
   `reopen`, `signoff`, `contract`, `owner-action`). It holds for that turn only and posts a
   blocker message to the owner.
 - `level OFF`, or the owner's `/autodrive off` (the shared skill's file in the account dir is read
-  for this session as a drop only): the record goes back to the default level.
+  for this session; a drop needs no owner words): the record goes back to the default level.
 
 A usage-limit stop and a halted thread also end the refusal on their own.
 
@@ -146,8 +166,24 @@ capture result before handoff.
 
 Use the Claude-provided session ID with `bin/alpaca --session ID` for recorded
 commands and explicit posture changes. Project posture files live under
-`.alpaca/config`; neither operator reads account-wide autodrive files. The
-dashboard is optional for Claude as well.
+`.alpaca/config`. The shared `/autodrive` skill writes its level to the account
+dir instead (`$CLAUDE_CONFIG_DIR`, else `~/.claude`), as
+`.autodrive-level.<session>`. Alpaca reads only that per-session file, never the
+account-wide one, and only in two cases:
+
+- A drop (`off`, or a level below the one in force) written after the latest
+  level decision lands as is. Dropping to a safer level is always allowed.
+- A raise lands only when the owner typed it. The session transcript that the
+  first session-start recorded must hold an owner message that is the
+  `/autodrive L<n>` call for that same level: a typed prompt or a queued
+  command, not a sidechain, meta, compact-summary or `claude -p` entry. The
+  message must be typed after the latest level decision, and the latest such
+  call must name the file's level. The decision is recorded under the actor
+  `owner` with the owner_word row (transcript, line, timestamp, quote), and
+  the project-local file is rewritten to match. A raise that no owner message
+  backs is ignored: an agent cannot raise its own level.
+
+The dashboard is optional for Claude as well.
 
 A `bin/alpaca` verb run without `--session` takes its session from `ALPACA_SESSION_ID`, then from `CLAUDE_CODE_SESSION_ID`, which Claude Code exports in every shell call. A task move, a proof seal or a message sent from a Claude session is therefore recorded under that session and not under the placeholder `cli`. Outside any session the placeholder still applies.
 
@@ -205,6 +241,53 @@ Explicit command errors are visible: exit 0 is success, exit 2 is a blocked or
 invalid session operation, exit 64 is command usage, and exit 67 is an internal
 failure. Keep the JSON result and command exit status together when assessing a
 lifecycle step.
+
+## Updating to a newer release
+
+`alpaca update` moves a project to the newest public release. It reads the newest `vN.N.N` tag of the release repository (`git ls-remote`, never a prompt), compares it with the project's own version, and when the tag is newer it installs that release and then runs `alpaca upgrade` on the project.
+
+```
+alpaca update --check     # report the project, installed and newest versions; change nothing
+alpaca update             # install, show the plan, ask, apply
+alpaca update --yes       # the same without questions (the plan is still printed first)
+```
+
+What it does, in order:
+
+1. Finds the project (the folder you run it in, or `--target DIR`) and refuses a pending upgrade journal, a development checkout and an installed release before it touches the network.
+2. Reads the newest release tag from `--repo URL` (default: `$ALPACA_UPDATE_REPO`, else the public repository). `http://` and `git://` addresses are refused; use https, ssh or a path. A relative path is read from the folder you ran the command in; `host:path` is read as ssh, as git does (write `./a:b` for a local folder with a colon).
+3. Compares the tag with the project's version. Equal: it says so and exits 0. Older than the project: it refuses (no downgrade; older code refuses a newer record).
+4. Installs the tag with that release's own `install.sh`: the release is cloned, every file is checked against the sha256 in its `MANIFEST.json`, it is kept under `<prefix>/releases/<id>`, and the `<prefix>/current` link moves after the launcher file is written, with the launcher put in place last. A release's `.venv` must pass `bash setup/bootstrap.sh --check`, not just exist; a half built one is rebuilt or removed. A failed install, a release that is not usable (wrong version or channel, `--version` fails, `.venv` not ready) and an interrupt (Ctrl-C) all put `current` and the launcher back as they were, and the message says so (`current and the launcher are back as they were`). A release that is already installed is not installed again, but its folder is checked against the `MANIFEST.json` of the fetched copy first: a copy that was changed or left half done is replaced by the checked one (`replacing it with the checked copy`), and one that is `current` and does not match refuses the install (`the current release folder ... does not match its MANIFEST.json`). Ctrl-C also removes the installer's stage folder and `alpaca.new`, and `alpaca update` ends with `FAIL ... interrupted` instead of a traceback.
+5. Hands off to the newly installed release (an `exec`), so the code that replaces the project's files is not the code being replaced. The launcher does the same for you: `alpaca update` typed anywhere runs the installed release, never a project's copy.
+6. Takes the project lock (`<project>/.alpaca/upgrade.lock`), which it keeps through the plan, the saving of local files and the apply. Prints the `alpaca upgrade` plan for the project, then asks `Apply this plan?` unless `--yes` is given. Each path that the new release changed shows as `will be refreshed`; a path that holds a local edit shows as `local edit will be replaced`; a `CLAUDE.md` or `AGENTS.md` that holds your own text inside the boot block (the marked region the release replaces) shows as `local edit in the boot block will be replaced by the release's block`. A `CLAUDE.md` that is a link (for example to `AGENTS.md`) stays a link: the plan says `kept as a link`, and its target is merged on its own when it is `CLAUDE.md` or `AGENTS.md`.
+7. Saves every local file the upgrade would replace (an edited file, a file you added under a refreshed path, a `CLAUDE.md` or `AGENTS.md` with an edit inside its boot block) to `<project>/.alpaca/update/<UTC stamp>/<path>`, with or without `--yes`, then applies the upgrade. `.alpaca/` is a memory path, so the upgrade never touches the copies.
+8. Checks that the project says the new version, that its `.venv` matches (`bash setup/bootstrap.sh --check`, then one bootstrap if it does not; a project without a `.venv` skips this), and runs `alpaca doctor`. A doctor ERROR fails the update; a doctor WARN passes and is named in the result (exit 1 counts as a warning only when doctor printed its own `GATE alpaca-doctor: WARN` line; any other exit 1 fails).
+
+Exit codes: 0 PASS (already newest, `--check` reached a tag, installed only, or updated), 1 FAIL (install, usability, apply, version, venv or doctor failed), 2 BLOCKED (every refusal and every "no" at a prompt), 64 usage.
+
+Refusals, and what to do:
+
+| Refusal | Fix |
+|---|---|
+| `cannot read release tags from ...` | Offline, a wrong `--repo`, or git is missing. Nothing was changed; run it again when the repository is reachable. |
+| `has a pending upgrade journal` | A crashed upgrade. Run `bin/alpaca upgrade --recover` in that project, then update. `alpaca update` reports the journal and never clears it. A journal file that cannot be read is refused the same way. |
+| `is the launcher of ..., not ...` | `--prefix` and `--bin-dir` (or the launcher you ran, plus your `--prefix`) belong to two different installs. `install.sh` would rewrite the other install's launcher, so nothing runs. Pass `--bin-dir` with the launcher folder of the prefix you mean. A file there that `install.sh` did not write is refused the same way. `--check` reports it too. |
+| `a repository address cannot start with '-'` | `--repo` (or `$ALPACA_UPDATE_REPO`) looks like an option to git. Use an https, ssh or path address. |
+| `cannot write ...` | The prefix or its lock file is not writable. Nothing was changed. |
+| `no downgrade` | The newest release is older than the project. Nothing to do. |
+| `is a development tree (channel dev)` | A development checkout takes its code from git, not from a release. |
+| `is an installed release, not a project` | Run it inside a project, or pass `--target`. |
+| `no installed Alpaca found` | Pass `--prefix` and `--bin-dir`, or run `install.sh` first. Update upgrades an install; it never makes the first one. |
+| `no terminal to ask; pass --yes` | There is no TTY to answer on. Pass `--yes`. `--check` needs no terminal. |
+| `another alpaca update holds ...` | Another update is running against the same prefix. Wait for it. |
+| `another alpaca update or upgrade of ... is running` / `an alpaca update or upgrade of ... is running now` | Another `alpaca update` or `alpaca upgrade` (or a second session's) holds the project lock `.alpaca/upgrade.lock`. Wait for it to end; do not run `upgrade --recover` on its journal. Nothing was changed. The lock is released when that process ends, even if it was killed. |
+| `could not save your local files before the upgrade` | A file the upgrade would replace cannot be copied (unreadable, a named pipe, an unreadable folder). Nothing was applied. Fix the file or move it away, then run it again. |
+
+Saying no at the plan prompt leaves the new release installed and current and the project untouched; run `alpaca update` again to finish. `--prefix DIR` and `--bin-dir DIR` name the install to update when no launcher written by `install.sh` is on your `PATH`; `install.sh` now records both folders in the launcher it writes. A project that is a git repository will show the upgrade's changes as uncommitted; the saved local files make that safe without a git refusal.
+
+The sha256 check proves that the tree matches its own `MANIFEST.json`. It does not prove who published the tree; the repository address is the trust anchor.
+
+Projects made by 1.3.0 or older: version 1.3.0 has no `update` verb, and its launcher does not route one. Run the install one-liner once (it installs the newest release and rewrites the launcher), then run `alpaca update` in each project. The manual fallback, with `$PREFIX` the install prefix (default `~/.local/share/alpaca`), is `"$PREFIX/current/bin/alpaca" upgrade --target "$PWD" --plan`, then the same command without `--plan`. Use that absolute path: inside a project, plain `alpaca upgrade` runs the project's own, older code with the project itself as the source.
 
 ## Research runs in the session
 

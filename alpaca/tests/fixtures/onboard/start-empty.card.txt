@@ -1,0 +1,57 @@
+SETUP PROPOSAL card-81d4e2f4 for class-reading-log                              2026-10-14
+Nothing is set up until you reply. It takes about 2 minutes to read.
+Alpaca records what I do, checks each change, and stops me at the points below.
+
+1. WHAT I UNDERSTOOD (tell me any line that is wrong)
+- Your goal, in your words: "a page on my laptop that tracks my students' reading logs, working
+  this week"
+- Limits you gave: "nothing is published online, ever, and student names never leave the laptop"
+- Done when (my first guess; we confirm it before any change): you can type a student's name and
+  the pages they read today, and see a list per student, on your laptop, before the end of this
+  week.
+- Situation: start empty. No repository was named.
+
+2. WHAT I FOUND
+- No existing code. We start from nothing, so there is nothing to read yet
+
+3. WHERE ALPACA SITS: native mode
+Your code lives in the studio (the folder you made with alpaca new), in its own git history.
+Nothing is shared with anyone until you decide.
+Why native: there is no code yet, so nothing needs to be kept apart.
+
+4. CHECKS
+None yet. The first piece of work adds a test, and that test becomes the first check.
+
+5. FIRST STEPS AFTER YOUR YES (your yes approves a only)
+a. Agree on what "done" means for your goal: about 10 minutes of questions, then I write a short
+   plan for you to read.
+b. Add the first task (one small piece of work with its own branch) with its first test, so the
+   first check exists.
+c. Start the first op (one goal with its own tasks and reports) only when you say go.
+
+6. HOW A CHANGE REACHES YOU
+Changes are commits in this folder's own git history. Nothing leaves your machine unless you
+push it yourself. Each task works on its own branch there, and I merge it into main only when
+its checks pass and you say so: you decide every merge. No repo of yours is attached, so there
+is no commit identity, pull request footer or branch prefix to set.
+
+7. HOW MUCH I DO ALONE: L3
+The level (how much I may do before I ask you, from L1 to L6) is L3. I run a whole task and stop
+at every fork and before anything that cannot be undone. Why L3: nothing exists to break, and no
+change leaves the studio. Say "raise the level" when you trust the work; I never raise it
+myself.
+
+8. WHAT STAYS WITH YOU
+Publishing anywhere, merging a task into main, raising the level, deleting files outside this
+folder.
+
+9. UNDO
+Before your yes there is nothing to undo. After it: delete this folder; copy your new code out
+first, because it lives inside.
+
+10. SETTINGS I WILL WRITE
+mode native; level L3; people: Alpaca Development as owner; plain-writing check on for Alpaca's
+own reports (suggested by me; your code is not affected).
+
+Reply "yes" to set this up as written, or tell me which line to change.
+(The long form works too: card-81d4e2f4 yes)

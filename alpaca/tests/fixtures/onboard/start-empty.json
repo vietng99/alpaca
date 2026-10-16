@@ -1,0 +1,46 @@
+{
+ "answers": {
+  "done-guess": {
+   "event": 6,
+   "source": "agent",
+   "value": "you can type a student's name and the pages they read today, and see a list per student, on your laptop, before the end of this week."
+  },
+  "goal": {
+   "event": 3,
+   "option": null,
+   "quote": "a page on my laptop that tracks my students' reading logs, working this week. 1a. nothing is published online, ever, and student names never leave the laptop",
+   "source": "owner",
+   "value": "a page on my laptop that tracks my students' reading logs, working this week"
+  },
+  "limits": {
+   "event": 5,
+   "option": null,
+   "quote": "a page on my laptop that tracks my students' reading logs, working this week. 1a. nothing is published online, ever, and student names never leave the laptop",
+   "source": "owner",
+   "value": "nothing is published online, ever, and student names never leave the laptop"
+  },
+  "opening": {
+   "event": 2,
+   "option": null,
+   "quote": "I want to make a little app for my class but I am not a programmer",
+   "source": "owner",
+   "value": "I want to make a little app for my class but I am not a programmer"
+  },
+  "stack": {
+   "event": 4,
+   "option": "a",
+   "quote": "a page on my laptop that tracks my students' reading logs, working this week. 1a. nothing is published online, ever, and student names never leave the laptop",
+   "source": "owner",
+   "value": null
+  }
+ },
+ "date": "2026-10-14",
+ "look": null,
+ "name": "class-reading-log",
+ "people": [
+  {
+   "name": "Alpaca Development",
+   "role": "owner"
+  }
+ ]
+}

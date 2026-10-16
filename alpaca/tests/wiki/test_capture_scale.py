@@ -254,10 +254,12 @@ def test_the_shared_absorber_is_replaced_when_its_store_or_root_changes(project)
 
 # ------------------------------------------------------------------ index size
 def test_the_echo_index_keeps_one_string_per_token():
+    # t-685: a block holds its tokens as ids into one vocabulary, so each token is one string
     index = EchoIndex()
     index.load([("a", "the lantern rota moved", "d1"), ("b", "lantern rota again", "d2")])
     index.add("c", "rota lantern twice", "d3")
-    held = {block: {token: token for token in index._tokens[block]} for block in "abc"}
+    held = {block: set(index._tok[index._slot[block]]) for block in "abc"}
     for token in ("lantern", "rota"):
-        assert held["a"][token] is held["b"][token] is held["c"][token]
+        assert all(index._vocab[token] in held[block] for block in "abc")
+    assert len(index._vocab) == len(set("the lantern rota moved again twice".split()))
     assert index.detect("the lantern rota moved", exclude_doc_id="d9") == ("quotes", "a", None)

@@ -17,18 +17,27 @@ import threading
 
 from alpaca.analytics import detail, metrics, ratecards
 
-# Keep the measured project inventory (773 parents and 2741 children) across
-# complete rebuilds. Bound bytes too: compact coverage/cost metadata can vary.
-MAX_ROWS = 8192
+# Keep the measured project inventory across complete rebuilds: 773 parents and 2741 children,
+# then 1333 parents and 9314 children (10604 rows, 19.6 MB of JSON) at t-680, when an 8192-row
+# bound evicted every row before its reuse. The byte bound is the real one; the row bound only
+# stops a flood of tiny rows.
+MAX_ROWS = 65536
 MAX_ROW_BYTES = 64 * 1024 * 1024
 _ROWS = OrderedDict()
 _ROW_BYTES = 0
 _ROWS_LOCK = threading.RLock()
 _MODEL_KEYS = ("model", "provider", "responses", "costed_responses", "unpriced")
+_UNKNOWN = "unknown session"     # metrics.analyze's KeyError for a conversation the record does not know
 
 
 def _analysis_row(root, sid):
-    """The pieces of metrics.analyze(root, sid) that index() needs, cached per analysis key."""
+    """The pieces of metrics.analyze(root, sid) that index() needs, cached per analysis key.
+
+    A conversation the record does not know (metrics.analyze raises KeyError('unknown session'):
+    no session row, no transcript, no pool file) is cached too, as a row of None that raises the
+    same KeyError: the key covers each of those inputs, so it moves when one appears. Most
+    children of the live record are such files, and an uncached miss paid the source revision
+    twice and the failed analysis on every index run (t-680)."""
     global _ROW_BYTES
     key = metrics.analysis_key(root, sid)
     identity = key[:3]
@@ -36,11 +45,21 @@ def _analysis_row(root, sid):
         cached = _ROWS.get(identity)
         if cached is not None and cached[0] == key:
             _ROWS.move_to_end(identity)
+            if cached[1] is None:
+                raise KeyError(_UNKNOWN)
             return copy.deepcopy(cached[1])
-    analysis = metrics.analyze(root, sid)
-    row = {"summary": analysis["summary"], "coverage": analysis["coverage"], "cost": analysis["cost"],
-           "operator": analysis["session"].get("operator"),
-           "models": [{name: model.get(name) for name in _MODEL_KEYS} for model in analysis.get("models") or []]}
+    try:
+        analysis = metrics.analyze(root, sid)
+    except KeyError as error:
+        if error.args != (_UNKNOWN,):
+            raise
+        analysis = None
+    if analysis is None:
+        row = None
+    else:
+        row = {"summary": analysis["summary"], "coverage": analysis["coverage"], "cost": analysis["cost"],
+               "operator": analysis["session"].get("operator"),
+               "models": [{name: model.get(name) for name in _MODEL_KEYS} for model in analysis.get("models") or []]}
     size = len(json.dumps([key, row], ensure_ascii=True).encode("utf-8"))
     with _ROWS_LOCK:
         # Replace a conversation revision directly, without scanning every key.
@@ -52,6 +71,8 @@ def _analysis_row(root, sid):
             _ROW_BYTES += size
         while _ROWS and (len(_ROWS) > MAX_ROWS or _ROW_BYTES > MAX_ROW_BYTES):
             _ROW_BYTES -= _ROWS.popitem(last=False)[1][2]
+    if row is None:
+        raise KeyError(_UNKNOWN)
     return row
 
 

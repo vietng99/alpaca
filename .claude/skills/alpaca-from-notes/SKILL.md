@@ -26,6 +26,13 @@ raw notes -> input/notes/ (alpaca note add) -> interview (/alpaca-interview, sig
 
 ## Step 0: keep the notes and let Alpaca pick
 
+If the first chat (`/alpaca-first-chat`) has run, the owner's goal is already in the inbox: the setup card's
+`apply` kept it as a note, in their words, byte for byte. `bin/alpaca note list` shows it. Start from that note
+and do not ask for the goal again.
+
+If the first chat is still open, finish it or ask the owner to type `skip setup` first. Until then
+`bin/alpaca note add` is refused, and the owner's goal goes on the setup card.
+
 Keep every piece the person gave in the inbox, as it is, one piece per note (their words, never a
 summary):
 

@@ -161,7 +161,7 @@ def test_watcher_folds_at_most_once_per_interval(project, monkeypatch):
     clock = [1000.0]
     signature = ["a"]
     monkeypatch.setattr(serve.time, "time", lambda: clock[0])
-    monkeypatch.setattr(serve, "_data_sig", lambda root: signature[0])
+    monkeypatch.setattr(serve.Live, "_input_sig", lambda self, *_: signature[0])
     monkeypatch.setattr(serve.build_index, "collect", lambda root: calls.append(1) or [])
     monkeypatch.setattr(serve.build_index, "_fold", lambda root, collected: {"sessions": [], "n": len(calls)})
     live = serve.Live(project)
@@ -178,6 +178,151 @@ def test_watcher_folds_at_most_once_per_interval(project, monkeypatch):
     signature[0] = "c"
     live.refresh()
     assert len(calls) == 3, "a direct refresh is never throttled"
+
+
+def test_input_signature_reads_the_event_head_without_scanning_the_chain(project, monkeypatch):
+    """t-670: the watcher computes the input signature every POLL_S. Its cost must not grow with
+    the number of events: an unindexed MAX(hash) read every event row on every tick."""
+    from alpaca import db
+    conn = db.connect(project)
+    db.append_event(conn, session="s1", actor="agent", kind="heartbeat", data={})
+    real = serve.db.connect_readonly
+    steps = [0]
+
+    def counted(root):
+        reader = real(root)
+        reader.set_progress_handler(lambda: steps.__setitem__(0, steps[0] + 1), 1)
+        return reader
+    monkeypatch.setattr(serve.db, "connect_readonly", counted)
+
+    def cost():
+        steps[0] = 0
+        signature = serve._data_sig(project)
+        return steps[0], signature
+    small, before = cost()
+    with db.transaction(conn):
+        for _ in range(2000):
+            db.append_event(conn, session="s1", actor="agent", kind="heartbeat", data={}, conn_in_txn=True)
+    large, after = cost()
+    head = conn.execute("SELECT id, hash FROM events ORDER BY id DESC LIMIT 1").fetchone()
+    conn.close()
+    assert after != before, "a new event still moves the signature"
+    assert small > 0, "the progress handler counted the signature's reads"
+    assert large - small < 200, "2000 more events cost %d more SQLite steps" % (large - small)
+    assert head[1], "the head row carries the hash the signature reads"
+
+
+def test_watcher_reads_file_inputs_at_most_every_scan_interval(project, monkeypatch):
+    """t-670: a throttled tick reads the transcript stats and the library walk at most every
+    SCAN_MIN_S; a direct refresh reads all. t-680: the record part only when the board or the fold
+    is due, the transcript stats only when the fold is."""
+    from alpaca import db
+    monkeypatch.setattr(serve.build_index, "collect", lambda root: [])
+    monkeypatch.setattr(serve.build_index, "_fold", lambda root, collected: {"sessions": []})
+    conn = db.connect(project)
+    transcript = os.path.join(project, ".alpaca", "transcripts", "main.jsonl")
+    os.makedirs(os.path.dirname(transcript), exist_ok=True)
+    with open(transcript, "w", encoding="utf-8") as fh:
+        fh.write("{}\n")
+    db.upsert(conn, "sessions", "sid", {"sid": "main", "transcript": transcript})
+    stats, walks = [], []
+    real_stat, real_walk = serve._stat_revision, serve.scan_library
+    monkeypatch.setattr(serve, "_stat_revision", lambda path: stats.append(path) or real_stat(path))
+    monkeypatch.setattr(serve, "scan_library", lambda root: walks.append(root) or real_walk(root))
+    live = serve.Live(project)
+    live.refresh(fold=False)
+    assert stats and walks, "a direct refresh reads the files"
+    del stats[:], walks[:]
+    live.refresh(throttle=True, fold=False)
+    assert stats == [] and walks == [], "a throttled tick inside SCAN_MIN_S reads no file"
+
+    db.append_event(conn, session="main", actor="agent", kind="heartbeat", data={})
+    live._board_at -= serve.BOARD_MIN_S
+    live.refresh(throttle=True, fold=False)
+    assert stats == [] and walks == []
+    moved = live._pricing_sig
+    assert moved == serve._data_sig(project), "a record change moves the signature on the next board tick"
+    del stats[:]
+
+    with open(transcript, "a", encoding="utf-8") as fh:
+        fh.write("{}\n")
+    live.refresh(throttle=True, fold=False)
+    assert stats == [] and live._pricing_sig == moved, "a transcript change waits for the next scan"
+    live._input_files_at -= serve.SCAN_MIN_S
+    live._lib_at -= serve.SCAN_MIN_S
+    live.refresh(throttle=True)
+    live._fold_thread.join(10)
+    assert stats and walks, "past SCAN_MIN_S a throttled tick with the fold due reads the files again"
+    del stats[:]
+    assert live._pricing_sig != moved and live._pricing_sig == serve._data_sig(project)
+    conn.close()
+
+
+def test_a_transcript_change_alone_does_not_rebuild_the_board(project, monkeypatch):
+    """t-670: the board renders from the record and the config files, so a transcript that moved
+    (the analytics fold's input) does not rebuild it; a new event still does."""
+    from alpaca import db
+    conn = db.connect(project)
+    transcript = os.path.join(project, ".alpaca", "transcripts", "main.jsonl")
+    os.makedirs(os.path.dirname(transcript), exist_ok=True)
+    with open(transcript, "w", encoding="utf-8") as fh:
+        fh.write("{}\n")
+    db.upsert(conn, "sessions", "sid", {"sid": "main", "transcript": transcript})
+    builds = []
+    real = serve.export.payload
+    monkeypatch.setattr(serve.export, "payload", lambda c, *a, **k: builds.append(1) or real(c, *a, **k))
+    live = serve.Live(project)
+    live.refresh(fold=False)
+    assert len(builds) == 1
+    with open(transcript, "a", encoding="utf-8") as fh:
+        fh.write("{}\n")
+    live.refresh(fold=False)
+    assert len(builds) == 1, "a transcript-only change leaves the board as it is"
+    db.append_event(conn, session="main", actor="agent", kind="heartbeat", data={})
+    live.refresh(fold=False)
+    assert len(builds) == 2, "a new event rebuilds the board"
+    conn.close()
+
+
+def test_an_unwatched_hub_slows_its_watcher_until_a_viewer_returns(project, monkeypatch):
+    """t-670: with no stream open and no viewer request for VIEW_GRACE_S, a throttled tick reads
+    the files at most every SCAN_IDLE_S and folds at most every FOLD_IDLE_S; a viewer's request
+    wakes the watcher, and its next tick folds the inputs that moved."""
+    from alpaca import db
+    clock = [1000.0]
+    monkeypatch.setattr(serve.time, "time", lambda: clock[0])
+    folds, stats = [], []
+    monkeypatch.setattr(serve.build_index, "collect", lambda root: folds.append(1) or [])
+    monkeypatch.setattr(serve.build_index, "_fold", lambda root, collected: {"sessions": [], "n": len(folds)})
+    real_stat = serve._stat_revision
+    monkeypatch.setattr(serve, "_stat_revision", lambda path: stats.append(path) or real_stat(path))
+    conn = db.connect(project)
+    transcript = os.path.join(project, ".alpaca", "transcripts", "main.jsonl")
+    os.makedirs(os.path.dirname(transcript), exist_ok=True)
+    with open(transcript, "w", encoding="utf-8") as fh:
+        fh.write("{}\n")
+    db.upsert(conn, "sessions", "sid", {"sid": "main", "transcript": transcript})
+    live = serve.Live(project)
+    live.refresh(throttle=True)
+    live._fold_thread.join(10)
+    assert len(folds) == 1 and live.watched(), "a fresh server counts as watched for VIEW_GRACE_S"
+
+    clock[0] += serve.VIEW_GRACE_S + serve.FOLD_MIN_S
+    assert not live.watched()
+    db.append_event(conn, session="main", actor="agent", kind="heartbeat", data={})
+    live._input_files_at -= serve.SCAN_MIN_S        # a watched tick would read the files again now
+    del stats[:]
+    live.refresh(throttle=True)
+    assert stats == [], "unwatched, the files wait for SCAN_IDLE_S"
+    assert len(folds) == 1, "unwatched, a moved input waits for FOLD_IDLE_S"
+    assert not live._wake.is_set()
+
+    live.touch()                                      # a viewer's request
+    assert live.watched() and live._wake.is_set(), "the request wakes the watcher"
+    live.refresh(throttle=True)
+    live._fold_thread.join(10)
+    assert len(folds) == 2, "the first watched tick folds what moved"
+    conn.close()
 
 
 def test_first_refresh_serves_the_board_before_the_fold(project, monkeypatch):
@@ -283,3 +428,125 @@ def test_inflight_failed_rebuild_keeps_the_old_snapshot_and_backs_off(project, m
     _wait_idle(live)
     assert len(calls) == 2 and live._inflight[1] == {"n": 1}
     assert live.inflight() == {"n": 1} and len(calls) == 2      # inside the back-off: no new attempt
+
+
+def _watched_project(project):
+    from alpaca import db
+    conn = db.connect(project)
+    transcript = os.path.join(project, ".alpaca", "transcripts", "main.jsonl")
+    os.makedirs(os.path.dirname(transcript), exist_ok=True)
+    with open(transcript, "w", encoding="utf-8") as fh:
+        fh.write("{}\n")
+    db.upsert(conn, "sessions", "sid", {"sid": "main", "transcript": transcript})
+    return conn, transcript
+
+
+def test_a_watched_tick_reads_the_inputs_only_when_the_board_or_the_fold_is_due(project, monkeypatch):
+    """t-680: with busy sessions on the host the record moves every second, so every 0.7 s tick of
+    a watched hub read the record parts (12380 meta rows on the live record) and every SCAN_MIN_S
+    one stat'ed every transcript, while the board they feed is rebuilt at most every BOARD_MIN_S
+    and the fold runs at most every FOLD_MIN_S. A tick now reads the record only when the board or
+    the fold is due, and the transcript stats only when the fold is due."""
+    from alpaca import db
+    clock = [1000.0]
+    monkeypatch.setattr(serve.time, "time", lambda: clock[0])
+    folds, records, stats, builds = [], [], [], []
+    monkeypatch.setattr(serve.build_index, "collect", lambda root: folds.append(1) or [])
+    monkeypatch.setattr(serve.build_index, "_fold", lambda root, collected: {"sessions": [], "n": len(folds)})
+    real_record, real_stat, real_payload = serve._record_parts, serve._stat_revision, serve.export.payload
+    monkeypatch.setattr(serve, "_record_parts", lambda conn: records.append(1) or real_record(conn))
+    monkeypatch.setattr(serve, "_stat_revision", lambda path: stats.append(path) or real_stat(path))
+    monkeypatch.setattr(serve.export, "payload", lambda c, *a, **k: builds.append(1) or real_payload(c, *a, **k))
+    conn, transcript = _watched_project(project)
+    live = serve.Live(project)
+    live.refresh(throttle=True)
+    live._fold_thread.join(10)
+    assert len(folds) == 1 and len(builds) == 1 and live.watched()
+
+    def tick(advance):
+        clock[0] += advance
+        del records[:], stats[:]
+        live.refresh(throttle=True)
+        if live._fold_thread is not None:
+            live._fold_thread.join(10)
+
+    db.append_event(conn, session="main", actor="agent", kind="heartbeat", data={})
+    live._input_files_at -= serve.SCAN_MIN_S
+    tick(serve.SCAN_MIN_S)
+    assert records == [] and stats == [] and len(builds) == 1, "neither the board nor the fold is due"
+    tick(serve.BOARD_MIN_S)
+    assert records and stats == [] and len(builds) == 2, "the board is due: the record is read, the files are not"
+    assert len(folds) == 1
+    with open(transcript, "a", encoding="utf-8") as fh:
+        fh.write("{}\n")
+    tick(1)
+    assert records == [] and stats == [] and len(builds) == 2
+    live._input_files_at -= serve.SCAN_MIN_S
+    tick(serve.FOLD_MIN_S)
+    assert records and stats and len(folds) == 2, "the fold is due: every input is read and the fold runs"
+    assert live._data_sig == serve._data_sig(project)
+    conn.close()
+
+
+def test_an_unwatched_hub_rebuilds_the_board_at_most_every_board_idle_interval(project, monkeypatch):
+    """t-680: an unwatched hub rebuilt the board every BOARD_MIN_S (0.34 s of CPU each on the live
+    record, the largest share of its idle cost) because busy sessions move the record all the
+    time, yet no page is open to take the push. Unwatched it waits BOARD_IDLE_S; a viewer's return
+    wakes the watcher and its first tick rebuilds what moved."""
+    from alpaca import db
+    clock = [1000.0]
+    monkeypatch.setattr(serve.time, "time", lambda: clock[0])
+    builds = []
+    real_payload = serve.export.payload
+    monkeypatch.setattr(serve.export, "payload", lambda c, *a, **k: builds.append(1) or real_payload(c, *a, **k))
+    conn, _transcript = _watched_project(project)
+    live = serve.Live(project)
+    live.refresh(throttle=True, fold=False)
+    assert len(builds) == 1
+    clock[0] += serve.VIEW_GRACE_S
+    assert not live.watched()
+    db.append_event(conn, session="main", actor="agent", kind="heartbeat", data={})
+    live.refresh(throttle=True, fold=False)
+    assert len(builds) == 2, "past BOARD_IDLE_S a moved record rebuilds the board"
+    db.append_event(conn, session="main", actor="agent", kind="heartbeat", data={})
+    clock[0] += serve.BOARD_MIN_S
+    live.refresh(throttle=True, fold=False)
+    assert len(builds) == 2, "unwatched, a moved record waits for BOARD_IDLE_S"
+    clock[0] += serve.BOARD_IDLE_S - serve.BOARD_MIN_S
+    live.refresh(throttle=True, fold=False)
+    assert len(builds) == 3
+    db.append_event(conn, session="main", actor="agent", kind="heartbeat", data={})
+    live.touch()
+    live.refresh(throttle=True, fold=False)
+    assert len(builds) == 3, "inside BOARD_MIN_S of the last build"
+    clock[0] += serve.BOARD_MIN_S
+    live.refresh(throttle=True, fold=False)
+    assert len(builds) == 4, "watched again, the board keeps BOARD_MIN_S"
+    conn.close()
+
+
+def test_a_tick_reads_the_board_liveness_without_serializing_the_board(project, monkeypatch):
+    """t-680: every tick took board_snapshot() (parse the 878 KB board, overlay liveness, serialize
+    it twice) only to see whether a work session's liveness flipped: 5.8 ms a tick, 1.1% of a
+    core at the watched cadence. The tick now reads the liveness of the work sessions alone, parsed
+    once per board; a flip still moves the board revision and pushes."""
+    clock = [1000.0]
+    monkeypatch.setattr(serve.time, "time", lambda: clock[0])
+    live = serve.Live(project)
+    live.refresh(throttle=True, fold=False)
+    live.board_json = json.dumps({"pulse": {"now": {"sessions": {"work": [
+        {"sid": "s1", "last_beat": "1970-01-01T00:16:40+00:00", "ended": None, "active": True}]}}}})
+    live.board_rev = "fixture-board"
+    snapshots = []
+    real = serve.Live.board_snapshot
+    monkeypatch.setattr(serve.Live, "board_snapshot", lambda self: snapshots.append(1) or real(self))
+    live.refresh(throttle=True, fold=False)
+    generation, revision = live.gen, json.loads(live.rev_blob())["board"]
+    del snapshots[:]
+    clock[0] += 1
+    live.refresh(throttle=True, fold=False)
+    assert snapshots == [] and live.gen == generation, "nothing flipped: no push, no serialization"
+    clock[0] += 600
+    live.refresh(throttle=True, fold=False)
+    assert snapshots == [] and live.gen > generation, "the session went quiet: a push"
+    assert json.loads(live.rev_blob())["board"] != revision

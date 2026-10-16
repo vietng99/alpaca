@@ -67,3 +67,13 @@ def test_main_prints_json_and_exits_zero():
     p = subprocess.run([sys.executable, "-m", "alpaca.hooks.temp_guard"], input="not json",
                        capture_output=True, text=True, cwd=REPO, timeout=30)
     assert p.returncode == 0 and p.stdout == ""
+
+
+def test_a_basetemp_in_the_sandbox_temp_root_is_ram_and_gets_only_the_leak_note():
+    """The sandbox temp root is `/tmp/sbx<sid8>` (alpaca/sandbox.py), on RAM like any /tmp folder: no
+    "not under /tmp" note, and the leak note stays unless the command removes it."""
+    path = "/tmp/sbxabcd1234/t1"
+    note = temp_guard.note_for(path)
+    assert "not under /tmp" not in note and "never deletes" in note
+    assert temp_guard.decide(_bash("pytest --basetemp %s x.py; rm -rf %s" % (path, path))) is None
+    assert "not under /tmp" in temp_guard.note_for("/work/.alpaca/tmp/sbx-abcd1234/t1")
