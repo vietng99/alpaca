@@ -447,6 +447,13 @@ class TranscriptUnavailable(OSError):
     """A registered transcript has no readable native or preserved source."""
 
 
+class TranscriptMalformed(OSError):
+    """A transcript file that is there and readable holds a record that does not parse (or a
+    retained copy's `capture-malformed-record` marker). A torn record in the middle of a file never
+    reads clean again, so the collector hands such a session to its own snapshot job instead of
+    retrying the whole batch for ever (t-684, `consumers.MALFORMED_AFTER_FAILURES`)."""
+
+
 class TranscriptVersionUnavailable(OSError):
     """The transcript version a record event names (its byte count and sha256) is no longer the start
     of the transcript file: the file is shorter, or its first bytes were rewritten. Nothing of the
@@ -526,9 +533,10 @@ def _visible_transcript(session, path, changed=None, version=None):
                     try:
                         record = json.loads(raw)
                     except (ValueError, UnicodeError, RecursionError) as exc:
-                        raise OSError("transcript contains an incomplete or malformed record") from exc
+                        raise TranscriptMalformed(
+                            "transcript contains an incomplete or malformed record") from exc
                     if not isinstance(record, dict) or record.get("type") == "capture-malformed-record":
-                        raise OSError("transcript contains a malformed record")
+                        raise TranscriptMalformed("transcript contains a malformed record")
                     yield record, source
             self.source_sha256 = digest.hexdigest()
             self.source_bytes = offset
@@ -1001,6 +1009,8 @@ def capture(root, events, *, sessions=(), clock=None, transcript_paths=None, abs
                              "error": "%s: %s" % (type(exc).__name__, exc)}
                     if isinstance(exc, TranscriptVersionUnavailable):
                         entry["reason"] = exc.reason
+                    elif isinstance(exc, TranscriptMalformed):
+                        entry["malformed"] = True        # there and readable, but torn (t-684)
                     missing.append(entry)
                     done += 1
                     continue

@@ -31,6 +31,11 @@ MAX_ROW_JSON_BYTES = 128 * 1024 * 1024
 _ROWS = OrderedDict()
 _ROW_BYTES = 0
 _ROWS_LOCK = threading.RLock()
+# The record's share of each row (_record_only and _record_summary), per session under the stamp of
+# what the two read (_record_stamps): every fold read every event of every session for it, 2.5 s of
+# CPU on the live record, for the few sessions that moved (t-680). Guarded by _ROWS_LOCK, bounded
+# by MAX_ROWS and pruned with _ROWS.
+_RECORD = OrderedDict()
 
 def _sessions_dir(root):
     return os.path.join(paths.runtime_dir(root), "analytics", "sessions")
@@ -52,6 +57,45 @@ def _record_summary(conn, sid):
             "ops_closed": q("op-close"), "msgs": q("msg"), "level": row[0]["level"] if row else None,
             "last_beat": row[0]["last_beat"] if row else None, "hook_runtime_ms": round(hook_ms, 1),
             "hook_runs": hook_runs}
+
+def _record_stamps(conn):
+    """sid -> the stamp of everything _record_only and _record_summary read for that session, from
+    four grouped queries: the session's event count and last event id (events are append-only, so
+    the pair moves whenever its events do), its session row, its operator label and its hook-cost
+    rows. A hook-cost key is filed under every sid it can start with, so the rows of a sid are
+    exactly those _record_summary keeps (`startswith("hook-cost:" + sid + ":")`)."""
+    events = {row[0]: (row[1], row[2]) for row in
+              conn.execute("SELECT session, COUNT(*), MAX(id) FROM events GROUP BY session")}
+    sessions = {row["sid"]: tuple(sorted(row.items())) for row in db.rows(conn, "sessions")}
+    operators, hooks = {}, {}
+    for key, value in conn.execute("SELECT key, value FROM meta WHERE key LIKE 'operator:%' "
+                                   "OR key LIKE 'hook-cost:%'"):
+        if key.startswith("operator:"):
+            operators[key[len("operator:"):]] = value
+        elif key.startswith("hook-cost:"):
+            at = key.find(":", len("hook-cost:"))
+            while at != -1:
+                hooks.setdefault(key[len("hook-cost:"):at], []).append((key, value))
+                at = key.find(":", at + 1)
+    return lambda sid: (events.get(sid), sessions.get(sid), operators.get(sid), tuple(hooks.get(sid, ())))
+
+
+def _record_parts(root, conn, sid, stamp):
+    """(_record_only, _record_summary) of sid, from the cache while its stamp holds; fresh copies."""
+    identity = (os.path.realpath(root), sid)
+    with _ROWS_LOCK:
+        cached = _RECORD.get(identity)
+        if cached is not None and cached[0] == stamp:
+            _RECORD.move_to_end(identity)
+            return copy.deepcopy(cached[1]), dict(cached[2])
+    only, summary = _record_only(conn, sid), _record_summary(conn, sid)
+    with _ROWS_LOCK:
+        _RECORD[identity] = (stamp, copy.deepcopy(only), dict(summary))
+        _RECORD.move_to_end(identity)
+        while len(_RECORD) > MAX_ROWS:
+            _RECORD.popitem(last=False)
+    return only, summary
+
 
 def _transcripts(root, conn):
     # Only explicitly registered paths and project-local copies. Historical
@@ -217,6 +261,8 @@ def _prune(root, sessions):
     with _ROWS_LOCK:
         for identity in [item for item in _ROWS if item[0] == real and item[1] not in sessions]:
             _drop(identity)
+        for identity in [item for item in _RECORD if item[0] == real and item[1] not in sessions]:
+            del _RECORD[identity]
 
 
 def collect(root, force=False, only=None):
@@ -233,16 +279,18 @@ def collect(root, force=False, only=None):
         folded = children.parents(families)
         sessions = ({r["sid"] for r in db.rows(conn, "sessions")} | set(sources)) - set(folded)
         wanted = sorted(sessions) if only is None else [sid for sid in sorted(sessions) if sid == only]
-        # Every revision is read inside one batch: obs_source is scanned once, not twice per session.
-        with detail.revision_batch(root):
+        # Every revision is read inside one batch: obs_source is scanned once, not twice per session,
+        # on one connection with one rate-card read, as the index run does (t-577, t-680).
+        with detail.revision_scope(root), detail.revision_batch(root):
             keys = {sid: metrics.analysis_key(root, sid) for sid in wanted}
         if only is None:
             _prune(root, sessions)
         owners = {}
+        stamp = _record_stamps(conn)
         for sid in wanted:
             tpath = sources.get(sid)
             available = bool(tpath and os.path.isfile(tpath))
-            d = _record_only(conn, sid)
+            d, record = _record_parts(root, conn, sid, stamp(sid))
             identity, entry = _entry(root, sid, keys[sid], tpath, available, force)
             analysis, src = copy.deepcopy(entry['analysis']), copy.deepcopy(entry['src'])
             if available:
@@ -293,7 +341,7 @@ def collect(root, force=False, only=None):
                                    for kind in ('workflow', 'subagent')}
             # The fold's revision moves when a child transcript grows, so the index is recomputed.
             d['subagents_rev'] = util.sha256_hex(util.canonical_json(children.revision(kids))) if kids else None
-            d['record'] = _record_summary(conn, sid)
+            d['record'] = record
             d['class'] = sessions_view.class_of(view, sid)
             if d['class'] == sessions_view.PROBE and (d.get('turns') or d.get('tool_calls')):
                 d['class'] = sessions_view.WORK

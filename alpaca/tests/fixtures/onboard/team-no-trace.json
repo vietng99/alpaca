@@ -1,0 +1,223 @@
+{
+ "answers": {
+  "commit-identity": {
+   "event": 8,
+   "option": null,
+   "quote": "1. add CSV export to the report command. 2b - no wait, Hana the team lead merges, so 2a. 3a. Author the commits as Shop Bot <bot@shop.example> and keep the pull request footer on. The repo must not get any Alpaca file, and their CI must stay green",
+   "source": "owner",
+   "value": "Shop Bot <bot@shop.example>"
+  },
+  "done-guess": {
+   "event": 7,
+   "source": "agent",
+   "value": "`report --csv` writes the same rows as the table output, with a test, and Hana merged the pull request."
+  },
+  "files-in-repo": {
+   "event": 7,
+   "option": "a",
+   "quote": "1. add CSV export to the report command. 2b - no wait, Hana the team lead merges, so 2a. 3a. Author the commits as Shop Bot <bot@shop.example> and keep the pull request footer on. The repo must not get any Alpaca file, and their CI must stay green",
+   "source": "owner",
+   "value": null
+  },
+  "goal": {
+   "event": 4,
+   "option": null,
+   "quote": "1. add CSV export to the report command. 2b - no wait, Hana the team lead merges, so 2a. 3a. Author the commits as Shop Bot <bot@shop.example> and keep the pull request footer on. The repo must not get any Alpaca file, and their CI must stay green",
+   "source": "owner",
+   "value": "add CSV export to the report command"
+  },
+  "limits": {
+   "event": 6,
+   "option": null,
+   "quote": "1. add CSV export to the report command. 2b - no wait, Hana the team lead merges, so 2a. 3a. Author the commits as Shop Bot <bot@shop.example> and keep the pull request footer on. The repo must not get any Alpaca file, and their CI must stay green",
+   "source": "owner",
+   "value": "The repo must not get any Alpaca file, and their CI must stay green"
+  },
+  "merges": {
+   "event": 5,
+   "option": "a",
+   "quote": "1. add CSV export to the report command. 2b - no wait, Hana the team lead merges, so 2a. 3a. Author the commits as Shop Bot <bot@shop.example> and keep the pull request footer on. The repo must not get any Alpaca file, and their CI must stay green",
+   "source": "owner",
+   "value": "Hana the team lead merges"
+  },
+  "opening": {
+   "event": 2,
+   "option": null,
+   "quote": "we have a repo at /srv/work/shop-reports, I want to add something",
+   "source": "owner",
+   "value": "we have a repo at /srv/work/shop-reports, I want to add something"
+  },
+  "pr-says-agent": {
+   "event": 9,
+   "option": "a",
+   "quote": "1. add CSV export to the report command. 2b - no wait, Hana the team lead merges, so 2a. 3a. Author the commits as Shop Bot <bot@shop.example> and keep the pull request footer on. The repo must not get any Alpaca file, and their CI must stay green",
+   "source": "owner",
+   "value": "keep the pull request footer on"
+  }
+ },
+ "date": "2026-10-14",
+ "look": {
+  "around": {
+   "agent_files": [
+    "AGENTS.md"
+   ],
+   "ci": [
+    ".github/workflows/ci.yml"
+   ],
+   "codeowners": [
+    "CODEOWNERS"
+   ],
+   "contributing": "CONTRIBUTING.md",
+   "contributing_branch_prefix": "feature/",
+   "contributing_branch_rule_at": "repo:CONTRIBUTING.md:12",
+   "gitmodules": false,
+   "hooks": [
+    ".husky/pre-push"
+   ],
+   "tests": [
+    "tests/test_export.py",
+    "tests/test_cli.py"
+   ]
+  },
+  "build_files": [
+   "pyproject.toml"
+  ],
+  "gates": [
+   {
+    "classify": "runs-repo-code",
+    "command": [
+     "python3",
+     "-m",
+     "pytest"
+    ],
+    "evidence": "repo:pyproject.toml",
+    "kind": "test",
+    "name": "test",
+    "timeout": 600,
+    "trial": null
+   }
+  ],
+  "git_findings": [],
+  "git_safe": true,
+  "head": {
+   "branch": "main",
+   "date": "2026-10-01",
+   "sha": "0123456789abcdef0123456789abcdef01234567",
+   "subject": "x"
+  },
+  "history": {
+   "authors": [
+    {
+     "commits": 90,
+     "name": "Hana Lead"
+    },
+    {
+     "commits": 70,
+     "name": "Minh Dev"
+    },
+    {
+     "commits": 40,
+     "name": "Tuan Dev"
+    },
+    {
+     "commits": 12,
+     "name": "Lan Dev"
+    }
+   ],
+   "base": "main",
+   "commits": 212,
+   "days_still": 3,
+   "first": "2025-02-03",
+   "last": "2026-10-11",
+   "recent_authors": [
+    {
+     "last": "2026-10-11",
+     "name": "Hana Lead"
+    },
+    {
+     "last": "2026-10-05",
+     "name": "Minh Dev"
+    },
+    {
+     "last": "2026-09-27",
+     "name": "Tuan Dev"
+    },
+    {
+     "last": "2026-09-18",
+     "name": "Lan Dev"
+    }
+   ],
+   "tips": [
+    {
+     "author": "Minh Dev",
+     "date": "2026-10-05",
+     "ref": "origin/feature/SHOP-12"
+    }
+   ]
+  },
+  "host": {
+   "git_user": "Alpaca Development",
+   "tools": {
+    "cmake": "found",
+    "git": "found",
+    "python3": "found"
+   },
+   "wanted": []
+  },
+  "now": "2026-10-14",
+  "repository": "shopco/shop-reports",
+  "schema": 1,
+  "source": "/srv/work/shop-reports",
+  "source_kind": "path",
+  "sources": [
+   {
+    "n": 1,
+    "text": "repo:pyproject.toml"
+   },
+   {
+    "n": 2,
+    "text": "cmd: git ls-files, grouped by file extension; examples repo:report/cli.py, repo:report/export.py"
+   },
+   {
+    "n": 3,
+    "text": "cmd: git ls-files | wc -l = 41"
+   },
+   {
+    "n": 4,
+    "text": "cmd: git log main --format=%an%x09%ad --date=short (4 authors, 212 commits)"
+   },
+   {
+    "n": 5,
+    "text": "cmd: git for-each-ref --sort=-committerdate refs/remotes"
+   },
+   {
+    "n": 6,
+    "text": "look scan of CI, hook, test, CODEOWNERS, CONTRIBUTING and agent files: found .github/workflows/ci.yml, .husky/pre-push, CODEOWNERS, AGENTS.md, tests/test_export.py, tests/test_cli.py, CONTRIBUTING.md"
+   }
+  ],
+  "tracked": {
+   "files": 41,
+   "languages": [
+    {
+     "examples": [
+      "report/cli.py",
+      "report/export.py"
+     ],
+     "files": 22,
+     "name": "Python"
+    }
+   ],
+   "own": 41,
+   "python_files": 22,
+   "vendor": []
+  },
+  "upstream": "https://github.com/shopco/shop-reports"
+ },
+ "name": "shop-reports",
+ "people": [
+  {
+   "name": "Alpaca Development",
+   "role": "owner"
+  }
+ ]
+}

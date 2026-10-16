@@ -66,7 +66,10 @@ def handle(payload):
     # t-076: a session that edits files while holding no task claim is invisible on the cockpit's
     # parallel-sessions panel. Guarded: a failed check never costs the prompt its other context.
     try:
-        nudge = claim_nudge(conn, sid)
+        # op-062 t-656: while the first chat is open an agent may not run `task add` (alpaca/first_chat.py), so the
+        # nudge that names it waits until the owner answered the setup card or skipped it
+        from alpaca import first_chat
+        nudge = None if first_chat.first_chat_open(conn, root) else claim_nudge(conn, sid)
         if nudge:
             parts.append(nudge)
     except Exception:

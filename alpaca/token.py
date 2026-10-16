@@ -30,6 +30,7 @@ resolves.
 """
 from __future__ import annotations
 
+import json
 import os
 import uuid
 
@@ -47,9 +48,15 @@ def _new_token() -> str:
 
 
 def _token_events(conn):
-    """All token notes in chronological order. db.events returns oldest-first."""
-    return [e for e in db.events(conn, limit=_SCAN_LIMIT)
-            if e["kind"] in (KIND_ISSUE, KIND_SETTLE, KIND_VOID)]
+    """The token notes among the last `_SCAN_LIMIT` events of the record, oldest first. Only they
+    are decoded (t-685: decoding all 100,000 to keep a few took 132 MB in each pad render)."""
+    out = [dict(r) for r in conn.execute(
+        "SELECT * FROM events WHERE kind IN (?,?,?) AND id >= (SELECT COALESCE(MIN(id), 0) FROM "
+        "(SELECT id FROM events ORDER BY id DESC LIMIT ?)) ORDER BY id",
+        (KIND_ISSUE, KIND_SETTLE, KIND_VOID, _SCAN_LIMIT))]
+    for e in out:
+        e["data"] = json.loads(e["data"])
+    return out
 
 
 def _issue_event(conn, token):

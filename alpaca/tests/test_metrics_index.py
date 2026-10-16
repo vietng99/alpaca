@@ -1,6 +1,9 @@
 """Project and crew totals never count client snapshots as additional charges."""
 import json
 from pathlib import Path
+
+import pytest
+
 from alpaca import db, transcripts
 from alpaca.analytics import metrics_index
 
@@ -119,11 +122,15 @@ def test_index_reuses_rows_for_unchanged_sessions_beyond_the_analysis_cache(proj
     assert fourth['totals']['unpriced_models'] == []
 
 
-def test_large_family_rebuild_does_not_reanalyse_unchanged_children(project, monkeypatch):
-    # The live project has 2741 children. A full sequential rebuild used to evict
-    # the next child's compact row from the 2048-entry cache on every pass.
+# The live project had 2741 children, then 9314 under 1333 parents (t-680): a full sequential
+# rebuild used to evict the next child's compact row from the 2048-entry cache, then from the
+# 8192-entry one, on every pass. Only the byte budget may bound the row count.
+@pytest.mark.parametrize('count', [2741, 12000])
+def test_large_family_rebuild_does_not_reanalyse_unchanged_children(project, monkeypatch, count):
+    from collections import OrderedDict
     from alpaca.analytics import metrics
-    count = 2741
+    monkeypatch.setattr(metrics_index, '_ROWS', OrderedDict())     # rows of another case share ids
+    monkeypatch.setattr(metrics_index, '_ROW_BYTES', 0)
     keys = {}
     calls = []
     def key(root, sid):
@@ -187,3 +194,31 @@ def test_index_rows_are_identical_with_and_without_the_per_run_scope(project, mo
     assert with_scope == without
     assert scoped_connects < plain_connects
     assert detail._SCOPE.state is None
+
+
+def test_a_child_the_record_does_not_know_is_not_analysed_again_while_its_key_holds(project, monkeypatch):
+    """t-680: a subagent file found under a parent, with no session row, no project copy of its own
+    and no pool file, makes metrics.analyze raise KeyError('unknown session'). The index kept no
+    row for that outcome, so every index run paid the child's source revision twice plus the failed
+    analysis (5979 of the 10598 rows of the live record, every fold). The miss is kept under the
+    analysis key like a row: the next run with the same key answers it from the cache, and a key
+    that moves analyses it again."""
+    from alpaca.analytics import metrics
+    register(project, 'parent')
+    write(transcripts.local_path(project, 'parent'), 'main-response', 999)
+    child = Path(transcripts.subagents_dir(project, 'parent')) / 'agent-child.jsonl'
+    write(child, 'child-response', 777)
+    calls = []
+    real = metrics.analyze
+    monkeypatch.setattr(metrics, 'analyze', lambda root, sid, *a: calls.append(sid) or real(root, sid, *a))
+    sessions = [{'sid': 'parent', 'class': 'work'}]
+    first = metrics_index.index(project, sessions)
+    assert 'child' in calls, 'the fixture child goes through the analysis first'
+    assert first['sessions'][0]['subagents']['measured'] == 1, 'and is measured by the light reader'
+    del calls[:]
+    assert metrics_index.index(project, sessions) == first
+    assert calls == [], 'an unchanged child the record does not know is not analysed again'
+    register(project, 'child')                          # the record learns the child: its key moves
+    del calls[:]
+    metrics_index.index(project, sessions)
+    assert calls == ['child']

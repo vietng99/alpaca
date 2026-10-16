@@ -188,3 +188,46 @@ def test_readme_says_to_edit_the_template_commands_after_onboarding():
     with open(os.path.join(REPO, "README.md"), encoding="utf-8") as fh:
         quickstart = fh.read().split("## Quickstart", 1)[1].split("\n## ", 1)[0]
     assert "edit `commands` in project.yaml" in quickstart
+
+
+def test_a_plain_onboard_leaves_no_first_chat_mark_and_a_provisional_one_marks_its_event(project):
+    from alpaca import adopt
+    cli.main(["init"])
+    assert cli.main(["onboard", "--name", "d", "--who", "a:owner", "--what", "w"]) == 0
+    conn = db.connect(project)
+    assert adopt.first_chat_state(conn) is None
+    assert "provisional" not in [e for e in db.events(conn, kind="onboard")][-1]["data"]
+
+
+def test_a_provisional_onboard_writes_the_same_project_yaml_and_marks_the_first_chat_due(tmp_path, monkeypatch):
+    import shutil
+    from alpaca import adopt
+    from alpaca.tests.conftest import REPO
+    docs = []
+    for provisional in (False, True):
+        root = tmp_path / ("p%d" % provisional)
+        (root / "style").mkdir(parents=True)
+        (root / "style" / "banned.txt").write_text("")
+        shutil.copy(os.path.join(REPO, "ALPACA-MANIFEST"), root / "ALPACA-MANIFEST")
+        (root / ".alpaca" / "config").mkdir(parents=True)
+        monkeypatch.chdir(root)
+        monkeypatch.delenv("ALPACA_ROOT", raising=False)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+        cli.main(["init"])
+        extra = ["--provisional"] if provisional else []
+        assert cli.main(["onboard", *extra, "--name", "d", "--who", "a:owner", "--what", "w", "--task", "t1"]) == 0
+        cfg = proj.load(str(root))
+        cfg.pop("project_id", None)
+        cfg.pop("cwd_history", None)
+        docs.append(cfg)
+        state = adopt.first_chat_state(db.connect(str(root)))
+        assert state == ("due" if provisional else None)
+        assert [e["data"].get("provisional") for e in db.events(db.connect(str(root)), kind="onboard")] == [True if provisional else None]
+    assert docs[0] == docs[1]
+
+
+def test_the_flat_onboard_says_what_is_missing(project, capsys):
+    cli.main(["init"])
+    assert cli.main(["onboard", "--name", "d"]) == cli.USAGE
+    assert "--name, --who and --what are required" in capsys.readouterr().out
+    assert not proj.is_onboarded(project)

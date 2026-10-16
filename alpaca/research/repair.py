@@ -246,7 +246,11 @@ def bug_report_text(ctx: RunContext, item) -> str | None:
     """The case's bug report from the frozen contract copy (contract/files/), never from the live
     checkout; None when the frozen copy is missing."""
     base = os.path.join(paths.contract_dir(ctx.root, ctx.run), "files")
-    folder = os.path.dirname(str(ctx.contract.runbook or ""))
+    from alpaca.research import gates
+    try:
+        folder = gates._studio_folder(ctx.contract) or os.path.dirname(str(ctx.contract.runbook or ""))
+    except ValueError:
+        return None
     for cand in (os.path.join(base, folder, item.bug_report), os.path.join(base, item.bug_report)):
         if os.path.isfile(cand) and not os.path.islink(cand):
             with open(cand, encoding="utf-8", errors="replace") as fh:

@@ -893,7 +893,14 @@ def matcher_selfcheck(tl: TermList):
 
 
 # ------------------------------------------------------------------ tree digest
-def iter_files(root: str):
+def iter_files(root: str, lister=None):
+    """(full path, relative path) of every file under `root`, in a fixed order. `lister(root)`, when
+    given, supplies the same pairs from somewhere else (attach mode lists the files git tracks or would
+    track, so the repository's own .git folder and its ignored build output are not part of the tree);
+    without it the folder is walked as before."""
+    if lister is not None and os.path.isdir(root):
+        yield from lister(root)
+        return
     if os.path.isfile(root):
         yield root, os.path.basename(root)
         return
@@ -909,13 +916,13 @@ def iter_files(root: str):
             yield full, canon_path(os.path.relpath(full, root))
 
 
-def tree_digest(root: str):
+def tree_digest(root: str, lister=None):
     """sha256 over (relative path bytes, raw file bytes) for every file, sorted. Hashes the EXACT
     bytes on disk: no rstrip, no decode, no row filter - a digest over a projection can be made to
     agree while the shipped bytes differ."""
     h = hashlib.sha256()
     n = 0
-    for full, rel in iter_files(root):
+    for full, rel in iter_files(root, lister):
         try:
             fh = sha256_file_raw(full)
         except OSError:
@@ -972,7 +979,7 @@ def write_receipt(path, payload):
 
 # ------------------------------------------------------------------ the audit
 def audit(target, terms_path=None, term_list=None, control=None, attestation=None, receipt=None,
-          shape_on=True, require_control=True):
+          shape_on=True, require_control=True, lister=None):
     """Run the mechanical leak audit. Returns Result(verdict, reasons, report).
 
     Exactly one of `terms_path` (a file) or `term_list` (a pre-parsed TermList, e.g. from
@@ -985,6 +992,8 @@ def audit(target, terms_path=None, term_list=None, control=None, attestation=Non
               "target": canon_path(os.path.abspath(target)),
               "terms": canon_path(os.path.abspath(terms_path)) if terms_path else "inline",
               "shape_rules_enabled": bool(shape_on)}
+    if lister is not None:
+        report["lister"] = "git-ls-files"
 
     if not shape_on:
         reasons.append(R_SHAPE_DISABLED)
@@ -1035,7 +1044,7 @@ def audit(target, terms_path=None, term_list=None, control=None, attestation=Non
 
     hits, suppressed, files = [], [], 0
     undecodable, unreadable, oversized = [], [], []
-    for full, rel in iter_files(target):
+    for full, rel in iter_files(target, lister):
         files += 1
         nh, ns = scan_name(tl, rel, shape_on)
         hits.extend(nh)
@@ -1153,7 +1162,7 @@ def audit(target, terms_path=None, term_list=None, control=None, attestation=Non
                                                                  ex["line"], ex["lane"]))
         verdicts.append(vc.FAIL)
 
-    digest, dn = tree_digest(target)
+    digest, dn = tree_digest(target, lister)
     report["tree_digest"] = digest
     report["tree_file_count"] = dn
     ar, ad = check_attestation(attestation, digest)
@@ -1183,7 +1192,7 @@ def audit(target, terms_path=None, term_list=None, control=None, attestation=Non
 
 
 # ------------------------------------------------------------------ clearance
-def verify_clearance(target, receipt_path, terms_path=None):
+def verify_clearance(target, receipt_path, terms_path=None, lister=None):
     """Re-derive the audited tree's digest and refuse unless a PASS receipt matches it. This is the
     refusal seam: a caller is REFUSED on anything but a PASS receipt whose tree_digest re-derives
     from the bytes it is about to ship. The verdict string is never trusted on its own."""
@@ -1194,7 +1203,7 @@ def verify_clearance(target, receipt_path, terms_path=None):
         verdicts.append(vc.BLOCKED)
         digest = None
     else:
-        digest, n = tree_digest(target)
+        digest, n = tree_digest(target, lister)
         if n == 0:
             reasons.append(R_TARGET_EMPTY)
             detail.append("target holds zero files; there is nothing to clear")
@@ -1270,7 +1279,13 @@ def check(root) -> int:
     from alpaca import project
     cfg = project.load(root) or {}
     tree = os.path.join(root, str((cfg.get("paths") or {}).get("product_tree") or "."))
-    return audit(tree, term_list=tl, require_control=False).verdict
+    lister = None
+    if isinstance(cfg.get("attach"), dict):
+        # attach mode: the product tree is somebody else's clone; audit what git tracks, not its .git folder
+        from alpaca.attach import config as attach_config, scan as attach_scan
+        if attach_config.mode(root) is not None:
+            lister = attach_scan.leak_lister
+    return audit(tree, term_list=tl, require_control=False, lister=lister).verdict
 
 
 def main(argv=None) -> int:

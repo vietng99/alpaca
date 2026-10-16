@@ -39,7 +39,11 @@ def _mk(path, files=("f.txt",)):
 
 
 @pytest.fixture
-def setup(project, tmp_path):
+def setup(project, tmp_path, monkeypatch):
+    # the sweep also lists the sandbox temp roots under TEMP_BASE (`/tmp/sbx<sid8>`): never the real /tmp, where
+    # a session of the machine running the suite has one (op-059 t-695 round 3)
+    from alpaca import sandbox
+    monkeypatch.setattr(sandbox, "TEMP_BASE", str(tmp_path / "fake-base"))
     scratch_top = tmp_path / "claude-top"
     slug_dir = scratch_top / disk.paths.escape_cwd(os.path.realpath(project))
     tmp_root = tmp_path / "fake-tmp"
@@ -458,3 +462,44 @@ def test_rune2_scratch_rule_waits_for_done(setup):
     p = _plan(setup)
     assert sorted(c["path"] for c in p["remove"]) == sorted([attack, done])
     assert any(c["path"] == live and "not done" in c["reason"] for c in p["keep"])
+
+
+def test_sandbox_temp_roots_of_ended_sessions_go_after_their_grace_others_stay(setup, tmp_path, monkeypatch):
+    """`/tmp/sbx<sid8>` (alpaca/sandbox.py): SessionEnd removes it; the sweep is the backstop. The folder
+    is judged by the full session id in its marker, never by its 8-character name."""
+    from alpaca import sandbox
+    base = tmp_path / "tmpbase"
+    base.mkdir()
+    monkeypatch.setattr(sandbox, "TEMP_BASE", str(base))
+    made = {}
+    for key, sid in (("dead", SID_DEAD), ("live", SID_LIVE), ("recent", SID_RECENT_END),
+                     ("open", SID_OPEN), ("unknown", "zzzzzzzz-unknown")):
+        d = str(base / ("sbx" + sid[:8]))
+        assert sandbox.make_temp_root(d, sid)
+        _mk(os.path.join(d, "pytest-of-x"))
+        _age(d)
+        made[key] = d
+    stranger = str(base / "sbxstrange")                 # no marker: not made by a session of ours
+    _mk(os.path.join(stranger, "x"))
+    _age(stranger)
+    p = _plan(setup)
+    gone = [c["path"] for c in p["remove"] if c["kind"] == "sandbox-tmp"]
+    assert gone == [made["dead"]]
+    kept = {c["path"]: c["reason"] for c in p["keep"] if c["kind"] == "sandbox-tmp"}
+    assert set(kept) == {made["live"], made["recent"], made["open"], made["unknown"], stranger}
+    assert "unknown" in kept[made["unknown"]] and "no marker" in kept[stranger]
+
+
+def test_a_sandbox_temp_root_with_the_prefix_of_an_ended_session_but_another_marker_stays(setup, tmp_path,
+                                                                                         monkeypatch):
+    from alpaca import sandbox
+    base = tmp_path / "tmpbase"
+    base.mkdir()
+    monkeypatch.setattr(sandbox, "TEMP_BASE", str(base))
+    d = str(base / ("sbx" + SID_DEAD[:8]))
+    assert sandbox.make_temp_root(d, SID_DEAD[:8] + "-a-live-twin")     # same 8 characters, another session
+    _mk(os.path.join(d, "x"))
+    _age(d)
+    p = _plan(setup)
+    assert [c for c in p["remove"] if c["kind"] == "sandbox-tmp"] == []
+    assert any(c["path"] == d and "unknown" in c["reason"] for c in p["keep"])

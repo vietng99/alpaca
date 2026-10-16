@@ -33,6 +33,7 @@ HOOKS = (
     ("PreToolUse", "pre_tool"),
     ("PreToolUse", "git_guard"),
     ("PreToolUse", "temp_guard"),
+    ("PreToolUse", "sandbox_guard"),
     ("PreToolUse", "research_guard"),
     ("PostToolUse", "post_tool"),
     ("Stop", "stop"),

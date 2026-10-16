@@ -70,6 +70,25 @@ def detect(root, conn=None) -> str:
     return FRESH
 
 
+#: meta key of the first chat (op-062 t-656): absent for every project that exists today; `due` after
+#: `alpaca new` (set up provisionally, the owner not asked yet), `confirmed` after the owner's yes to a card,
+#: `done` after `onboard apply`, `skipped` when the owner skipped it
+FIRST_CHAT = "first_chat"
+
+
+def first_chat_state(conn):
+    """The first-chat state of the record (due, confirmed, done, skipped) or None. Read-only."""
+    try:
+        return db.meta_get(conn, FIRST_CHAT)
+    except Exception:
+        return None
+
+
+def first_chat_due(conn) -> bool:
+    """True while the owner has not yet had the first chat: `due`, or `confirmed` but not applied."""
+    return first_chat_state(conn) in ("due", "confirmed")
+
+
 def describe(state: str) -> str:
     """One human line for the sentinel; the pad and the SessionStart hook carry it."""
     return _DESCRIBE.get(state, state)

@@ -1,0 +1,23 @@
+# P1 Linh: a firmware engineer who inherited an STM32 repo. Terse. The repo is a bare mirror of a clone of
+# the real QTRM64 repository, made by fixtures.mirror_qtrm64 (no network, no token).
+id: P1
+name: Linh
+repo: qtrm64-mirror
+expected_situation: take-over
+expected_mode: attach
+public:
+  voice: "Terse. Short lowercase sentences. Does not know Alpaca. Answers what is asked and nothing more."
+  opening: "I have this old firmware repo from my previous team, can you help"
+  gives_path_when_asked: true
+  path_when_asked: "{repo_path}"
+sealed:
+  goal: "A reproducible Linux build so a new hire can flash boards, and the README fixed before the hire starts."
+  limits:
+    - "The GUI must not change."
+    - "Nothing goes to main directly."
+  done_when: "A new hire can build the firmware on a Linux machine from the README alone."
+  others_push: "Nobody else pushes now; a colleague only tested the serial part months ago."
+  traps:
+    - "After the card is shown, ask once what a gate is, in your own words, before answering yes."
+  trap_reply: ""
+  quiz_note: "Answer the quiz from the card only."

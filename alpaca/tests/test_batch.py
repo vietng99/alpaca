@@ -609,6 +609,33 @@ def test_an_answer_that_opens_with_no_is_text_not_a_refusal(p):
     assert batch.items(p.conn, op)["external"]["state"] == batch.OPEN
 
 
+def test_the_sandbox_proposal_and_answer_are_read_back_to_the_owner(p):
+    """op-059 t-695 round 3: the batch text and the answer's confirmation show how the write guard reads
+    the sandbox answer; another item's answer prints no sandbox reading. Round 4: the reading is a
+    proposal, never enforced by itself; it prints the exact `alpaca sandbox set` command to confirm."""
+    op = new_op(p)
+    batch.propose(p.conn, op, "sandbox", "Writes stay in this project root and the session scratchpad; "
+                  "no sudo", session=p.sid)
+    code, out = run(p, "batch", "show", op)
+    assert code == 0, out
+    shown = out.split("[sandbox]")[1].split("[spend]")[0]
+    assert "PROPOSAL" in shown and "the write guard's proposal" in shown and "NOT ENFORCED" in shown
+    assert "no sudo" in shown
+    assert "alpaca sandbox set %s --path root --path scratchpad --by owner --quote" % op in shown
+    p.write([typed("sandbox yes")])
+    code, out = run(p, "batch", "answer", op, "sandbox", "--yes", "--by", "owner", "--quote", "sandbox yes")
+    assert code == 0, out
+    assert "the write guard's proposal" in out and "NOT ENFORCED" in out and "no sudo" in out
+    assert "alpaca sandbox set %s --path root --path scratchpad" % op in out
+    p.write([typed("spend: nothing")])
+    code, out = run(p, "batch", "answer", op, "spend", "--text", "nothing", "--by", "owner",
+                    "--quote", "spend: nothing")
+    assert code == 0, out
+    assert "write guard" not in out
+    again = run(p, "batch", "show", op)[1]
+    assert "ANSWERED" in again.split("[sandbox]")[1].split("[spend]")[0] and "ENFORCED" in again
+
+
 @pytest.mark.parametrize("reply", ["runtime yes, but run it headless",
                                    "runtime yes, though only on weekdays"])
 def test_a_qualified_yes_answers_nothing(p, reply):

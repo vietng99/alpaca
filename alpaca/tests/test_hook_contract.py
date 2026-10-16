@@ -33,6 +33,7 @@ HOOKS = [
     "alpaca.hooks.pre_tool",
     "alpaca.hooks.git_guard",
     "alpaca.hooks.temp_guard",
+    "alpaca.hooks.sandbox_guard",
     "alpaca.hooks.research_guard",
     "alpaca.hooks.post_tool",
     "alpaca.hooks.stop",

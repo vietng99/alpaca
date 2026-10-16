@@ -390,8 +390,10 @@ def test_stop_hook_mirrors_an_off_before_it_decides(project):
     assert out.get("decision") != "block"
 
 
-def test_session_done_gate_and_off_commands(project, capsys):
+def test_session_done_gate_and_off_commands(project, capsys, monkeypatch):
     from alpaca import cli
+    from alpaca.tests.ownerword_fixtures import owner_at_terminal
+    owner_at_terminal(monkeypatch, "L6")         # a raise above the default is the owner's (t-678)
     cli.main(["init"])
     assert cli.main(["--session", "s1", "session", "start", "--operator", "claude",
                      "--level", "L6", "--goal", "run the op"]) == cli.PASS

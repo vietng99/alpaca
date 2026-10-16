@@ -35,6 +35,8 @@ Interfaces (M2.7), consumed by the pad, the board, `alpaca doctor` (M4.13) and `
 """
 from __future__ import annotations
 
+import json
+
 from alpaca import db, util
 
 # The closed set of lifecycle states. The derivation never invents another.
@@ -98,8 +100,16 @@ def _row_exists(conn, row_id):
     return bool(db.rows(conn, "rows", "id=?", (row_id,)))
 
 
-def _events_for_op(conn, op):
-    return [e for e in db.events(conn, limit=10 ** 9) if e.get("op") == op]
+def _events_for_op(conn, op, kinds):
+    """The events of `kinds` on `op`, oldest first. Read through the kind index and decoded alone
+    (t-685): reading and decoding the whole record for every op, twice an op in each pad render,
+    took the collector's pad refresh to 5.1 GB and 15 s on the live record (284,107 events)."""
+    marks = ",".join("?" * len(kinds))
+    out = [dict(r) for r in conn.execute(
+        "SELECT * FROM events WHERE kind IN (%s) AND op=? ORDER BY id" % marks, (*kinds, op))]
+    for e in out:
+        e["data"] = json.loads(e["data"])
+    return out
 
 
 def _live_ops(conn):
@@ -118,7 +128,7 @@ def _live_ops(conn):
 def _archive_state(conn, op):
     """True when the latest archive transition on `op` is an archive not yet un-archived."""
     latest = None
-    for e in _events_for_op(conn, op):
+    for e in _events_for_op(conn, op, (ARCHIVE_KIND, UNARCHIVE_KIND)):
         if e["kind"] in (ARCHIVE_KIND, UNARCHIVE_KIND):
             latest = e["kind"]
     return latest == ARCHIVE_KIND
@@ -147,7 +157,7 @@ def state(conn, op) -> str:
 def _pinned_cursor(conn, op):
     """The latest explicitly pinned cursor row_id for `op`, or None when none was pinned."""
     pinned = None
-    for e in _events_for_op(conn, op):
+    for e in _events_for_op(conn, op, (CURSOR_KIND,)):
         if e["kind"] == CURSOR_KIND:
             pinned = (e["data"] or {}).get("row_id")
     return pinned
@@ -210,7 +220,7 @@ def _cursor_advanced_at(conn, op):
     """The ISO instant the op's cursor last advanced: the latest timestamp among the advancing
     events on the op, or None when there is none."""
     latest = None
-    for e in _events_for_op(conn, op):
+    for e in _events_for_op(conn, op, _ADVANCING_KINDS):
         if e["kind"] in _ADVANCING_KINDS:
             if latest is None or e["ts"] > latest:
                 latest = e["ts"]

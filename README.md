@@ -153,14 +153,14 @@ alpaca new
 
 1. copies Alpaca into that directory, one full copy per project;
 2. writes the project name at the top of the README;
-3. creates the local Python environment and onboards the project;
+3. creates the local Python environment and sets the project up provisionally;
 4. runs `bin/alpaca doctor` and starts the hub.
 
-It prints the hub address, for example `http://127.0.0.1:7366/`. Open Claude Code or Codex in the new folder and start working.
+It prints the hub address, for example `http://127.0.0.1:7366/`. Open Claude Code or Codex in the new folder and tell it about your project: paste a git URL or a folder path, or say "start empty". It reads your repository, asks a few questions, shows you one setup card, and configures nothing until you type yes (`docs/onboarding.md`).
 
 The installer checks every file of the release against the sha256 recorded in its `MANIFEST.json`. If any file differs, nothing is installed. The installer writes exactly two things: the release under `~/.local/share/alpaca/` and one launcher at `~/.local/bin/alpaca`. It changes no shell profile and no global agent configuration. To uninstall, delete both.
 
-Inside a project folder, `alpaca` runs that project's own `bin/alpaca`. Every project stays on the Alpaca version it was created from.
+Inside a project folder, `alpaca` runs that project's own `bin/alpaca`. Every project stays on the Alpaca version it was created from. To move a project to the newest release, run `alpaca update --check`, then `alpaca update` inside it; see [docs/operators.md](docs/operators.md#updating-to-a-newer-release).
 
 **The hub runs on your machine only.** It listens on `127.0.0.1`, and each session prints its address when it starts. `bin/alpaca serve --status` prints the address again. To reach it from another machine, use the `ssh -L` tunnel that `alpaca serve` prints, or publish it behind a sign-in (see [docs/workspaces.md](docs/workspaces.md)).
 
@@ -374,7 +374,7 @@ Ship, release close, and irreversible external actions stay human decisions at e
 1. Extract the release archive and enter its directory. The directory may be renamed.
 2. Run `bash setup/bootstrap.sh`. This creates a local Python environment inside this copy and installs nothing else. Python 3.10 or newer with venv support is required.
 3. Open Claude Code or Codex in that directory. For a shell check, run `bin/alpaca --help`, then `bin/alpaca doctor`.
-4. The first chat runs onboarding: answer the questions, run `bin/alpaca onboard ...` once (flags as in the Quickstart), then `bin/alpaca doctor`.
+4. The first chat runs onboarding: tell the agent about your project (a git URL, a folder path, or "start empty"); it reads the repo, asks up to four questions, shows one setup card, and runs `bin/alpaca onboard apply` after your typed yes. By hand, run `bin/alpaca onboard ...` once (flags as in the Quickstart). Then `bin/alpaca doctor`.
 
 Claude Code has native lifecycle hooks. Codex follows AGENTS.md and uses explicit lifecycle commands. Both write one local Alpaca record. No global agent configuration is modified.
 

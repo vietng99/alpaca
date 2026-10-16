@@ -39,9 +39,11 @@ The everyday operating verbs. Small on purpose.
 ### Setup and adoption
 
 - `alpaca init` - create the runtime record under `.alpaca/` in this project root.
-- `alpaca onboard` - sense the repository, propose an identity, and seed the record on first contact.
-- `alpaca new` - start a project as a full copy of this installation: asks for the name and directory, copies the shipped files, fills the README name block, then runs bootstrap, onboard and doctor and starts the hub.
+- `alpaca onboard` - the first chat: `look` reads the owner's repository, `answer` and `next` record the answers, `propose` renders one setup card, `confirm` proves the owner's typed yes, `apply` configures from that card; with no sub-verb it onboards by hand and seeds the record on first contact.
+- `alpaca new` - start a project as a full copy of this installation: asks for the name and directory, copies the shipped files, fills the README name block, then runs bootstrap, a provisional onboard (the first chat stays due) and doctor and starts the hub.
+- `alpaca attach` - run Alpaca beside a repository that already exists and that other people keep working on. The repository is cloned into a folder of the studio (named app by default) and never receives an Alpaca file; agents change it only on work branches. `alpaca new --attach SOURCE` makes the studio and attaches in one step; run it in your own terminal, because inside a chat session it is refused, and so is a script with no terminal on its input (the chat attaches only after you say yes to a setup card). Sub-verbs: `init` (attach a git URL or path to this studio; `--no-pr-footer` leaves the generated section out of the pull request body, and `--commit-name` with `--commit-email` chooses the commit identity, default `Alpaca agent <alpaca-agent@localhost>`; with `--card` the setup card the owner confirmed in the first chat names the upstream, base, branch prefix, gates, footer and identity, and those options are refused), `status`, `baseline`, `check`, `study`, `stage`, `land`, `approve` (the owner, or an agent under a delegation, approves the exact head commit), `handoff` (dry run, then `--execute --expect SHA` pushes the branch and opens the pull request), `merge`, `sync` (reports merged, closed and behind handoffs; moves no branch), `propose`. The guide from attach to sync, with the known limits, is `docs/attach.md`.
 - `alpaca upgrade` - refresh the mechanism paths and leave the memory paths untouched, crash-safe.
+- `alpaca update` - find the newest release tag on the public repository, install it next to the current release with that release's own `install.sh` (every file checked against its sha256), then show the `alpaca upgrade` plan for this project and apply it; `--check` only reports. A failed install puts `current` and the launcher back as they were. It refuses when offline, with a pending upgrade journal, when the newest release is older than the project, and when `--prefix` and `--bin-dir` belong to two different installs.
 - `alpaca spec` - install one spec tool from the vendored copies, offline (`init --kit spec-kit|openspec`, `status`, `verify`); see Spec tools below.
 
 ### Maintenance
@@ -50,6 +52,7 @@ The everyday operating verbs. Small on purpose.
 - `alpaca verify` - recompute the append-only event chain and report PASS or FAIL.
 - `alpaca retention` - apply the declared store retention and compaction policy; `retention gc` plans (and with `--apply` runs) the project.yaml `disk:` cleanup of ended sessions' scratch, stale /tmp leftovers, old run trees and merged worktrees of closed ops (`docs/temp-and-scratch.md`).
 - `alpaca apply` - apply a recorded in-place change with its mandatory snapshot note.
+- `alpaca sandbox` - `set <op> --path P [--path P ...] --by owner --quote '...'` records the path list the owner confirmed for an op (absolute or `~/` paths, globs, and the words `root` and `scratchpad`), the only thing the write guard enforces: the quote is the owner's message, typed after the op's sandbox question was asked, that holds the exact line `alpaca sandbox set <op> --path P ...` naming exactly these paths (the owner pastes the line the readback prints as a message of the agent session, after the question; one message confirms once, only the owner's newest sandbox line for the op counts, and a confirmation typed at a terminal is not accepted, so a Codex session cannot confirm a list). `/`, `/home`, `/tmp`, `/var`, `/etc`, `/usr`, anything that covers the home folder or the folder holding the project root, a glob over the children of one of those folders (`~/[a-z]*`, `/var/tmp/*x`, `~/.*`), and a path through a symbolic link are refused. `ask <op> --path P ...` records the sandbox question for an op without a batch and prints the line to paste; `widen <op> --path DIR --by owner --quote '...'` adds to the list with the same proof (the `widen` line). `show <op>` or `show --session-id SID` prints the enforced list, the always list (project root, `.alpaca/`, the session scratchpad, `~/.claude/`, the session temp root `/tmp/sbx<sid8>`) and, for an op with no confirmed list, "not enforced: no confirmed path list" with the list proposed from the owner's answer and the exact `set` command. See The hooks.
 - `alpaca token` - manage a claim token (the live lease a row holds).
 - `alpaca watchdog` - the advisory guard for destructive git work (design/watchdog/design.md). `watch [--interval S] [--once] [--json]` prints one `WATCHDOG <kind> <key> :: <summary>` line per new event (a request message to `watchdog`, main dirty with several sessions' files, a new or orphaned worktree, a record chain failure) and nothing when idle; the `/watchdog` skill runs it under the Monitor tool. `preflight [--for <who>] -- <git command>` writes a report under `.alpaca/watchdog/runs/<id>/` with what the command touches, the live sessions holding work there and a dry run, and exits 0 safe, 1 risky or 2 stop. `undo <id>` keeps refs under `refs/watchdog/<id>/` and a record snapshot before the owner signs; `rollback <id> [--dry-run]` recreates the branches and worktrees it saved. `postcheck <id> [--to <who>]` verifies the record, compares refs with the preflight and posts the result. It never blocks or runs another session's command.
 
@@ -99,7 +102,7 @@ The everyday operating verbs. Small on purpose.
 
 ## Copy and rename
 
-The short route is `install.sh` once, then `alpaca new` per project. `install.sh` checks a release against its `MANIFEST.json`, keeps it under `~/.local/share/alpaca/releases/`, and writes one launcher at `~/.local/bin/alpaca`. Inside a project the launcher runs that project's `bin/alpaca`; elsewhere it runs the installed release. `alpaca new` copies the mechanism class into a new directory, puts the release templates in place, writes the project name into the block between `<!-- alpaca:project-name -->` and `<!-- /alpaca:project-name -->` at the top of README.md, and runs `git init`, `bash setup/bootstrap.sh`, `alpaca onboard` and `alpaca doctor`. README.md is then the project's own: `alpaca upgrade` keeps it, and `setup/gen_manifest.py --verify` lists it as instance-owned.
+The short route is `install.sh` once, then `alpaca new` per project. `install.sh` checks a release against its `MANIFEST.json`, keeps it under `~/.local/share/alpaca/releases/`, and writes one launcher at `~/.local/bin/alpaca`. Inside a project the launcher runs that project's `bin/alpaca`; elsewhere it runs the installed release. `alpaca new` copies the mechanism class into a new directory, puts the release templates in place, writes the project name into the block between `<!-- alpaca:project-name -->` and `<!-- /alpaca:project-name -->` at the top of README.md, and runs `git init`, `bash setup/bootstrap.sh`, `alpaca onboard --provisional` and `alpaca doctor`. The first chat is then due: open Claude Code or Codex in the folder and tell it about your project. README.md is then the project's own: `alpaca upgrade` keeps it, and `setup/gen_manifest.py --verify` lists it as instance-owned.
 
 By hand: use the clean archive produced by `setup/ship.py`. Extract it into a new directory, rename that directory if desired, and run `bash setup/bootstrap.sh`. The local Python environment is recreated on the destination; any tools a domain profile needs are installed separately. No source-machine paths or runtime state are required.
 
@@ -109,19 +112,30 @@ Two file classes travel differently. The mechanism class (the code, the doctrine
 
 ## First chat and onboarding
 
-On the first session the SessionStart hook prints `RESUME.md` into the chat. On a generic unconfigured project
-there is nothing to resume yet, so the first thing to do is onboard.
+After `alpaca new`, open Claude Code or Codex in the new folder and tell it about your project: paste a git URL
+or a folder path, or say "start empty". The SessionStart hook prints `FIRST CHAT` and the agent follows the
+`/alpaca-first-chat` skill:
 
-- `alpaca onboard` senses the repository, proposes an identity, and seeds the record. It writes
-  `project.yaml` (the project identity, the default autodrive level, the plain-writing preset
-  choice) and opens the record. On a fresh copy it writes these answers into the shipped template
-  `project.yaml` and keeps every other key and its value. It is a sense-then-propose step: it reads the repository and
-  proposes, and you confirm, rather than guessing silently.
-- `alpaca doctor` then checks that the installation and the record are consistent. Run it once right
-  after onboarding.
+1. It reads your repository first, in a copy outside the studio, and tells you what it found: `alpaca onboard look`.
+   Nothing from the repository runs, and nothing is written in the studio.
+2. It names the situation it sees (take over, team repo, audit only, migrate or rewrite, start empty) and asks up to
+   four questions with options and a recommendation, among them who else pushes and whether Alpaca files may live in
+   your repo (the recommended answer is no). One typed message can answer them all.
+3. It reads your goal back in your own words and shows ONE setup card (`alpaca onboard propose`): what it understood,
+   what it found, where Alpaca sits (attach mode keeps your repo free of Alpaca files; native mode keeps the code in
+   the studio; the card says why, from your answers), the checks, the first steps with their time, how a change reaches
+   your repo (with the commit identity, the pull request footer and the branch prefix your repo will show, defaults
+   included; if you want no trace of Alpaca it proposes a neutral set), how much it does alone, what stays with you,
+   how to undo it, and the settings it will write.
+4. Nothing is configured until you type yes to that card (`alpaca onboard confirm`). A click does not count, and
+   neither does "yes, but ...", which is a change. You can ask a question or change a line; the card is shown again.
+5. `alpaca onboard apply` configures from the confirmed card only: the project settings, the attached repo,
+   the plain-writing style, your goal kept word for word as the first note, and the level.
 
-Onboarding asks who is working on the project, what is being worked on, what the open tasks are,
-and whether to turn on the plain-writing preset. Answer those, run `alpaca onboard`, then `alpaca doctor`.
+`alpaca onboard show` prints the confirmed card; `alpaca onboard skip` ends the first chat on your word, and
+`alpaca onboard --name ... --who ... --what ...` sets a project up by hand. The details, the states and every record
+event are in `docs/onboarding.md`. `alpaca doctor` checks the installation and the record; run it once after the
+first chat.
 
 ## Daily use
 
@@ -223,6 +237,7 @@ swallowed and the session continues.
 | PreToolUse | `alpaca.hooks.pre_tool` | Writes the tool name and the whole tool input to the capture pool. Prints nothing, so it never blocks a call. |
 | PreToolUse (Bash) | `alpaca.hooks.git_guard` | Denies git commands that rewrite working files in the shared main tree (`git stash` other than list and show, `git reset --hard`, `git checkout -- <path>`, `git restore <path>`, `git clean -f`), because other sessions and the live record work there. The same commands run in a linked worktree. |
 | PreToolUse (Bash) | `alpaca.hooks.temp_guard` | Warns, never blocks, when a pytest run passes `--basetemp` and the same command does not remove it, or points it at the disk: pytest never deletes an explicit basetemp, so it stays in RAM-backed `/tmp`. See `docs/temp-and-scratch.md`. |
+| PreToolUse (Bash, Write, Edit) | `alpaca.hooks.sandbox_guard` | Denies a Write, Edit or Bash target outside the path list the owner confirmed for the op the session works on (`alpaca sandbox set`, proved by the owner pasting the exact command line as a message of the session after the op's sandbox question, never by a confirmation typed at a terminal; `alpaca sandbox show`). The owner's free-text answer to the op's `sandbox` batch item is only the proposal: it is read back with the proposed list and the exact line to paste, an op with no confirmed list is not enforced, and a session working on several ops is held to the union of the lists of those that have one. The project root, `.alpaca/`, the session scratchpad, `~/.claude/` and the session temp root `/tmp/sbx<first 8 characters of the session id>` (private, removed at session end) are always allowed and are named in every deny; the list word `scratchpad` adds every session scratchpad of the project. While a sandbox binds the session, TMPDIR and pytest's temp root point at that temp root, so a pytest run leaves nothing else in `/tmp`; a pytest call that drops TMPDIR is denied. A command over 64 KB, one the guard cannot read within 2 s, or one whose variables grow past 64 KB, is denied with "split it"; one the tokenizer cannot read is scanned for its write shapes. The session transcripts and the guard's own folder cannot be written by name by a tool call (a hard link made first is a stated limit). It cannot see a write made inside a script or program, and the research egress folder `/tmp/alpaca-egress-<uid>` ignores TMPDIR. Only the owner sets or widens the list (`alpaca sandbox widen`). See `docs/temp-and-scratch.md`. |
 | PostToolUse | `alpaca.hooks.post_tool` | Records a heartbeat of tool activity against the right project, and the whole call and its response to the pool. |
 | Stop | `alpaca.hooks.stop` | Runs the plain-writing lint over the turn before it lands, and keeps the local transcript copy current. |
 | PreToolUse (research) | `alpaca.hooks.research_guard` | Denies a subagent's call that reaches the control plane (the record, the hooks, the settings, the engine's code, another agent's transcript, a process that outlives the call, a git command that writes) while a research run is live. It does nothing for the driving session or with no live run. |

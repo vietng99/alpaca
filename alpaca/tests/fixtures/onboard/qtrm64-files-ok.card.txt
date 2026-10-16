@@ -1,0 +1,110 @@
+SETUP PROPOSAL card-27e4bdc0 for QTRM64                                         2026-10-14
+Nothing is set up until you reply. It takes about 3 minutes to read.
+Alpaca records what I do, checks each change, and stops me at the points below.
+
+1. WHAT I UNDERSTOOD (tell me any line that is wrong)
+- Your goal, in your words: "I want to get it into a clean state first, the build has some weird
+  stuff and the readme is out of date. later I want to add new features for the beam control"
+- Limits you gave: "dont touch the GUI for now"
+- Done when (my first guess; we confirm it before any change): the CMake build files have no
+  duplicated steps, README.md names only files that exist, and you merged each fix on GitHub.
+  Beam-control features come later, as separate work.
+- Situation: take over. You said "I took over this firmware project from my old team"; main has
+  not changed for 204 days [4].
+- Others who push: nobody now. Only you commit, so you merge.
+- Where checks run: only on your machine, no CI. You said "there is no CI anywhere, we only ever
+  built it on my laptop".
+- Alpaca in your repo: you said Alpaca files may live in it.
+- Still unknown: which arm-none-eabi-gcc version the real build uses
+
+2. WHAT I FOUND (in a read-only copy outside this folder; your repo is unchanged)
+- Written in C (28 files) and Python (6 files); built with CMake [1] [2]
+- 155 files; 85 are vendor code (libraries copied in) in Drivers/, so about 70 are your own [3]
+- 57 commits on main by 5 people, 2026-01-08 to 2026-03-24; main is unchanged for 204 days [4]
+- Newer work exists only on side branches, by nguyenbach03022003, last on 2026-09-11 [5]
+- None of these exist: CI files, git hooks, tests, CLAUDE.md or AGENTS.md, CODEOWNERS,
+  CONTRIBUTING.md [6]
+- This machine has no arm-none-eabi-gcc, so the real build cannot run here [7]
+- The hex and bin step is written twice, so every build runs objcopy twice (my reading of the
+  code) [10]
+- README.md names QTRM64.ioc and STM32F429XX_FLASH.ld at the root; neither exists (my reading of
+  the code) [11]
+
+3. WHERE ALPACA SITS: attach mode
+Your code stays in its own repo with its own history. Alpaca keeps its notes, records and
+reports in the studio (the folder you made with alpaca new). A copy of your repo goes into app/
+inside the studio, and the studio's own git ignores that folder. Your repo gets no Alpaca file.
+Why attach: you said Alpaca files may live in it and nobody else pushes. The in-place mode,
+which would put Alpaca files inside your repo, is not built in this version, so I propose
+attach.
+
+4. CHECKS
+Each of these is a gate (a command that must pass before a change can leave the studio). I run
+every gate on your current main first, so a gate that already fails there is not blamed on new
+work.
+- py-syntax: the 6 Python files parse. Tried it: pass, 0.05 s [9]
+- cmake-configure: CMake still configures with this machine's compiler. Not tried yet: it runs
+  your CMake files, so it runs only after your yes [1]
+- arm-syntax (suggested by me): 23 C files type-check against the ST headers for the Cortex-M4.
+  It skips main.c and 6 app files, which need an ARM C library this machine lacks. Tried it:
+  pass, 0.89 s [12]
+- Not a gate here: the real build. It needs arm-none-eabi-gcc, which this machine lacks [7]
+
+5. FIRST STEPS AFTER YOUR YES (your yes approves a and b)
+a. Copy your repo into app/ and record the baseline (the result of every check on your code as
+   it is today), taken on main at bd1ef44: about 2 to 3 minutes, no input from you.
+b. Run the study (a first read of your code, written down as a map): modules, how to build,
+   risky areas, each line pointing at a file; about 10 to 20 minutes for 70 own files, no input
+   from you.
+c. Start the first op (one goal with its own tasks and reports) from your goal: about 10 minutes
+   of questions to agree on "done", then I write the plan.
+
+6. HOW A CHANGE REACHES YOUR REPO
+Each task (one small piece of work with its own branch) gets its own branch, named alpaca/ and
+the task number (for example alpaca/t-001), cut from the newest main. The gates run on the
+branch and on a trial merge with the newest main. You approve the exact commit. Then I push that
+branch and open a pull request on GitHub, and you merge it there. Your repo will show this of
+me; tell me any line to change:
+- Commit identity: Alpaca agent <alpaca-agent@localhost> (my default; it names Alpaca)
+- Pull request footer: on, the body says it was made with an agent assistant (my default)
+- Branch prefix: alpaca/ (my default; it names Alpaca)
+
+7. HOW MUCH I DO ALONE: L2
+The level (how much I may do before I ask you, from L1 to L6) is L2. I make one bounded change
+at a time and show it to you before the next. Why L2: no gate here builds or tests the code. Say
+"raise the level" when you trust the work; I never raise it myself.
+
+8. WHAT STAYS WITH YOU
+Every push and merge, approving each commit, raising the level, any GitHub setting, deleting
+branches.
+
+9. UNDO
+Before your yes there is nothing to undo (the read-only copy goes away after setup). After it:
+delete this studio folder. Your repo then holds only the alpaca/ branches and pull requests you
+approved.
+
+10. SETTINGS I WILL WRITE
+upstream (the repo your code comes from) https://github.com/example-org/QTRM64, base (the branch
+your changes start from and are checked against) main, branch prefix alpaca/, commit identity
+Alpaca agent, pull request footer on, gates py-syntax, cmake-configure, arm-syntax; level L2;
+people: Alpaca Development as owner [8]; plain-writing check on for Alpaca's own reports
+(suggested by me; your code is not affected).
+
+Sources (repo paths at commit bd1ef44)
+[1] repo:CMakeLists.txt, repo:CMakePresets.json, repo:cmake/gcc-arm-none-eabi.cmake
+[2] cmd: git ls-files, grouped by file extension; examples repo:Core/Src/main.c,
+    repo:QTRM-App/Src/gain_phase.c, repo:qtrm-app.py, repo:uart_v2/gui.py
+[3] cmd: git ls-files | wc -l = 155; git ls-files Drivers | wc -l = 85
+[4] cmd: git log main --format=%an%x09%ad --date=short (5 authors, 57 commits)
+[5] cmd: git for-each-ref --sort=-committerdate refs/remotes
+[6] look scan of CI, hook, test, CODEOWNERS, CONTRIBUTING and agent files: none found
+[7] host: which arm-none-eabi-gcc (not found)
+[8] host: git config user.name
+[9] look trial: python3 parse (ast) of every tracked *.py file, exit 0, 0.05 s
+[10] repo:CMakeLists.txt:101-112
+[11] repo:README.md:31-32
+[12] look trial: clang --target=arm-none-eabi -fsyntax-only Core/Src/system_stm32f4xx.c, exit 0,
+     0.89 s
+
+Reply "yes" to set this up as written, or tell me which line to change.
+(The long form works too: card-27e4bdc0 yes)

@@ -59,6 +59,16 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && bin/alpaca-python --isolated -m alpaca.hooks.sandbox_guard",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PostToolUse": [

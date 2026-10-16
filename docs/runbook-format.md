@@ -148,8 +148,12 @@ failure is recognized and what to do then (see "Known failures").
 | `${STAGE}` | the id of the stage being run |
 | `${ATTEMPT}` | the attempt number, 1 for the first run |
 | `${EVIDENCE_DIR}` | the folder where this attempt keeps its evidence files |
+| `${ATTACH_WORKTREE}` | attach projects only, format 1 and 2 runbooks (the stage runner `alpaca attach stage` sets it): the absolute path of the task's work folder in the attached repository; a `workdir` or check `path` may start with it, and a check path written with it is judged on real paths, so a link in the work folder that leaves it is refused |
 
-Any other name is refused (`VAR-UNKNOWN`).
+Any other name is refused (`VAR-UNKNOWN`). `${ATTACH_WORKTREE}` is a name only in a format 1 or 2
+runbook of a project that attaches to a repository; in any other project, and in a format 3 (research)
+runbook, it is refused like every unknown name, and in an attached project a knob may not carry its
+name (`KNOB-SHADOWS-BUILTIN`).
 
 ## Checks
 
@@ -1312,6 +1316,7 @@ Every error is reported at once, one per line: `ERROR <code> <where>: <message>`
 | `KNOB-TYPE-UNKNOWN` | a knob `type` outside the list above |
 | `KNOB-DEFAULT-TYPE` | a knob default does not fit its type |
 | `KNOB-DEFAULT-RANGE` | a knob default is outside `min`..`max` or not one of `values` |
+| `KNOB-SHADOWS-BUILTIN` | attach projects only, format 1 and 2: a knob has the name of the built-in variable `${ATTACH_WORKTREE}` |
 | `KNOB-UNKNOWN` | a retry moves a knob that is not declared |
 | `KNOB-OWNER-ONLY` | a retry moves an `owner_only` knob |
 | `KNOB-NOT-NUMBER` | a retry moves a knob that is not `int` or `float` |

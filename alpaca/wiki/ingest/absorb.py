@@ -221,9 +221,18 @@ def echo_rows(conn):
             conn.execute("COMMIT")
 
 
+ECHO_TEXT_SQL = "SELECT text FROM blocks WHERE block_id=?"
+
+
 def load_echo_index(conn) -> EchoIndex:
-    """The echo index of every active block of the store (`echo_rows`)."""
-    index = EchoIndex()
+    """The echo index of every active block of the store (`echo_rows`). It keeps no block text
+    (t-685): the exact-match and quote checks read the few texts they compare from the store
+    through `conn` (`EchoIndex(fetch=...)`). A block's normalized text never changes under its id
+    (the id is made from its sha256, `segment`), and no block row is ever deleted (`no_delete_blocks`)."""
+    def fetch(block_id):
+        row = conn.execute(ECHO_TEXT_SQL, (block_id,)).fetchone()
+        return None if row is None else row[0]
+    index = EchoIndex(fetch=fetch)
     rows = echo_rows(conn)
     try:
         index.load(rows)

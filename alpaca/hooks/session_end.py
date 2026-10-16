@@ -21,6 +21,7 @@ def handle(payload):
             db.patch(conn, "sessions", "sid", sid, {"ended": now})
         else:
             db.upsert(conn, "sessions", "sid", {"sid": sid, "started": now, "ended": now})
+    _clear_sandbox(sid, payload)
     _publish_hub_tile(root, conn, sid, payload)
     _start_disk_sweep(root, sid, payload)
     from alpaca import capture_runner, observability
@@ -77,6 +78,16 @@ def handle(payload):
     # a failed or stopped build appends `analytics-build-failed` (`common.run_step`)
     common.run_step(payload, "session_end", "analytics", share=0.9)
     return {"ended": now}
+
+
+def _clear_sandbox(sid, payload):
+    """Remove this session's sandbox temp root, env file and cache (alpaca/sandbox.py). Best effort."""
+    try:
+        from alpaca import sandbox
+        sandbox.cleanup_session(sandbox.hook_root(payload.get("cwd")), sid)
+    except Exception:
+        if payload.get("_strict"):
+            raise
 
 
 def _consolidate_on(root):

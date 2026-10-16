@@ -67,7 +67,30 @@ fi
 mkdir -p "$PREFIX/releases"
 PREFIX="$(cd "$PREFIX" && pwd -P)"
 STAGE="$(mktemp -d "$PREFIX/.stage.XXXXXX")"
-trap 'rm -rf "$STAGE"' EXIT
+LAUNCHER_NEW=""
+# CURRENT_MOVED is 1 from the moment `current` may have been pointed at the new release until the
+# launcher is in place; OLD_CURRENT is where it pointed before.
+CURRENT_MOVED=0
+OLD_CURRENT=""
+# Whatever way this script ends, its stage and an unfinished launcher file go, and a `current` that
+# moved without its launcher goes back; a finished install has moved the launcher already, so there
+# is nothing left to undo then.
+cleanup() {
+  if [ "$CURRENT_MOVED" = 1 ]; then
+    CURRENT_MOVED=0
+    if [ -n "$OLD_CURRENT" ]; then ln -sfn "$OLD_CURRENT" "$PREFIX/current" 2>/dev/null || true
+    elif [ -L "$PREFIX/current" ]; then rm -f "$PREFIX/current"; fi
+  fi
+  if [ -n "$LAUNCHER_NEW" ]; then rm -f "$LAUNCHER_NEW"; fi
+  if [ -d "$STAGE/stale" ]; then chmod -R u+w "$STAGE/stale" 2>/dev/null || true; fi
+  rm -rf "$STAGE"
+}
+trap cleanup EXIT
+# Ctrl-C, kill and a closed terminal end the script through the trap above (bash runs it once the
+# command in progress is over), so none of them leaves a stage folder or an unfinished launcher.
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 SRC="$STAGE/tree"
 
 case "$MODE" in
@@ -112,26 +135,62 @@ fi
 ID="$("$PY" -c 'import json,sys; print(json.load(open(sys.argv[1]))["tree_digest"][:12])' "$SRC/MANIFEST.json")"
 DEST="$PREFIX/releases/$ID"
 if [ -d "$DEST" ]; then
-  say "release $ID is already installed"
+  # The folder was checked when it was installed, not since: a copy left by an earlier install that
+  # stopped, or one changed afterwards, must not become current unchecked. The checked source is the
+  # reference (its MANIFEST.json and its gen_manifest.py), never the folder's own.
+  if cmp -s "$SRC/MANIFEST.json" "$DEST/MANIFEST.json" \
+     && "$PY" "$SRC/setup/gen_manifest.py" --root "$DEST" --verify > "$STAGE/verify-dest.log" 2>&1; then
+    say "release $ID is already installed"
+  else
+    # -ef compares the files themselves, so a releases/ folder that is a link (moved to another disk)
+    # still shows which release is current; a missing `current` is never the same file.
+    if [ "$PREFIX/current" -ef "$DEST" ]; then
+      sed 's/^/  /' "$STAGE/verify-dest.log" 2>/dev/null | tail -20 >&2 || true
+      die "the current release folder $DEST does not match its MANIFEST.json; nothing was changed"
+    fi
+    say "release folder $DEST does not match its MANIFEST.json; replacing it with the checked copy"
+    mv "$DEST" "$STAGE/stale" || die "cannot move the release folder $DEST aside; nothing was changed"
+    mv "$SRC" "$DEST"
+    say "installed release $ID at $DEST"
+  fi
 else
   mv "$SRC" "$DEST"
   say "installed release $ID at $DEST"
 fi
-if [ "$BOOTSTRAP" -eq 1 ] && [ ! -x "$DEST/.venv/bin/python" ]; then
-  say "creating the release's local .venv"
-  bash "$DEST/setup/bootstrap.sh" --python "$PY" > "$STAGE/bootstrap.log" 2>&1 || {
-    tail -20 "$STAGE/bootstrap.log" >&2; die "bootstrap of $DEST failed"; }
+# The release's .venv must work, not just exist: a .venv left half-built by an earlier run (pip failed
+# after the folder was made) is checked, rebuilt, and removed again when it still cannot be built, so
+# a failed bootstrap never leaves a venv that a later install would take as done.
+if [ "$BOOTSTRAP" -eq 1 ]; then
+  if [ -x "$DEST/.venv/bin/python" ] && bash "$DEST/setup/bootstrap.sh" --check > "$STAGE/check.log" 2>&1; then
+    say "the release's local .venv is ready"
+  else
+    if [ -e "$DEST/.venv" ] || [ -L "$DEST/.venv" ]; then say "the release's local .venv is not ready; rebuilding it"
+    else say "creating the release's local .venv"; fi
+    bash "$DEST/setup/bootstrap.sh" --python "$PY" > "$STAGE/bootstrap.log" 2>&1 || {
+      tail -20 "$STAGE/bootstrap.log" >&2
+      rm -rf "$DEST/.venv"
+      die "bootstrap of $DEST failed; its .venv was removed, so a retry starts clean"; }
+  fi
 fi
-ln -sfn "releases/$ID" "$PREFIX/current"
 
-mkdir -p "$BIN_DIR"
+# Everything that can fail runs before the release becomes current: the launcher file is written
+# first, then `current` moves, then the launcher is put in place (a rename). A failure up to that
+# point leaves the old `current` and the old launcher as they were.
+mkdir -p "$BIN_DIR" || die "cannot create $BIN_DIR"
+BIN_DIR="$(cd "$BIN_DIR" && pwd -P)"
 q="'${PREFIX//\'/\'\\\'\'}'"
-cat > "$LAUNCHER.new" <<EOF
+qb="'${BIN_DIR//\'/\'\\\'\'}'"
+LAUNCHER_NEW="$LAUNCHER.new"
+cat > "$LAUNCHER_NEW" <<EOF || die "cannot write the launcher file $LAUNCHER_NEW"
 #!/bin/sh
 $MARK; delete it to uninstall.
 # Inside an Alpaca project it runs that project's own bin/alpaca; anywhere else it runs the
 # installed release, so \`alpaca new\` works from any folder.
 ALPACA_HOME=$q
+ALPACA_BIN_DIR=$qb
+# \`alpaca update\` runs the installed release, never a project's copy: that copy may predate the
+# verb, and the update replaces its files while it runs.
+if [ "\${1-}" = update ]; then shift; exec "\$ALPACA_HOME/current/bin/alpaca" update --prefix "\$ALPACA_HOME" --bin-dir "\$ALPACA_BIN_DIR" "\$@"; fi
 d=\$(pwd -P)
 while :; do
   if [ -f "\$d/ALPACA-MANIFEST" ] && [ -x "\$d/bin/alpaca" ]; then exec "\$d/bin/alpaca" "\$@"; fi
@@ -140,7 +199,16 @@ while :; do
 done
 exec "\$ALPACA_HOME/current/bin/alpaca" "\$@"
 EOF
-chmod 0755 "$LAUNCHER.new" && mv -f "$LAUNCHER.new" "$LAUNCHER"
+chmod 0755 "$LAUNCHER_NEW" || die "cannot write the launcher at $LAUNCHER"
+OLD_CURRENT="$(readlink "$PREFIX/current" 2>/dev/null || true)"
+CURRENT_MOVED=1
+ln -sfn "releases/$ID" "$PREFIX/current" || die "cannot move $PREFIX/current"
+if ! mv -f "$LAUNCHER_NEW" "$LAUNCHER"; then
+  if [ -n "$OLD_CURRENT" ]; then ln -sfn "$OLD_CURRENT" "$PREFIX/current" || true; fi
+  die "cannot put the launcher at $LAUNCHER; current is back at ${OLD_CURRENT:-its old place}"
+fi
+LAUNCHER_NEW=""
+CURRENT_MOVED=0
 say "launcher at $LAUNCHER"
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;

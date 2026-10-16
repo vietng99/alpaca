@@ -356,7 +356,7 @@ def test_preservation_batch_reloads_witnesses_after_external_wiki_commit(tmp_pat
     # job one built the shared index, the external operator its own, and job two built the
     # shared one again after the external commit
     assert len(built) == 3 and absorbers[0].echo_index is built[-1]
-    assert 'raw/external.md' in absorbers[0].echo_index._doc.values()
+    assert 'raw/external.md' in {doc for doc, _ in absorbers[0].echo_index.entries().values()}
     conn.close()
 
 
@@ -723,3 +723,185 @@ def test_snapshot_job_for_a_gone_transcript_closes_without_new_events(tmp_path):
     assert job['status'] == 'done' and job['failures'] == 0 and job['error'] is None
     assert [i['code'] for i in rows(tmp_path,'obs_issue') if i['resolved_at'] is None] == []
     conn.close()
+
+
+def _writes(conn):
+    """The write statements `conn` runs from now on (sqlite3 trace callback)."""
+    seen = []
+    conn.set_trace_callback(lambda sql: seen.append(sql) if sql.lstrip().split(None, 1)[0].upper()
+                            in ('INSERT', 'UPDATE', 'DELETE', 'REPLACE') else None)
+    return seen
+
+
+def test_open_issue_lookup_has_an_index_in_new_and_existing_records(tmp_path):
+    """t-679: every poll of every source resolves its open issues by (source_id, code). Without an
+    index each poll scanned the whole obs_issue table twice; on the live record (10,000 sources and
+    10,600 issues every 2 s) that was two thirds of the collector's CPU."""
+    from alpaca import migrate
+    conn = db.connect(str(tmp_path))
+    plan = lambda: ' '.join(str(r[3]) for r in conn.execute(
+        'EXPLAIN QUERY PLAN SELECT 1 FROM obs_issue WHERE source_id=? AND code IN (?,?) '
+        'AND resolved_at IS NULL LIMIT 1', ('s', 'a', 'b')))
+    assert 'idx_obs_issue_open' in plan(), plan()
+    conn.execute('DROP INDEX idx_obs_issue_open')
+    conn.close()
+    # An existing record at the current version gets it on its next open for write.
+    conn = db.connect(str(tmp_path))
+    assert 'idx_obs_issue_open' in plan(), plan()
+    before = conn.total_changes
+    migrate.apply(conn)
+    assert conn.total_changes == before
+    conn.close()
+
+
+def test_a_poll_with_no_open_issue_writes_nothing_to_the_issue_table(tmp_path):
+    """t-679: an unchanged source is polled every pass. With no open issue to close, the poll runs
+    no UPDATE (each one was a write transaction of its own, 8,000 per pass on the live record)."""
+    path, sid = source(tmp_path, '{"type":"user"}\n')
+    obs.run_once(str(tmp_path), consumers=False)
+    conn = db.connect(str(tmp_path))
+    spec = obs._sources(conn)[0]
+    writes = _writes(conn)
+    assert obs._collect_source(conn, spec, 200, str(tmp_path)) == 0
+    assert writes == []
+    # New lines: the batch is written, but no issue row is touched.
+    with path.open('a') as f:
+        f.write('{"type":"assistant"}\n')
+    assert obs._collect_source(conn, spec, 200, str(tmp_path)) == 1
+    assert not [sql for sql in writes if 'obs_issue' in sql], writes
+    conn.close()
+
+
+def test_a_poll_closes_only_its_own_open_issues(tmp_path):
+    """t-679: the cheaper check still closes an open issue of the polled source on both paths
+    (unchanged and new lines), and leaves another source's issue and other codes open."""
+    path, sid = source(tmp_path, '{"type":"user"}\n')
+    obs.run_once(str(tmp_path), consumers=False)
+    conn = db.connect(str(tmp_path))
+    spec = obs._sources(conn)[0]
+    obs.issue(conn, 'source-unreadable', source_id=sid, detail='PermissionError')
+    obs.issue(conn, 'collector-error', source_id='other', detail='ValueError')
+    obs.issue(conn, 'malformed-json', source_id=sid, detail='line=1', identity=1)
+    assert obs._collect_source(conn, spec, 200, str(tmp_path)) == 0
+    open_ = lambda: {(i['source_id'], i['code']) for i in rows(tmp_path, 'obs_issue') if i['resolved_at'] is None}
+    assert open_() == {('other', 'collector-error'), (sid, 'malformed-json')}
+    obs.issue(conn, 'collector-error', source_id=sid, detail='ValueError')
+    with path.open('a') as f:
+        f.write('{"type":"assistant"}\n')
+    assert obs._collect_source(conn, spec, 200, str(tmp_path)) == 1
+    assert open_() == {('other', 'collector-error'), (sid, 'malformed-json')}
+    conn.close()
+
+
+def test_a_verified_stat_change_is_not_verified_again_on_every_poll(tmp_path, monkeypatch):
+    """t-679: a source whose stat changed with no new content (a new link, a touch, or lines that
+    landed between the fstat and the read of the pass that took them) was read and hashed whole on
+    every poll, since the stored stat hint is not rewritten for a poll that found nothing (no write
+    per poll). On the live record 714 such sources, 755 MB, were hashed every 2 s. The watcher now
+    remembers the verified stat in memory: the next poll of the same stat takes the fast path, still
+    without a write, and a real change after it is still found."""
+    import os
+    path, sid = source(tmp_path, '{"type":"user"}\n')
+    obs.run_once(tmp_path, consumers=False)
+    conn = db.connect(tmp_path)
+    spec = obs._sources(conn)[0]
+    old = path.stat()
+    os.utime(path, ns=(old.st_atime_ns, old.st_mtime_ns + 1000000))
+    reads = []
+    real_prefix = obs._prefix
+    monkeypatch.setattr(obs, '_prefix', lambda fh, length: reads.append(length) or real_prefix(fh, length))
+    writes = _writes(conn)
+    assert obs._collect_source(conn, spec, 200, tmp_path) == 0
+    assert reads                                   # the first poll after the change verifies
+    reads.clear()
+    assert obs._collect_source(conn, spec, 200, tmp_path) == 0
+    assert obs._collect_source(conn, spec, 200, tmp_path) == 0
+    assert reads == [] and writes == []
+    # A same-size content change has a new stat: verified again, and a new generation.
+    path.write_text('{"type":"xxxx"}\n')
+    assert obs._collect_source(conn, spec, 200, tmp_path) == 1
+    assert conn.execute('select max(generation) from obs_generation').fetchone()[0] == 2
+    conn.close()
+
+
+def test_a_pass_reads_backoffs_and_the_source_list_once(tmp_path, monkeypatch):
+    """t-679: a pass over the live record (10,000 sources, 5,850 of them in a retry backoff for a
+    missing file) read each source's backoff with a query of its own and parsed the whole source
+    list three times. The backoffs and the list are read once per pass; a source in backoff is
+    still skipped, and one past its backoff still retried."""
+    import datetime as dt
+    present, sid = source(tmp_path, '{"type":"user"}\n')
+    for n in range(40):
+        obs.expect_source(str(tmp_path), 'gone%d' % n, 'codex', locator=str(tmp_path / ('gone%d.jsonl' % n)))
+    first = obs.run_once(str(tmp_path), consumers=False)
+    assert first['errors'] == 40 and first['records'] == 1
+    statements = []
+    real_connect = obs.db.connect
+
+    def traced(root):
+        conn = real_connect(root)
+        conn.set_trace_callback(statements.append)
+        return conn
+    monkeypatch.setattr(obs.db, 'connect', traced)
+    second = obs.run_once(str(tmp_path), consumers=False)
+    assert second['errors'] == 0 and second['sources'] == 1          # all 40 still in backoff
+    assert len([s for s in statements if 'obs:retry:' in s]) <= 1, statements
+    assert len([s for s in statements if 'FROM obs_source' in s and 'SELECT *' in s]) <= 1, statements
+    # One whose backoff ran out is tried again.
+    conn = real_connect(str(tmp_path))
+    gone = obs.expect_source(str(tmp_path), 'gone0', 'codex')['source_id']
+    past = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=1)).isoformat()
+    db.meta_set(conn, 'obs:retry:' + gone, json.dumps({'failures': 1, 'after': past}))
+    conn.close()
+    third = obs.run_once(str(tmp_path), consumers=False)
+    assert third['errors'] == 1 and third['sources'] == 2
+
+
+def test_a_verified_unchanged_source_is_polled_with_one_stat(tmp_path):
+    """t-679: once this process verified a source at its cursor, a poll of the same stat runs no
+    query at all; new lines, a failed poll or another record file bring the full poll back."""
+    path, sid = source(tmp_path, '{"type":"user"}\n')
+    obs.run_once(str(tmp_path), consumers=False)
+    conn = db.connect(str(tmp_path))
+    spec = obs._sources(conn)[0]
+    assert obs._collect_source(conn, spec, 200, str(tmp_path)) == 0      # verifies and remembers
+    statements = []
+    conn.set_trace_callback(statements.append)
+    assert obs._collect_source(conn, spec, 200, str(tmp_path)) == 0
+    assert statements == []
+    with path.open('a') as f:
+        f.write('{"type":"assistant"}\n')
+    assert obs._collect_source(conn, spec, 200, str(tmp_path)) == 1
+    conn.set_trace_callback(None)
+    conn.close()
+    # A failed poll forgets the source: its next good poll runs the full check and closes the issue.
+    obs._collect_source(db.connect(str(tmp_path)), spec, 200, str(tmp_path))
+    assert (str(tmp_path), sid) in obs._VERIFIED
+    path.rename(tmp_path / 'away.jsonl')
+    assert obs.run_once(str(tmp_path), consumers=False)['errors'] == 1
+    assert (str(tmp_path), sid) not in obs._VERIFIED
+    (tmp_path / 'away.jsonl').rename(path)
+    conn = db.connect(str(tmp_path))
+    conn.execute("DELETE FROM meta WHERE key LIKE 'obs:retry:%'")
+    conn.close()
+    assert obs.run_once(str(tmp_path), consumers=False)['errors'] == 0
+    assert [i['resolved_at'] is not None for i in rows(tmp_path, 'obs_issue')] == [True]
+
+
+def test_another_record_file_drops_the_verified_stats_of_its_root(tmp_path):
+    """t-679: a record restored or replaced under a running collector may hold other cursors."""
+    path, sid = source(tmp_path, '{"type":"user"}\n')
+    obs.run_once(str(tmp_path), consumers=False)
+    obs.run_once(str(tmp_path), consumers=False)
+    assert (str(tmp_path), sid) in obs._VERIFIED
+    record = tmp_path / '.alpaca' / 'alpaca.db'
+    src = db.connect_readonly(str(tmp_path))
+    import sqlite3
+    copy = sqlite3.connect(str(tmp_path / 'copy.db'))
+    src.backup(copy)
+    copy.close(); src.close()
+    for suffix in ('-wal', '-shm'):
+        Path(str(record) + suffix).unlink(missing_ok=True)
+    (tmp_path / 'copy.db').replace(record)
+    obs._record_identity(str(tmp_path))
+    assert (str(tmp_path), sid) not in obs._VERIFIED

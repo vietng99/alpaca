@@ -15,7 +15,28 @@ SESSION_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
 
 
 class SessionError(ValueError):
-    pass
+    """A refused session verb. `reason` is a refusal token when one names the cause."""
+
+    def __init__(self, message, reason=None):
+        super().__init__(message)
+        self.reason = reason
+
+
+def _raise_refused(exc, session, level, root, started=False):
+    """The SessionError for a level raise refused for want of the owner's words (t-678)."""
+    from alpaca.posture import level as posture
+    conn = db.connect(root)
+    try:
+        current = "L%d" % posture.in_force(conn, session, root=root)
+    finally:
+        conn.close()
+    head = "session %s started at %s; " % (session, current) if started else ""
+    return SessionError(
+        "%s%sraising session %s to %s needs the owner's own words (%s). Have the owner type "
+        "/autodrive %s in this session, or run this command in the owner's own terminal; a drop, "
+        "OFF or the same level needs no owner words" % (
+            head, exc.reason + ": " if exc.reason else "", session, level, exc.detail, level),
+        reason=exc.reason)
 
 
 def run(action, root, session=None, *, operator=None, level=None, goal="",
@@ -78,8 +99,12 @@ def run(action, root, session=None, *, operator=None, level=None, goal="",
                 # handler runs: its snapshot then copies the file the operator just named.
                 db.patch(conn, "sessions", "sid", session, {"transcript": transcript})
         if action == "start":
+            from alpaca import ownerword
             from alpaca.hooks import session_start
-            result.update(session_start.handle(payload))
+            try:
+                result.update(session_start.handle(payload))
+            except ownerword.OwnerWordRefusal as exc:
+                raise _raise_refused(exc, session, level, root, started=True)
         elif action == "checkpoint":
             # FR-7, OA-4: the Stop hook's capture step for a session that has no Stop hook
             from alpaca.hooks import pre_compact
@@ -112,8 +137,14 @@ def run(action, root, session=None, *, operator=None, level=None, goal="",
             except ValueError as exc:
                 raise SessionError(str(exc))
         elif action == "level":
+            from alpaca import ownerword
             from alpaca.posture import level as posture
-            posture.set_local(conn, session, level, goal, actor=selected_operator, root=root)
+            try:
+                # a raise records only on the owner's own words; a drop, OFF or the same level
+                # records as before (CLAUDE.md rule 6, t-678)
+                posture.request(conn, session, level, goal, actor=selected_operator, root=root)
+            except ownerword.OwnerWordRefusal as exc:
+                raise _raise_refused(exc, session, level, root)
             from alpaca import pad
             pad.write(root)
             result["level"] = "L%d" % posture.in_force(conn, session, root=root)
@@ -141,7 +172,10 @@ def cmd_session(args):
                      transcript=getattr(args, "transcript", None),
                      wiki_question=getattr(args, "wiki_question", None))
     except SessionError as exc:
-        print(json.dumps({"status": "BLOCKED", "error": str(exc)}))
+        out = {"status": "BLOCKED", "error": str(exc)}
+        if exc.reason:
+            out["reason"] = exc.reason
+        print(json.dumps(out, ensure_ascii=True))
         return cli.BLOCKED
     print(json.dumps(result, ensure_ascii=True))
     return cli.BLOCKED if result.get("decision") == "block" else cli.PASS
@@ -171,7 +205,8 @@ def _parser(sub):
     beat = verbs.add_parser("beat", help="record an explicitly reported tool action")
     beat.add_argument("--tool", required=True)
     beat.add_argument("--ref", default="")
-    level = verbs.add_parser("level", help="record an owner-authorized session level")
+    level = verbs.add_parser("level", help="record a session level; a raise needs the owner's "
+                             "own /autodrive call or the owner's terminal")
     level.add_argument("level", choices=["L%d" % n for n in range(1, 7)] + ["OFF"])
     level.add_argument("--goal", default="")
     done = verbs.add_parser("done", help="record that the autodrive goal is reached (L6 may stop)")

@@ -95,6 +95,15 @@ def ignore_sources(path, rels):
     return ['%s (%s)' % (rel, found.get(rel, 'no ignore rule')) for rel in rels]
 
 
+def kept_out(seed, ignored):
+    """The detail naming the candidate members its own ignore rules keep out of the seed."""
+    if not ignored:
+        return ''
+    return ('kept out of the seed by the candidate\'s own ignore rules: '
+            + ', '.join(ignore_sources(seed, ignored[:5]))
+            + (' and %d more' % (len(ignored) - 5) if len(ignored) > 5 else ''))
+
+
 def copy_files(files, target):
     target.mkdir(parents=True, exist_ok=False)
     for rel, source in files.items():
@@ -525,7 +534,9 @@ def check_release(root, config, build, source=None, progress=QUIET, carry=True):
 
     With carry (the default) a project gate that passed in an earlier recorded check of the same build
     is not run again but carried over, pointing at the check that ran it (carry_plan). The built-in
-    checks and the final recheck always run. carry=False runs every gate."""
+    checks are never carried, and the final recheck always runs. With release.fail_fast a failed
+    built-in check skips the built-in checks after it and every project gate. carry=False runs every
+    gate."""
     root = Path(root).resolve()
     source = Path(source or root).resolve()
     attempt = uuid.uuid4().hex
@@ -555,6 +566,17 @@ def check_release(root, config, build, source=None, progress=QUIET, carry=True):
         gates[-1].update(started=stamp(start), duration_s=round(time.time() - start, 1))
         progress.finish(gates[-1]['name'], gates[-1]['status'], gates[-1]['duration_s'])
 
+    def skipped(name):
+        # With fail_fast a failed built-in check skips the built-in checks after it, as a failed project
+        # gate skips the gates after it (op-056 t-611, t-644).
+        first = next((g['name'] for g in gates if g['status'] != 'PASS'), None)
+        if not (config.fail_fast and first):
+            return False
+        gates.append({'name': name, 'status': 'SKIPPED', 'returncode': None, 'timed_out': False,
+                      'detail': 'not run: %s failed first (release.fail_fast)' % first})
+        progress.finish(name, 'SKIPPED')
+        return True
+
     start = time.time()
     progress.start('reproducibility')
     try:
@@ -565,36 +587,39 @@ def check_release(root, config, build, source=None, progress=QUIET, carry=True):
     timed(start)
 
     seed = work / 'seed'
-    start = time.time()
-    progress.start('leak-scan')
-    try:
-        copy_files({rel: Path(build.tree) / rel for rel in build.inventory}, seed)
-        candidate = init_repository(seed)
-        ignored = left_out(seed)
-        cfg, terms, policy_hash = policy(root, source)
-        report = barrier.scan(str(seed), [candidate], cfg=cfg, term_list=terms)
-        reasons = list(report.reasons)
-        if ignored:
-            # The scan reads the commit; a member the candidate's .gitignore keeps out of it is unscanned.
-            reasons.append('UNSCANNED-IGNORED-MEMBER')
-        add('leak-scan', report.verdict == 0 and not ignored, ','.join(reasons))
-    except (ValueError, OSError, subprocess.SubprocessError) as exc:
-        ignored = []
-        add('leak-scan', False, type(exc).__name__)
-    timed(start)
+    ignored = []
+    if not skipped('leak-scan'):
+        start = time.time()
+        progress.start('leak-scan')
+        try:
+            copy_files({rel: Path(build.tree) / rel for rel in build.inventory}, seed)
+            candidate = init_repository(seed)
+            ignored = left_out(seed)
+            cfg, terms, policy_hash = policy(root, source)
+            report = barrier.scan(str(seed), [candidate], cfg=cfg, term_list=terms)
+            reasons = list(report.reasons)
+            if ignored:
+                # The scan reads the commit; a member the candidate's .gitignore keeps out of it is
+                # unscanned. Named here too, since fail_fast skips the fresh clone after this failure.
+                reasons.append('UNSCANNED-IGNORED-MEMBER')
+            detail = ','.join(reasons) + (': ' + kept_out(seed, ignored) if ignored else '')
+            add('leak-scan', report.verdict == 0 and not ignored, detail)
+        except (ValueError, OSError, subprocess.SubprocessError) as exc:
+            ignored = []
+            add('leak-scan', False, type(exc).__name__)
+        timed(start)
 
-    start = time.time()
-    progress.start('fresh-clone')
-    try:
-        clone = work / 'fresh'
-        git(work, 'clone', '-q', '--no-local', str(seed), str(clone))
-        detail = ('kept out of the seed by the candidate\'s own ignore rules: '
-                  + ', '.join(ignore_sources(seed, ignored[:5]))
-                  + (' and %d more' % (len(ignored) - 5) if len(ignored) > 5 else '')) if ignored else ''
-        add('fresh-clone', digest(tree_inventory(clone)) == build.tree_hash and not ignored, detail)
-    except (ValueError, OSError, subprocess.SubprocessError) as exc:
-        add('fresh-clone', False, type(exc).__name__)
-    timed(start)
+    if not skipped('fresh-clone'):
+        start = time.time()
+        progress.start('fresh-clone')
+        try:
+            clone = work / 'fresh'
+            git(work, 'clone', '-q', '--no-local', str(seed), str(clone))
+            add('fresh-clone', digest(tree_inventory(clone)) == build.tree_hash and not ignored,
+                kept_out(seed, ignored))
+        except (ValueError, OSError, subprocess.SubprocessError) as exc:
+            add('fresh-clone', False, type(exc).__name__)
+        timed(start)
 
     reuse = {}
     if carry and policy_hash and all(g['status'] == 'PASS' for g in gates):
@@ -605,7 +630,8 @@ def check_release(root, config, build, source=None, progress=QUIET, carry=True):
     run_gates(work, config, seed, source, gates, progress, reuse)
     try:
         validate_build(root, config, build, source)
-        if policy(root, source)[2] != policy_hash:
+        # Only a policy the leak scan read can have changed; a skipped or failed-early scan read none.
+        if policy_hash and policy(root, source)[2] != policy_hash:
             raise ValueError('release policy changed during checks')
         approval.require(root, config, build.source_sha, approved, source=source)
     except (ValueError, OSError, subprocess.SubprocessError) as exc:

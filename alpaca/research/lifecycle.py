@@ -773,7 +773,12 @@ class _Attempt:
         if not name:
             return None
         base = os.path.join(paths.contract_dir(self.root, self.run), "files")
-        for cand in (os.path.join(base, os.path.dirname(self.contract.runbook), name),
+        from alpaca.research import gates
+        try:
+            folder = gates._studio_folder(self.contract)
+        except ValueError:
+            return None
+        for cand in (os.path.join(base, folder or os.path.dirname(self.contract.runbook), name),
                      os.path.join(base, name)):
             if os.path.isfile(cand) and not os.path.islink(cand):
                 with open(cand, encoding="utf-8", errors="replace") as fh:

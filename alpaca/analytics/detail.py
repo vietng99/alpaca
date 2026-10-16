@@ -437,9 +437,25 @@ def _hash(value):
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:24]
 
 
+def _real(path):
+    """os.path.realpath(path), kept for the rest of the revision batch when one is open on this
+    thread (revision_batch): a batch reads every conversation's revision as of its start, and the
+    containment checks below resolved the same root and directories about 120 times a
+    conversation (t-680). Outside a batch every call resolves."""
+    memo = getattr(_BATCH, 'real', None)
+    if memo is None:
+        return os.path.realpath(path)
+    key = os.fspath(path)
+    value = memo.get(key)
+    if value is None:
+        value = memo[key] = os.path.realpath(key)
+    return value
+
+
 def _inside(path, directory):
     try:
-        return os.path.commonpath([os.path.realpath(path), os.path.realpath(directory)]) == os.path.realpath(directory)
+        real = _real(directory)
+        return os.path.commonpath([_real(path), real]) == real
     except (ValueError, OSError):
         return False
 
@@ -947,7 +963,7 @@ def revision_scope(root):
 def scoped(root, key, compute):
     """compute() once per revision_scope for (root, key); every call outside a scope computes."""
     state = getattr(_SCOPE, "state", None)
-    if state is None or state[0] != os.path.realpath(root):
+    if state is None or state[0] != _real(root):
         return compute()
     memo = state[2]
     if (key,) not in memo:
@@ -957,7 +973,7 @@ def scoped(root, key, compute):
 
 def _connection(root):
     state = getattr(_SCOPE, "state", None)
-    if state is not None and state[0] == os.path.realpath(root):
+    if state is not None and state[0] == _real(root):
         return _SharedConnection(state[1])
     return db.connect_readonly(root)
 
@@ -974,33 +990,35 @@ def revision_batch(root):
     parent_session help each query but not the count). The
     rows are read once, in source_id order, and each call filters them in Python, which returns what
     the query returned as of the start of the block. The caller keys a cached row on that revision,
-    so a row that moves later changes the next revision and recomputes."""
-    conn = _connection(root)
+    so a row that moves later changes the next revision and recomputes. Real paths are kept for
+    the block the same way (_real)."""
+    prior, prior_real = getattr(_BATCH, 'obs', None), getattr(_BATCH, 'real', None)
+    _BATCH.real = {} if prior_real is None else prior_real
     try:
-        rows = [dict(item) for item in conn.execute("SELECT * FROM obs_source ORDER BY source_id")]
-    except sqlite3.OperationalError as exc:
-        if 'no such table' not in str(exc):
-            raise
-        rows = []
-    finally:
-        conn.close()
-    prior = getattr(_BATCH, 'obs', None)
-    by_session, by_parent = {}, {}
-    for position, row in enumerate(rows):
-        by_session.setdefault(row['session'], []).append(position)
-        by_parent.setdefault(row['parent_session'], []).append(position)
-    _BATCH.obs = (os.path.realpath(root), rows, by_session, by_parent)
-    try:
+        conn = _connection(root)
+        try:
+            rows = [dict(item) for item in conn.execute("SELECT * FROM obs_source ORDER BY source_id")]
+        except sqlite3.OperationalError as exc:
+            if 'no such table' not in str(exc):
+                raise
+            rows = []
+        finally:
+            conn.close()
+        by_session, by_parent = {}, {}
+        for position, row in enumerate(rows):
+            by_session.setdefault(row['session'], []).append(position)
+            by_parent.setdefault(row['parent_session'], []).append(position)
+        _BATCH.obs = (_real(root), rows, by_session, by_parent)
         yield
     finally:
-        _BATCH.obs = prior
+        _BATCH.obs, _BATCH.real = prior, prior_real
 
 
 def _obs_sources(conn, root, sid, parent_only=False):
     """obs_source rows naming sid as the parent (parent_only, with a locator) or as either side."""
     batch = getattr(_BATCH, 'obs', None)
     # A batch answers only for the root it read; another root's call queries its own record.
-    if batch is not None and batch[0] == os.path.realpath(root):
+    if batch is not None and batch[0] == _real(root):
         _root, rows, by_session, by_parent = batch
         if parent_only:
             return [rows[at] for at in by_parent.get(sid, ()) if rows[at]['locator'] is not None]
@@ -1108,7 +1126,7 @@ def _children(root, sid, registered):
                 local_dir = Path(transcripts.subagents_dir(root, sid))
                 if registered and _inside(candidate, local_dir):
                     native_candidate = Path(registered).parent / Path(registered).stem / 'subagents' / Path(candidate).relative_to(local_dir)
-                if os.path.realpath(native_candidate) == os.path.realpath(child_path):
+                if _real(native_candidate) == _real(child_path):
                     matching.append((old_id, candidate))
             retained = Path(transcripts.local_path(root, row['session']))
             available = child_path if child_path.is_file() and not child_path.is_symlink() else retained if _local_file(retained, root) else matching[0][1] if matching else None
@@ -1160,7 +1178,7 @@ def _locator_fingerprint(sources):
 
 def source_revision(root, sid):
     """Metadata revision of every bounded detail source, including record fallback."""
-    root = os.path.realpath(root)
+    root = _real(root)
     conn = _connection(root)
     try:
         row = conn.execute("SELECT transcript,started,ended FROM sessions WHERE sid=?", (sid,)).fetchone() if conn else None

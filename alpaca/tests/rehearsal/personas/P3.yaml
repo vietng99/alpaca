@@ -1,0 +1,19 @@
+# P3 Mai: a teacher, not a programmer. No repository.
+id: P3
+name: Mai
+repo: none
+expected_situation: start-empty
+expected_mode: native
+public:
+  voice: "Warm, unsure about technical words. Asks what words mean. Never says git or repo on her own."
+  opening: "I want to make a little app for my class but I am not a programmer"
+sealed:
+  goal: "A page on my laptop that tracks my students' reading logs, working this week."
+  limits:
+    - "Nothing is published online, ever."
+    - "Student names never leave the laptop."
+  done_when: "I can type a student's name and the pages read today, and see a list per student."
+  traps:
+    - "Ask what an op is, and ask whether your data is sent anywhere, before you say yes."
+  trap_reply: ""
+  quiz_note: "Answer the quiz from the card only."

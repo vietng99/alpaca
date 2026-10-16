@@ -521,6 +521,40 @@ def plan(root, policy=None, *, current_sid=None, now=None, held=None, sessions=_
             b = blocked(d)
             (keep if b else remove).append(_candidate("scratch", d, b or why))
 
+    # sandbox temp roots: `/tmp/sbx<sid8>` of a session the record shows ended (alpaca/sandbox.py). SessionEnd
+    # removes it; this is the backstop for a session that died. The folder names its session in a marker
+    # file with the full session id, never by the 8-character name: a folder with no marker, one that is
+    # not ours or closed to others, a link, and one whose session is live, not ended or unknown stay.
+    from alpaca import sandbox
+    sbx_base = os.path.realpath(sandbox.TEMP_BASE)
+    for n in (sorted(os.listdir(sbx_base)) if sessions is not None and os.path.isdir(sbx_base) else []):
+        d = os.path.join(sbx_base, n)
+        if not n.startswith(sandbox.TEMP_PREFIX) or os.path.islink(d) or not os.path.isdir(d):
+            continue
+        sid = sandbox._marker_of(d)
+        if not sid:
+            keep.append(_candidate("sandbox-tmp", d, "no marker of ours (not made by a session of this user)"))
+            continue
+        if sid == current_sid:
+            keep.append(_candidate("sandbox-tmp", d, "the session running this sweep"))
+            continue
+        info = sessions.get(sid)
+        if not info:
+            keep.append(_candidate("sandbox-tmp", d, "its session is unknown to the record"))
+            continue
+        if info["live"] or not info["ended"]:
+            keep.append(_candidate("sandbox-tmp", d, "its session is live or not ended in the record"))
+            continue
+        age = _age_of_stamp(info["last"], now) or 0
+        age = min(age, deep_quiet_seconds(d, now))
+        if age < ended_grace:
+            keep.append(_candidate("sandbox-tmp", d, "session ended %.0f h ago, under %.0f h"
+                                   % (age / 3600, policy["ended_grace_hours"])))
+            continue
+        b = blocked(d)
+        (keep if b else remove).append(_candidate(
+            "sandbox-tmp", d, b or "its session ended and nothing changed for %.0f h" % (age / 3600)))
+
     # tmp: declared globs at the top of tmp_root, owned by this user
     troot = policy.get("tmp_root")
     if troot and policy["tmp_globs"]:

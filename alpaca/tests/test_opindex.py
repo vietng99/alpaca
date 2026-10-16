@@ -241,3 +241,29 @@ def test_status_index_is_json_serialisable(project):
 def vc_blocked():
     from alpaca.gates import verdict as vc
     return vc.BLOCKED
+
+
+def test_the_op_reads_decode_only_their_own_events(project, monkeypatch):
+    # t-685: `_events_for_op` read and decoded the whole record for every op, twice an op in each
+    # pad render (5.1 GB and 15 s in the collector on the live record). It reads the op's events
+    # of the asked kinds alone, and the answers stay those of the whole-record read.
+    conn = _setup(project)
+    _op(conn, "op-001")
+    _op(conn, "op-002")
+    _row(conn, "r-1", op="op-001")
+    _row(conn, "r-2", op="op-002")
+    for i in range(50):
+        db.append_event(conn, session="s", actor="t", kind="heartbeat", op="op-001", data={"n": i})
+    opindex.archive(conn, "op-001", session="s", reason="parked")
+    opindex.set_cursor(conn, "op-002", "r-2", session="s")
+    opindex.archive(conn, "op-002", session="s", reason="parked")
+    opindex.unarchive(conn, "op-002", session="s", reason="back")
+    assert opindex.state(conn, "op-001") == "archived" and opindex.state(conn, "op-002") == "open"
+    assert opindex.cursor(conn, "op-002") == "r-2" and opindex._pinned_cursor(conn, "op-001") is None
+    whole = [e for e in db.events(conn, limit=10 ** 9)]
+    monkeypatch.setattr(db, "events", lambda *a, **k: pytest.fail("the whole record was read"))
+    for op in ("op-001", "op-002"):
+        for kinds in ((opindex.ARCHIVE_KIND, opindex.UNARCHIVE_KIND), (opindex.CURSOR_KIND,),
+                      opindex._ADVANCING_KINDS):
+            assert opindex._events_for_op(conn, op, kinds) == [
+                e for e in whole if e["op"] == op and e["kind"] in kinds]

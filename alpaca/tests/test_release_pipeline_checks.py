@@ -192,11 +192,22 @@ def test_check_flags_a_candidate_member_its_gitignore_hides(project):
     assert 'src/debug.log' in api('build').tree_inventory(receipt.build['tree'])
     assert receipt.status != 'PASS'
     gates = {g['name']: g for g in receipt.gates}
-    assert gates['fresh-clone']['status'] == 'FAIL' and 'src/debug.log' in gates['fresh-clone']['detail']
-    assert 'src/.gitignore:1' in gates['fresh-clone']['detail']           # the actual ignore source
     assert gates['leak-scan']['status'] == 'FAIL' and 'UNSCANNED-IGNORED-MEMBER' in gates['leak-scan']['detail']
+    assert 'src/debug.log' in gates['leak-scan']['detail']
+    assert 'src/.gitignore:1' in gates['leak-scan']['detail']             # the actual ignore source
+    assert gates['fresh-clone']['status'] == 'SKIPPED'                     # fail_fast, after the leak scan
     with pytest.raises(ValueError):
         api('checks').validate_checks(project, api('config').load_config(project), receipt)
+
+
+def test_without_fail_fast_the_fresh_clone_names_a_hidden_member_too(project):
+    ship_ignored_member(project)
+    data = yaml.safe_load((project / 'project.yaml').read_text())
+    data['release']['fail_fast'] = False
+    (project / 'project.yaml').write_text(yaml.safe_dump(data))
+    gates = {g['name']: g for g in check(project).gates}
+    assert gates['fresh-clone']['status'] == 'FAIL' and 'src/debug.log' in gates['fresh-clone']['detail']
+    assert 'src/.gitignore:1' in gates['fresh-clone']['detail']
 
 
 def test_dev_gate_keeps_tracked_files_an_ignore_rule_matches(project):
@@ -294,6 +305,56 @@ def test_a_failed_mandatory_check_skips_every_project_gate(project, monkeypatch)
     receipt = check(project)
     assert receipt.status == 'FAIL' and not calls
     assert next(g for g in receipt.gates if g['name'] == 'product-test')['status'] == 'SKIPPED'
+
+
+def _rebuild_differs(project, monkeypatch, **release):
+    """A check whose rebuild yields another tree, so reproducibility fails first."""
+    from dataclasses import replace
+    approve_head(project, commit=True)
+    candidate = build(project)
+    checks = api('checks')
+    real = checks.build_release
+    monkeypatch.setattr(checks, 'build_release', lambda *a, **k: replace(real(*a, **k), tree_hash='f' * 64))
+    config = replace(api('config').load_config(project), **release)
+    return checks.check_release(project, config, candidate)
+
+
+def test_a_failed_builtin_check_skips_the_builtin_checks_after_it(project, monkeypatch):
+    calls = []
+    monkeypatch.setattr(api('checks'), 'run_command', lambda *a, **k: calls.append(a) or (0, False))
+    receipt = _rebuild_differs(project, monkeypatch)
+    status = {g['name']: g for g in receipt.gates}
+    assert receipt.status == 'FAIL' and not calls
+    assert status['reproducibility']['status'] == 'FAIL'
+    for name in ('leak-scan', 'fresh-clone', 'product-test'):
+        assert status[name]['status'] == 'SKIPPED'
+        assert status[name]['detail'] == 'not run: reproducibility failed first (release.fail_fast)'
+        assert 'started' not in status[name]
+    assert not receipt.policy_hash                   # the skipped leak scan never read the term policy
+    assert 'input-integrity' not in status          # so the final recheck has no policy to compare
+
+
+def test_a_policy_edit_during_the_gates_still_fails_the_final_recheck(project):
+    terms = project / '.alpaca/terms.txt'
+    configure(project, [sys.executable, '-c', 'open(%r, "a").write("AnotherCanary\\n")' % str(terms)])
+    receipt = check(project)
+    integrity = next(g for g in receipt.gates if g['name'] == 'input-integrity')
+    assert receipt.status == 'FAIL' and integrity['detail'] == 'release policy changed during checks'
+
+
+def test_a_failed_leak_scan_skips_the_fresh_clone(project, monkeypatch):
+    (project / 'src/app.txt').write_text('SecretCanaryValue')
+    receipt = check(project)
+    status = {g['name']: g['status'] for g in receipt.gates}
+    assert status == {'reproducibility': 'PASS', 'leak-scan': 'FAIL', 'fresh-clone': 'SKIPPED',
+                      'product-test': 'SKIPPED'}
+
+
+def test_fail_fast_off_runs_every_builtin_check(project, monkeypatch):
+    receipt = _rebuild_differs(project, monkeypatch, fail_fast=False)
+    status = {g['name']: g['status'] for g in receipt.gates}
+    assert receipt.status == 'FAIL' and status['reproducibility'] == 'FAIL'
+    assert status['leak-scan'] == status['fresh-clone'] == status['product-test'] == 'PASS'
 
 
 def test_fail_fast_off_runs_every_gate(project, tmp_path):

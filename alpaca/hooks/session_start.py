@@ -57,11 +57,23 @@ def export_tool_path(root) -> bool:
         return False
 
 
+def export_sandbox(sid, cwd=None) -> bool:
+    """Source the op sandbox's env file (alpaca/sandbox.py) before every later Bash call, so TMPDIR and
+    pytest's temp root point inside the sandbox while one binds this session. One static line; the guard
+    writes the file it names. Fail-open."""
+    try:
+        from alpaca import sandbox
+        return sandbox.export_hook(sandbox.hook_root(cwd), sid)
+    except Exception:
+        return False
+
+
 def handle(payload):
     from alpaca import db, pad, paths, project, util
     root = paths.root(payload.get("cwd"))
     sid = common.session_of(payload)
     export_session(sid)
+    export_sandbox(sid, payload.get("cwd"))
     export_tool_path(root)
     project.ensure_instance(root)
     conn = db.connect(root)
@@ -94,8 +106,9 @@ def handle(payload):
     try:
         from alpaca.posture import level as posture_level
         if payload.get("level") is not None:
-            posture_level.set_local(conn, sid, payload["level"], payload.get("goal") or "",
-                                    actor=operator, root=root)
+            # `session start --level`: a raise records only on the owner's own words (t-678)
+            posture_level.request(conn, sid, payload["level"], payload.get("goal") or "",
+                                  actor=operator, root=root)
         else:
             posture_level.mirror(conn, sid, root=root)
         level = "L%d" % posture_level.in_force(conn, sid, root=root)
@@ -130,11 +143,20 @@ def handle(payload):
     bundled = bool(cfg.get("template") and ready)
     if bundled:
         pass                    # the profile's lines above say how to start; nothing to onboard
-    elif fork_state == adopt.FRESH:
-        head.append("FIRST CHAT: this project is not onboarded (the /alpaca-first-chat skill walks this). Ask, in this order, then run the verb once:")
-        head.append("  1) who is working on this (names and roles)  2) what is being worked on (one paragraph)")
-        head.append("  3) the open tasks as a list (no goals)  4) enable the plain-writing preset? (y/n)")
-        head.append("  then: bin/alpaca onboard --name <n> --who <a:role,b:role> --what \"...\" --task \"...\" [--preset plain-writing]; then bin/alpaca doctor")
+    elif fork_state == adopt.FRESH or adopt.first_chat_due(conn):
+        if adopt.first_chat_state(conn) == "confirmed":
+            from alpaca import pad as _pad
+            head.append("FIRST CHAT: the owner confirmed the setup card, but it is not applied. Run: bin/alpaca onboard apply %s"
+                        % (_pad._confirmed_card(conn) or "<card>"))
+        else:
+            head.append("FIRST CHAT: setup is not confirmed yet. On the owner's first message run the /alpaca-first-chat skill:")
+            head.append("  look first (bin/alpaca onboard look <git-url|path> --scratch <your session scratchpad>/onboard-look "
+                        "--quote \"<their message>\"),")
+            head.append("  say what you found and the situation, ask the printed questions in plain chat (never AskUserQuestion),")
+            head.append("  record each answer (bin/alpaca onboard answer ...), paste the card from bin/alpaca onboard propose unchanged "
+                        "as one message,")
+            head.append("  and configure nothing until bin/alpaca onboard confirm accepts the owner's typed reply; then "
+                        "bin/alpaca onboard apply <card>.")
     elif fork_state == adopt.SECOND_MACHINE:
         head.append("SECOND MACHINE: this is a cloned but unrun copy of %s; it acts on nothing. Do not onboard; just start work and the record builds here locally." % (cfg.get("name") or "this project"))
     if resume_verdict == "BLOCK":

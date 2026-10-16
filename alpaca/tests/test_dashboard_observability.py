@@ -123,13 +123,13 @@ def test_live_marks_input_revision_failure_stale_and_retries(project, monkeypatc
     live = serve.Live(project)
     live.refresh()
     live.refresh()  # Prime the stable post-DB signature before a transient read failure.
-    original_sig = serve._data_sig
+    original_parts = serve._input_parts
 
-    monkeypatch.setattr(serve, "_data_sig", lambda _root: (_ for _ in ()).throw(OSError("fixture read failure")))
+    monkeypatch.setattr(serve, "_input_parts", lambda _root, files=True: (_ for _ in ()).throw(OSError("fixture read failure")))
     live.refresh()
     assert json.loads(live.health_json())["state"] == "stale"
 
-    monkeypatch.setattr(serve, "_data_sig", original_sig)
+    monkeypatch.setattr(serve, "_input_parts", original_parts)
     live.refresh()
     assert json.loads(live.health_json())["state"] == "fresh"
     conn.close()

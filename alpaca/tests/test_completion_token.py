@@ -158,3 +158,20 @@ def test_session_start_injects_block_into_pad(project):
     import json
     ctx = json.loads(p.stdout)["hookSpecificOutput"]["additionalContext"]
     assert "BLOCK" in ctx and tok in ctx and "widget-Z" in ctx
+
+
+def test_token_notes_are_read_without_decoding_the_other_events(project, monkeypatch):
+    # t-685: the token scan decoded the last 100,000 events of the record to keep a few (132 MB in
+    # each pad render of the collector); it reads the token notes among them alone.
+    cli.main(["init"])
+    conn = db.connect(project)
+    first = token.issue(conn, "s1", "widget-A")
+    for i in range(30):
+        db.append_event(conn, session="s1", actor="t", kind="heartbeat", data={"n": i})
+    second = token.issue(conn, "s1", "widget-B")
+    token.settle(conn, first, "local:.alpaca/alpaca.db")
+    monkeypatch.setattr(db, "events", lambda *a, **k: pytest.fail("the record was read whole"))
+    assert [u["token"] for u in token.unmatched(conn)] == [second]
+    # only the last _SCAN_LIMIT events are looked at, as before
+    monkeypatch.setattr(token, "_SCAN_LIMIT", 1)
+    assert token.unmatched(conn) == []          # the last event is the settle of the first

@@ -25,7 +25,7 @@ def latest(conn, op):
             raise ValueError('plan must be an object')
     except (TypeError, ValueError) as exc:
         raise ValueError('The latest plan is unreadable') from exc
-    return dict(data, revision=row['id'])
+    return dict(db.without_rehearsal(data), revision=row['id'])
 
 
 def _text(value, name, limit=120):

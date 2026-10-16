@@ -182,15 +182,41 @@ def note_denial(root, reason):
         pass
 
 
+def _attach_decision(command, cwd):
+    """The deny for an attached studio's rules (alpaca/attach/guard.py), or None. The attach package is
+    read only when some folder above the cwd or a path in the command holds `.alpaca/attach/state.json`;
+    any failure in it lets the call go ahead, as the hook contract says."""
+    try:
+        from alpaca.attach import guard
+        found = guard.check(command, cwd)
+        if not found:
+            return None
+        note_denial(found.studio, found.reason)
+        return {"hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": guard.message(found)}}
+    except Exception:
+        return None
+
+
 def decide(payload):
     """The deny decision for one PreToolUse payload, or None to let the call run."""
     if payload.get("tool_name") != "Bash":
         return None
     command = (payload.get("tool_input") or {}).get("command")
-    if not isinstance(command, str) or "git" not in command:
+    if not isinstance(command, str):
+        return None
+    plain = command.replace("\\", "").replace("'", "").replace('"', "")      # g\it, g''it and "g"it read as git
+    if "git" not in plain and "gh" not in plain:
+        return None
+    cwd = payload.get("cwd") or os.getcwd()
+    attach = _attach_decision(command, cwd)
+    if attach:
+        return attach
+    if "git" not in command:
         return None
     from alpaca import paths
-    cwd = payload.get("cwd") or os.getcwd()
     root = os.path.realpath(paths.root(cwd))
     for target, reason in findings(command, cwd):
         if _main_toplevel(target) == root:

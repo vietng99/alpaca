@@ -29,8 +29,9 @@ from contextlib import redirect_stdout
 
 import pytest
 
-from alpaca import new
+from alpaca import new, ownerword
 from alpaca.tests import studio_fixture, studio_shots
+from alpaca.tests.conftest import owner_pty
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
@@ -254,8 +255,12 @@ def test_upgrade_refreshes_the_studio_and_keeps_the_project_page(tmp_path_factor
     assert os.path.isfile(record)
 
     source = _release(os.path.join(work, "release"))
-    run = subprocess.run([sys.executable, "-m", "alpaca", "upgrade", "--source", source], cwd=live, env=_env(work),
-                         capture_output=True, text=True, timeout=300)
+    # an upgrade is the owner's act: while the first chat is open an agent call may not run it (alpaca/first_chat.py),
+    # so it runs at the owner's terminal, standard input a pseudo-terminal and no agent marker in the environment
+    owner_env = {k: v for k, v in _env(work).items() if k not in ownerword.AGENT_MARKERS}
+    with owner_pty():
+        run = subprocess.run([sys.executable, "-m", "alpaca", "upgrade", "--source", source], cwd=live, env=owner_env,
+                             capture_output=True, text=True, timeout=300)
     print(run.stdout + run.stderr)
     assert run.returncode == 0 and "PASS" in run.stdout, run.stdout + run.stderr
 

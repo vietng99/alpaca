@@ -38,6 +38,8 @@ def cold(root):
         build_index._ROW_BYTES = 0
     with metrics._CACHE_LOCK:
         metrics._CACHE.clear()
+    with build_index._ROWS_LOCK:
+        build_index._RECORD.clear()
     return fold(root)
 
 
@@ -307,3 +309,98 @@ def test_project_marker_appearing_moves_the_attribution(project, tmp_path):
     warm = fold(project)
     assert next(s for s in json.loads(warm)['sessions'] if s['sid'] == 'a')['projects'] == {str(other): 1}
     assert warm == cold(project)
+
+
+def test_a_revision_batch_resolves_each_path_once(project, monkeypatch):
+    """t-680: source_revision checks containment on real paths (detail._inside resolved the
+    directory twice a check) and compares each scope with the real root, about 120 resolutions a
+    conversation: 161677 os.path.realpath calls and 1.25 M lstat calls in one warm fold of the live
+    record, more in each index run. Inside a revision batch each path is resolved once; the
+    revisions are those computed outside a batch."""
+    import collections
+    for sid in ('a', 'b', 'c'):
+        register(project, sid)
+        write(project, sid, sid + '-response')
+    child = Path(transcripts.subagents_dir(project, 'a')) / 'agent-x.jsonl'
+    child.parent.mkdir(parents=True, exist_ok=True)
+    child.write_text(_assistant('x-1') + '\n')
+    _obs(project, 'src-x', 'x', parent='a', locator=str(child))
+    alone = {sid: detail.source_revision(project, sid) for sid in ('a', 'b', 'c')}
+    calls = collections.Counter()
+    real = os.path.realpath
+    monkeypatch.setattr(os.path, 'realpath', lambda p, *a, **k: calls.update([os.fspath(p)]) or real(p, *a, **k))
+    with detail.revision_batch(project):
+        batched = {sid: detail.source_revision(project, sid) for sid in ('a', 'b', 'c')}
+    assert batched == alone
+    assert calls and max(calls.values()) == 1, calls.most_common(3)
+    calls.clear()
+    assert detail.source_revision(project, 'a') == alone['a'], 'outside a batch nothing is kept'
+    assert max(calls.values()) > 1
+
+
+def test_a_fold_reads_the_record_of_only_the_sessions_that_moved(project, monkeypatch):
+    """t-680: collect read every event of every session (_record_only) and counted each kind per
+    session (_record_summary) on every fold: 2.5 s of CPU of a warm fold of the live record (1333
+    sessions, 277736 events) for the three or four sessions that moved. Both are kept per session
+    under a stamp of what they read: the session's event count and last event id (events are
+    append-only), its session row, its operator label and its hook-cost rows. A fold reads only
+    the sessions whose stamp moved, and equals a cold fold."""
+    for sid in ('a', 'b', 'c'):
+        register(project, sid)
+        write(project, sid, sid + '-response')
+    reads = []
+    real = build_index.db.events
+    monkeypatch.setattr(build_index.db, 'events',
+                        lambda conn, **k: reads.append(k.get('session')) or real(conn, **k))
+    first = cold(project)
+    assert {'a', 'b', 'c'} <= set(reads)
+    del reads[:]
+    assert fold(project) == first
+    assert reads == [], 'nothing moved: no session record is read'
+
+    record = db.connect(project)
+    steps = [
+        ('b', lambda: db.append_event(record, session='b', actor='agent', kind='heartbeat',
+                                      data={'tool': 'Bash'})),
+        ('a', lambda: db.meta_set(record, 'hook-cost:a:PreToolUse', json.dumps({'total_ms': 5, 'runs': 2}))),
+        ('a', lambda: db.meta_set(record, 'hook-cost:a:PreToolUse', json.dumps({'total_ms': 9, 'runs': 3}))),
+        ('c', lambda: db.upsert(record, 'sessions', 'sid', {'sid': 'c', 'level': 'L3'})),
+        ('c', lambda: db.meta_set(record, 'operator:c', 'codex-like')),
+    ]
+    for sid, change in steps:
+        change()
+        del reads[:]
+        moved = fold(project)
+        assert reads == [sid], (sid, reads)
+        assert moved == cold(project)
+    record.close()
+    by_sid = {s['sid']: s for s in build_index.collect(project)}
+    assert by_sid['b']['record']['heartbeats'] == 1 and by_sid['a']['record']['hook_runs'] == 3
+    assert by_sid['c']['record']['level'] == 'L3'
+
+
+def test_a_fold_reads_the_revisions_on_one_connection(project, monkeypatch):
+    """t-680: the fold's key pass opened a connection and read the rate-card revision for every
+    session (4013 connections and 1335 rate-card reads a fold of the live record); like the index
+    run (t-577) it now reads them in one revision scope, so their count does not grow with the
+    sessions, and the keys are the ones read outside a scope."""
+    import collections
+    from alpaca.analytics import ratecards
+    connects, cards = collections.Counter(), []
+    real_connect, real_cards = db.connect_readonly, ratecards._revision
+    monkeypatch.setattr(db, 'connect_readonly', lambda root: connects.update(['c']) or real_connect(root))
+    monkeypatch.setattr(ratecards, '_revision', lambda root, **k: cards.append(1) or real_cards(root, **k))
+
+    def counts(n):
+        for i in range(n):
+            register(project, 's%02d' % i)
+            write(project, 's%02d' % i, 's%02dx' % i)
+        cold(project)
+        connects.clear(); del cards[:]
+        build_index.collect(project)
+        return connects['c'], len(cards)
+    few, many = counts(3), counts(12)
+    assert many == few, (few, many)
+    keys = {sid: metrics.analysis_key(project, sid) for sid in ('s00', 's11')}
+    with detail.revision_scope(project), detail.revision_batch(project):
+        assert keys == {sid: metrics.analysis_key(project, sid) for sid in ('s00', 's11')}

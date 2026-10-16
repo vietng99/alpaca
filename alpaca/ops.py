@@ -648,6 +648,14 @@ def cmd_task(args):
         if t[0]["status"] != "open": print("GATE alpaca-task-claim: FAIL (%s is %s; move it to open first)" % (args.id, t[0]["status"])); return cli.FAIL
         if _intent_refused(conn, t[0], "claim", sid, "alpaca-task-claim"): return cli.FAIL
         res = claims.take(conn, args.id, args.by, minutes=args.minutes, session=sid)
+        from alpaca.attach import config as _attach_config
+        if _attach_config.mode(cli._root()) is not None:
+            # attach mode (op-062 t-648): one end point cuts the work branch of a won claim, releases the lease it
+            # took when anything fails, and checks the lease once more before it says the task is claimed
+            from alpaca.attach import worktree as _attach_wt
+            refusal = _attach_wt.after_claim(conn, cli._root(), args.id, args.by, res, session=sid)
+            if refusal:
+                print("GATE alpaca-task-claim: FAIL (%s)" % refusal); return cli.FAIL
         print("%s claimed by %s until %s" % (args.id, args.by, res["lease_until"])); return cli.PASS
     if args.task_verb == "move":
         # M1.13: a checklist obligation row is discharged by AUTHORING a verdict row (machine-

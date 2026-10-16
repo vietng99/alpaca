@@ -108,6 +108,8 @@ CREATE TABLE IF NOT EXISTS obs_issue (
   issue_id TEXT PRIMARY KEY, source_id TEXT, code TEXT NOT NULL, detail TEXT NOT NULL,
   first_seen TEXT NOT NULL, last_seen TEXT NOT NULL, occurrences INTEGER NOT NULL DEFAULT 1,
   resolved_at TEXT);
+-- t-679: every collector poll of every source looks up its open issues by (source_id, code).
+CREATE INDEX IF NOT EXISTS idx_obs_issue_open ON obs_issue(source_id, code) WHERE resolved_at IS NULL;
 CREATE TABLE IF NOT EXISTS obs_consumer_checkpoint (
   consumer TEXT PRIMARY KEY, event_id INTEGER NOT NULL DEFAULT 0,
   observation_id INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL,

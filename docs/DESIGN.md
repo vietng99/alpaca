@@ -12,7 +12,7 @@ The bundle includes the operating instructions, the core engineering mechanisms,
 
 The core keeps its event record, operations and tasks, sealed proof reports, phase gates, projections, knowledge store, worker coordination, and recovery mechanisms under alpaca/. The immutable obligation hash is shared across synthesis, persistence, and verification; derived status and maturity tags are not frozen inputs.
 
-Claude Code uses native lifecycle hooks in .claude/settings.json. Codex uses AGENTS.md and explicit session commands. Both call the same lifecycle handlers and write .alpaca/alpaca.db. Session IDs remain distinct, while each clean installation creates its own .alpaca/instance.json. No account-wide autonomy or transcript discovery is inherited. Usage that an operator does not expose is reported as unavailable.
+Claude Code uses native lifecycle hooks in .claude/settings.json. Codex uses AGENTS.md and explicit session commands. Both call the same lifecycle handlers and write .alpaca/alpaca.db. Session IDs remain distinct, while each clean installation creates its own .alpaca/instance.json. No account-wide autonomy or transcript discovery is inherited: the shared /autodrive skill's per-session file counts only as a drop, or as a raise the owner typed as an /autodrive call in this session's own transcript. Usage that an operator does not expose is reported as unavailable.
 
 ## Tasks, evidence and proof
 

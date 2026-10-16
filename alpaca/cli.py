@@ -14,7 +14,7 @@ ENV_SESSION_VARS = ("ALPACA_SESSION_ID", "CLAUDE_CODE_SESSION_ID")
 # M4.12: the verb modules whose import registers the rest of the dispatch table. main() imports
 # these (reporting a shortfall) and surface.lint reads the resulting table via registered_verbs.
 # A domain profile adds its own verb modules (alpaca/profile.py `verbs`), see _profile_verb_modules.
-VERB_MODULES = ('ops', 'onboard', 'new', 'doctor', 'analytics_cli', 'serve', 'questions', 'board', 'messages', 'decisions', 'sort', 'export', 'review', 'upgrade', 'barrier', 'operator', 'proof', 'observability.cli', 'artifacts', 'backup', 'workspace', 'spec_kits', 'runbook', 'intake', 'start', 'note', 'interview', 'hub_publish', 'mission_cli', 'release.cli', 'research.cli', 'ownerword', 'brief', 'orders', 'selfcheck', 'oob', 'batch', 'watchdog.cli', 'aar')
+VERB_MODULES = ('ops', 'onboard', 'new', 'doctor', 'analytics_cli', 'serve', 'questions', 'board', 'messages', 'decisions', 'sort', 'export', 'review', 'upgrade', 'update', 'barrier', 'operator', 'proof', 'observability.cli', 'artifacts', 'backup', 'workspace', 'spec_kits', 'runbook', 'intake', 'start', 'note', 'interview', 'hub_publish', 'mission_cli', 'release.cli', 'research.cli', 'ownerword', 'brief', 'orders', 'selfcheck', 'oob', 'batch', 'watchdog.cli', 'aar', 'attach.cli', 'sandbox')
 
 
 def _profile_verb_modules():
@@ -451,7 +451,10 @@ def cmd_day(args):
         date, t["ops"], t["events"], t["unsorted"]))
 
 def build_parser():
-    p = argparse.ArgumentParser(prog="alpaca", add_help=True)
+    # allow_abbrev=False: `--sess s` must not pass for `--session s`. The start-up recovery below
+    # is decided from the parsed verb, and an abbreviation that argparse expanded after the fact
+    # would let it roll a journal that `alpaca update` is meant to refuse. Subparsers keep their own.
+    p = argparse.ArgumentParser(prog="alpaca", add_help=True, allow_abbrev=False)
     p.add_argument("--session", default=None, help="session id (hooks pass it)")
     p.add_argument("--version", action="store_true", help="print the Alpaca version and exit")
     sub = p.add_subparsers(dest="verb")
@@ -609,17 +612,21 @@ def main(argv=None) -> int:
         pass
     for name, reg in _EXTRA_PARSERS:
         reg(sub)
-    # M4.2: a crashed upgrade is recovered on the next start, not on demand, so it can never leave
-    # a half tree behind a working CLI. Fail-open: recovery never blocks an ordinary command.
-    try:
-        from alpaca import upgrade
-        upgrade.recover(paths.root())
-    except Exception:
-        pass
     try:
         args = parser.parse_args(argv)
     except SystemExit as e:
         return USAGE if e.code not in (0,) else PASS
+    # M4.2: a crashed upgrade is recovered on the next start, not on demand, so it can never leave
+    # a half tree behind a working CLI. Fail-open: recovery never blocks an ordinary command.
+    # `alpaca update` is the exception: it reports a pending journal and leaves it alone. The verb
+    # comes from the parsed arguments, so no spelling of an option can hide it, and a usage error
+    # runs no recovery.
+    if args.verb != "update":
+        try:
+            from alpaca import upgrade
+            upgrade.recover(paths.root())
+        except Exception:
+            pass
     if getattr(args, "version", False) and not args.verb:
         from alpaca import version
         print("Alpaca %s" % version.string())
@@ -645,6 +652,14 @@ def main(argv=None) -> int:
     if args.session:
         os.environ["ALPACA_SESSION_ID"] = args.session
     try:
+        # op-062 t-656: while the first chat is open, an agent call runs only the verbs on first_chat's list (design
+        # 7.1: nothing outside .alpaca/ changes before the owner's yes). No try/except here: a failed check ends the
+        # call through the except below, so the verb never runs on a check that did not finish.
+        from alpaca import first_chat
+        refused = first_chat.verb_refusal(args)
+        if refused:
+            print("GATE alpaca-%s: FAIL (%s) [%s]" % (args.verb, refused[1], refused[0]))
+            return FAIL
         return COMMANDS[args.verb](args)
     except paths.RootNotFound as e:
         print("GATE alpaca: BLOCKED (%s)" % e)

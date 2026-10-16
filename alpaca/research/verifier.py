@@ -32,12 +32,14 @@ import concurrent.futures
 import contextlib
 import errno
 import fcntl
+import hashlib
 import json
 import os
 import re
 import shlex
 import shutil
 import socket
+import stat
 import subprocess
 import tempfile
 import threading
@@ -383,11 +385,12 @@ def _git_env(extra=None) -> dict:
     return env
 
 
-def _git(cwd, *args, check=True, binary=False, env=None):
-    """One git call with isolation.GIT_HARDEN on its command line and the _git_env environment."""
+def _git(cwd, *args, check=True, binary=False, env=None, input=None):
+    """One git call with isolation.GIT_HARDEN on its command line and the _git_env environment. `input` (bytes)
+    is what git reads on stdin; with None stdin is closed, as it always was."""
+    feed = {"stdin": subprocess.DEVNULL} if input is None else {"input": input}
     done = subprocess.run(("git",) + tuple(isolation.GIT_HARDEN) + _GIT_PINS + args, cwd=cwd,
-                          capture_output=True, env=_git_env(env), timeout=900, text=not binary,
-                          stdin=subprocess.DEVNULL)
+                          capture_output=True, env=_git_env(env), timeout=900, text=not binary, **feed)
     if check and done.returncode != 0:
         err = done.stderr if isinstance(done.stderr, str) else done.stderr.decode("utf-8", "replace")
         raise RuntimeError("git %s failed: %s" % (args[0], " ".join(err.split())[:300]))
@@ -473,6 +476,244 @@ def _build_head_clone(root, task, vf, head):
     if tree is None:
         raise RuntimeError("the head clone holds no base commit")
     return info, tree
+
+
+def _app_open_facts(tree) -> dict:
+    """The open event's record of the attached repo's sealed diff (op-062 t-650): the patch hash and the
+    base commit it applies to. {} for a seal without one, so a plain open event is what it was."""
+    app = tree.get("app") if isinstance(tree.get("app"), dict) else None
+    if not app:
+        return {}
+    return {"app_patch_sha256": app.get("patch_sha256"), "app_base": app.get("base"),
+            "app_tree": app.get("tree")}
+
+
+_APP_SHA = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})")
+#: the most the attached repo's base tree may hold when it is laid into a try's trees
+_APP_TREE_CAP = 512 * 1024 * 1024
+
+
+def _app_entries(repo, base):
+    """[(mode, sha, path)] of every blob and link in `base`'s tree of the attached repo, from git's own
+    listing. A submodule (mode 160000) is left out: it holds no file here."""
+    from alpaca.attach import gitops
+    raw = gitops.git(repo, "ls-tree", "-r", "-z", "--full-tree", base, binary=True, timeout=300)
+    out = []
+    for rec in raw.split(b"\0"):
+        if not rec:
+            continue
+        meta, _, name = rec.partition(b"\t")
+        mode, kind, sha = meta.decode("ascii").split(" ")
+        path = name.decode("utf-8", "surrogateescape")
+        parts = path.split("/")
+        if kind != "blob" or any(p in ("", ".", "..") or p.lower() == ".git" for p in parts):
+            continue
+        out.append((mode, sha, path))
+    return out
+
+
+def _app_blobs(repo, entries) -> dict:
+    """{sha: bytes} for the blobs of `entries`, read in one `git cat-file --batch`: the stored bytes,
+    with no attribute, filter or line-ending conversion, which is what the sealed patch was cut against."""
+    from alpaca.attach import gitops
+    shas = sorted({sha for _m, sha, _p in entries})
+    if not shas:
+        return {}
+    raw = gitops.git(repo, "cat-file", "--batch", input="\n".join(shas) + "\n", binary=True, timeout=600)
+    blobs, pos, total = {}, 0, 0
+    while pos < len(raw):
+        end = raw.index(b"\n", pos)
+        sha, kind, size = raw[pos:end].decode("ascii").split(" ")
+        pos, size = end + 1, int(size)
+        if kind != "blob":
+            raise RuntimeError("the base tree holds an object that is not a blob")
+        blobs[sha] = raw[pos:pos + size]
+        total += size
+        if total > _APP_TREE_CAP:
+            raise RuntimeError("the attached repo's base tree is over the cap for a verification")
+        pos += size + 1
+    return blobs
+
+
+def _lay_app_tree(root, repo, base, dest) -> None:
+    """Write the attached repo's tree at `base` into `dest` (a folder that does not exist yet): regular
+    files first, with the executable bit, then links. Everything is written by descriptor below a folder made
+    exclusively in this call (alpaca/attach/applay.py), so a link at `dest` or a tree that names a path below
+    one of its own links stops here."""
+    from alpaca.attach import applay
+    entries = _app_entries(repo, base)
+    applay.lay(root, dest, entries, _app_blobs(repo, entries))
+
+
+def _app_gitlinks(repo, base) -> dict:
+    """{path: commit id} of the submodule entries of `base`'s tree. The verifier lays no submodule; the
+    sealed tree id names each of them, so the tree it rebuilds must name the same ones."""
+    from alpaca.attach import gitops
+    raw = gitops.git(repo, "ls-tree", "-r", "-z", "--full-tree", base, binary=True, timeout=300)
+    out = {}
+    for rec in raw.split(b"\0"):
+        meta, _, name = rec.partition(b"\t")
+        if meta.startswith(b"160000 "):
+            out[name.decode("utf-8", "surrogateescape")] = meta.split(b" ")[2].decode("ascii")
+    return out
+
+
+def _hash_object(algo, kind, size, chunks) -> str:
+    """The object id git gives `kind` content of `size` bytes, from the bytes and nothing else."""
+    h = hashlib.new(algo)
+    h.update(b"%s %d\0" % (kind, size))
+    seen = 0
+    for chunk in chunks:
+        seen += len(chunk)
+        h.update(chunk)
+    if seen != size:
+        raise RuntimeError("a file changed while it was hashed")
+    return h.hexdigest()
+
+
+def _file_chunks(path):
+    with _fopen(path, "rb") as fh:
+        while True:
+            chunk = fh.read(1 << 20)
+            if not chunk:
+                return
+            yield chunk
+
+
+def _walk_flat(top, algo) -> dict:
+    """{path: (mode, object id)} of every file and link below `top`, hashed here in Python the way git hashes
+    a blob: no repository, no config, no attribute and no filter is read. A link is hashed by its target and
+    followed nowhere. A path that is neither a file, a link nor a folder raises."""
+    out = {}
+
+    def walk(folder, prefix):
+        with os.scandir(folder) as it:
+            entries = sorted(it, key=lambda e: e.name)
+        for entry in entries:
+            rel = prefix + entry.name
+            st = entry.stat(follow_symlinks=False)
+            if stat.S_ISDIR(st.st_mode):
+                walk(entry.path, rel + "/")
+            elif stat.S_ISLNK(st.st_mode):
+                target = os.fsencode(os.readlink(entry.path))
+                out[rel] = ("120000", _hash_object(algo, b"blob", len(target), [target]))
+            elif stat.S_ISREG(st.st_mode):
+                mode = "100755" if st.st_mode & stat.S_IXUSR else "100644"
+                out[rel] = (mode, _hash_object(algo, b"blob", st.st_size, _file_chunks(entry.path)))
+            else:
+                raise RuntimeError("%s is not a file, a link or a folder" % rel)
+
+    walk(top, "")
+    return out
+
+
+def _tree_id(flat, algo) -> str:
+    """The tree object id git gives the paths of `flat` ({path: (mode, hex id)}): folders become trees, and
+    git's order (a folder sorts as its name plus a slash) is used."""
+    root = {}
+    for path, leaf in flat.items():
+        node = root
+        parts = path.split("/")
+        for part in parts[:-1]:
+            node = node.setdefault(part, {})
+            if not isinstance(node, dict):
+                raise RuntimeError("%s lies below a file" % path)
+        if isinstance(node.get(parts[-1]), dict):
+            raise RuntimeError("%s is both a file and a folder" % path)
+        node[parts[-1]] = leaf
+
+    def build(node):
+        rows = []
+        for name, child in node.items():
+            key = os.fsencode(name)
+            if isinstance(child, dict):
+                mode, oid = "40000", build(child)
+                key += b"/"
+            else:
+                mode, oid = child
+            rows.append((key, os.fsencode(name), mode, oid))
+        body = b"".join(b"%s %s\0%s" % (mode.encode(), name, bytes.fromhex(oid))
+                        for _k, name, mode, oid in sorted(rows, key=lambda r: r[0]))
+        return _hash_object(algo, b"tree", len(body), [body])
+
+    return build(root)
+
+
+def _check_app_tree(repo, base, want, app_dir) -> None:
+    """The tree of `tree/app` after the apply must be the tree the seal recorded. The seal took the id from
+    git (`write-tree` of its staged copy of the index); here the folder is hashed in Python and the base's
+    submodule entries are added. No file of the attached clone is read for the hash, so a diff, rename or
+    attribute setting of the clone that changes what the patch builds shows up here as another tree id and
+    stops the verification (fix round 2, B3; tests: test_attach_proof_content.py)."""
+    from alpaca.attach import AttachError
+    if not isinstance(want, str) or not _APP_SHA.fullmatch(want) or len(want) != len(base):
+        raise _sealed_error("the seal records no tree id for the attached repo's work")
+    algo = "sha256" if len(base) == 64 else "sha1"
+    try:
+        flat = _walk_flat(app_dir, algo)
+        for path, oid in _app_gitlinks(repo, base).items():
+            if path in flat:
+                raise RuntimeError("%s is a submodule in the base and a file in the tree" % path)
+            flat[path] = ("160000", oid)
+        got = _tree_id(flat, algo)
+    except (RuntimeError, OSError, ValueError, UnicodeError, AttachError) as exc:
+        raise _sealed_error("the applied app.patch could not be checked against the sealed tree: %s"
+                            % " ".join(str(exc).split())[:200])
+    if got != want:
+        raise _sealed_error("the applied app.patch does not give the sealed tree (tree/app hashes to %s, the "
+                            "seal records %s)" % (got[:12], want[:12]))
+
+
+def _applay(root, *, force=False):
+    """alpaca.attach.applay when the verification handles the attached repo's bytes: the project is in attach
+    mode, or `force` (the seal carries an app patch). None for a plain project. When the attach code cannot be
+    loaded and the project has attach state, the verification stops with VERIFY-TREE: it never falls back to the
+    plain writers (op-062 t-650 fix round 4)."""
+    try:
+        from alpaca.attach import applay
+        attached = force or applay.attach_project(root)
+    except Exception:
+        attached = force or os.path.lexists(os.path.join(str(root), ".alpaca", "attach"))
+        if attached:
+            raise verdicts.error("VERIFY-TREE", "the attach code could not be loaded, so the attached repo's "
+                                 "bytes cannot be placed")
+        return None
+    return applay if attached else None
+
+
+def _materialize_app(root, task, vf, tree, tree_dir, base_dir, env) -> int:
+    """The attached repo inside a try's trees (op-062 t-650, trace-b finding 3). The studio's head clone
+    holds no `app/` (it is ignored), so a sealed diff of the attached repo had nothing to apply to. Lay the
+    repo's tree at the sealed base commit into `tree/app` and `base/app`, check the kept `app.patch` against
+    the sealed hash, and apply it in `tree/` under `app/`. Raises VERIFY-TREE with the sealed rule when the
+    kept patch changed, the base is missing, or the patch does not apply. Returns the patch's size in bytes.
+    The patch is read once (bounded, no link followed) and applied from memory on stdin."""
+    from alpaca.attach import AttachError, config as aconfig
+    applay = _applay(root, force=True)
+    want = tree.get("app_patch_sha256")
+    base = tree.get("app_base")
+    data = applay.read_patch(root, _vf_dir(root, task, vf), want)
+    if data is None:
+        raise _sealed_error("the kept app.patch no longer hashes to its sealed value")
+    if not isinstance(base, str) or not _APP_SHA.fullmatch(base):
+        raise _sealed_error("the sealed app base is not a commit id")
+    cfg = aconfig.mode(root)
+    if cfg is None:
+        raise _sealed_error("the project is no longer in attach mode, so the sealed app diff has no repo")
+    repo = str(cfg.repo_path(root))
+    try:
+        _lay_app_tree(root, repo, base, os.path.join(tree_dir, "app"))
+        _lay_app_tree(root, repo, base, os.path.join(base_dir, "app"))
+    except (RuntimeError, OSError, ValueError, AttachError) as exc:
+        raise _sealed_error("the attached repo at the sealed base could not be laid out: %s"
+                            % " ".join(str(exc).split())[:200])
+    if len(data) > 0:
+        got = _git(tree_dir, "apply", "--binary", "--whitespace=nowarn", "--directory=app", "-",
+                   check=False, env=env, binary=True, input=data)
+        if got.returncode != 0:
+            raise _sealed_error("the sealed app.patch does not apply")
+    _check_app_tree(repo, base, tree.get("app_tree"), os.path.join(tree_dir, "app"))
+    return len(data)
 
 
 def _head_clone(root, task, vf, tree):
@@ -700,6 +941,16 @@ def open(conn, root, task, *, runtime, driver, session, binary=None, session_mod
             shutil.copyfile(kept, os.path.join(folder, "tree.patch"))
             with _fopen(kept, "rb") as fh:
                 patch_text = fh.read().decode("utf-8", "replace")
+        app = tree.get("app") if isinstance(tree.get("app"), dict) else None
+        if app:
+            # an attach seal (op-062 t-650) also kept the attached repo's work-branch diff
+            # read with no link followed, bounded, and written by descriptor (alpaca/attach/applay.py)
+            from alpaca.attach import AttachError
+            try:
+                _applay(root, force=True).copy_patch(root, app.get("patch"), app.get("patch_sha256"), folder)
+            except AttachError as exc:
+                raise verdicts.error("VERIFY-TREE", "the kept app.patch could not be copied into the "
+                                     "verification folder: %s" % " ".join(str(exc).split())[:200])
     head_clone, clone_failed = None, None
     if tree is not None:
         # the head clone is built here, fresh, and its base commit and tree id go on the open
@@ -731,7 +982,7 @@ def open(conn, root, task, *, runtime, driver, session, binary=None, session_mod
             "contracts": cl["contracts"], "steering_exempt": steer["exempt"],
             "binary": pin, "binary_sha256": pin_sha, "audit_event": audit_event,
             "tree": (dict({"head": tree.get("head"), "patch_sha256": tree.get("patch_sha256")},
-                          **head_clone) if tree else None),
+                          **head_clone, **_app_open_facts(tree)) if tree else None),
             "engine": engine_block, "cap": verdicts.ROUND_CAP, "earlier": earlier,
             "session_mode": bool(session_mode),
             "recovered": recovered,
@@ -865,6 +1116,8 @@ def _place_evidence(conn, root, seal_data, cl, packet):
     sealed value (VERIFY-TREE otherwise). Returns the brief's `evidence` value."""
     placed = []
     seen = set()
+    applay = _applay(root)                  # an attach project's copies are written by descriptor (fix round 4)
+    from alpaca.attach import AttachError
     for c in cl["claims"]:
         for s in c.get("sealed") or []:
             copy = s.get("copy")
@@ -873,7 +1126,8 @@ def _place_evidence(conn, root, seal_data, cl, packet):
             seen.add(copy)
             ptr = s.get("pointer")
             target = os.path.join(os.path.dirname(packet), copy)
-            os.makedirs(os.path.dirname(target), exist_ok=True)
+            if applay is None:
+                os.makedirs(os.path.dirname(target), exist_ok=True)
             if copy == "packet/diff.patch":
                 continue
             if ptr.startswith("event:"):
@@ -891,6 +1145,15 @@ def _place_evidence(conn, root, seal_data, cl, packet):
                 src = proof._evidence_file(root, item.get("kind"), ptr)
                 if src:
                     sources.append(src)
+                if applay is not None:
+                    try:
+                        if not applay.place_copy(root, sources, s.get("sha256"), target):
+                            raise _sealed_error("evidence %s no longer hashes to its sealed value" % ptr)
+                    except AttachError as exc:
+                        raise verdicts.error("VERIFY-TREE", "evidence %s could not be placed in the packet: %s"
+                                             % (ptr, " ".join(str(exc).split())[:200]))
+                    placed.append({"pointer": ptr, "copy": copy})
+                    continue
                 chosen = None
                 for cand in sources:
                     if os.path.isfile(cand) and not os.path.islink(cand) \
@@ -976,6 +1239,9 @@ def _cut_trees(conn, root, task, vf, open_data, folder, packet):
             if got.returncode != 0:
                 raise _sealed_error("the sealed tree.patch does not apply")
         out["base_differs"] = os.path.getsize(patch) > 0
+        if tree.get("app_patch_sha256") is not None:
+            app_size = _materialize_app(root, task, vf, tree, tree_dir, base_dir, cuts["tree"]["env"])
+            out["base_differs"] = out["base_differs"] or app_size > 0
         if role == "report":
             _report_files(conn, root, task, tree_dir)
         for top in (tree_dir, base_dir):
@@ -2527,7 +2793,9 @@ def _end(conn, root, task, vf, session, driver, *, superseded=False):
     runs = verify_gate.refuted_runs(conn, task, before=od.get("seal_event"))
     data = {"verification": vf, "task": task, "seal_event": od.get("seal_event"),
             "report_sha256": od.get("report_sha256"),
-            "tree_patch_sha256": tree.get("patch_sha256") if tree else None, "outcome": word,
+            "tree_patch_sha256": tree.get("patch_sha256") if tree else None,
+            **({"app_patch_sha256": tree["app"].get("patch_sha256")}
+               if tree and isinstance(tree.get("app"), dict) else {}), "outcome": word,
             "rounds": rounds[-1]["data"].get("round") if rounds else 0,
             "cap": verify_gate.HARD_CAP if verify_gate.events(conn, _EXTEND, task, verification=vf)
             else verdicts.ROUND_CAP,

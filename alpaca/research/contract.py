@@ -241,6 +241,48 @@ def _store_files(folder):
     return out
 
 
+#: a studio pack (op-062 t-653): the pack of a research runbook that lives in an attached project's studio while
+#: repo.path is the attached repository. Its files are read from disk, frozen under this prefix, and never
+#: reach the run tree, so no pack file can be part of an attempt commit.
+_STUDIO_PREFIX = "@studio/"
+_STUDIO_MAX_FILES = 2000
+_STUDIO_MAX_BYTES = 64 << 20
+_STUDIO_SKIP_DIRS = ("__pycache__", ".git")
+
+
+def _studio_files(folder, skip=()):
+    """{path relative to `folder`: (bytes, git mode)} of the regular files under the studio pack folder `folder`,
+    without the names in `skip`, without `__pycache__` and `.git` folders and `.pyc` files. A link is not
+    followed or kept. More than _STUDIO_MAX_FILES files or _STUDIO_MAX_BYTES bytes is refused: a pack folder
+    that large is the wrong folder."""
+    out, total = {}, 0
+    for base, dirs, names in os.walk(folder, followlinks=False):
+        dirs[:] = sorted(d for d in dirs if d not in _STUDIO_SKIP_DIRS)
+        for name in sorted(names):
+            if name.endswith(".pyc"):
+                continue
+            full = os.path.join(base, name)
+            info = os.lstat(full)
+            if not stat.S_ISREG(info.st_mode):
+                continue
+            rel = os.path.relpath(full, folder).replace(os.sep, "/")
+            if rel in skip:
+                continue
+            content = _read_bytes(full)
+            total += len(content)
+            if len(out) >= _STUDIO_MAX_FILES or total > _STUDIO_MAX_BYTES:
+                raise _refuse("CONTRACT-CHECK-FAILED", "the studio pack folder %s holds more than %d files or %d "
+                              "bytes; the runbook folder of a studio pack holds the pack and nothing else"
+                              % (folder, _STUDIO_MAX_FILES, _STUDIO_MAX_BYTES))
+            out[rel] = (content, "100755" if info.st_mode & stat.S_IXUSR else "100644")
+    return out
+
+
+def _studio_pack_allowed(project, repo_abs, base) -> bool:
+    """Whether the attach package lets the pack folder `base` lie outside the repository `repo_abs`."""
+    return runbook._pack_outside_allowed(project, repo_abs, os.path.realpath(base))
+
+
 # -------------------------------------------------------------------------- the pack contract
 def load_block(runbook_path: str) -> dict:
     """The pack-level contract of a `runbook: 3` file: runbook.check with its spec first
@@ -284,24 +326,48 @@ def load_block(runbook_path: str) -> dict:
     else:
         repo_abs = os.path.join(project, repo_path)
     top, commit = _repo_state(repo_abs, ref_name)
+    studio = False
     if not _within(base, top):
-        raise _refuse("CONTRACT-PACK-OUTSIDE-REPO", "the runbook folder %s does not lie inside repo.path %s"
-                      % (base, top))
-    folder = os.path.relpath(os.path.realpath(base), top).replace(os.sep, "/")
+        # only an attached project's studio may hold the pack of a run on the attached repository (R15)
+        if not _studio_pack_allowed(project, repo_abs, base):
+            raise _refuse("CONTRACT-PACK-OUTSIDE-REPO", "the runbook folder %s does not lie inside repo.path %s"
+                          % (base, top))
+        studio = True
     tree = _tree(top, commit)
+    if studio:
+        if any(p == _STUDIO_PREFIX.rstrip("/") or p.startswith(_STUDIO_PREFIX) for p in tree):
+            raise _refuse("CONTRACT-PACK-OUTSIDE-REPO", "the repository tracks a path under %s, the name the "
+                          "frozen studio pack uses" % _STUDIO_PREFIX)
+        folder = _STUDIO_PREFIX + os.path.relpath(os.path.realpath(base), os.path.realpath(project)).replace(os.sep, "/")
+    else:
+        folder = os.path.relpath(os.path.realpath(base), top).replace(os.sep, "/")
 
     def from_top(rel):
         return os.path.relpath(os.path.realpath(os.path.join(base, rel)), top).replace(os.sep, "/")
 
-    own = {from_top(os.path.basename(path))}
     defaults_name = block.get("defaults")
-    if isinstance(defaults_name, str):
-        own.add(from_top(defaults_name))
     rules = _rules(block, "paths", "protected") + _rules(block, "holdout", "paths")
-    # the runbook and its defaults file stay out: their fields are compared one by one (section 7.7)
-    chosen = sorted(p for p in tree if p not in own and (_under(p, folder) or runbook.path_hit(p, rules)))
+    studio_skip = set()
+    if studio:
+        # the runbook and its defaults file stay out, as for a pack in the repository; every other regular
+        # file under the runbook folder is frozen from disk under @studio/<folder>/
+        studio_skip = {os.path.basename(path)}
+        if isinstance(defaults_name, str):
+            studio_skip.add(os.path.normpath(defaults_name).replace(os.sep, "/"))
+        chosen = sorted(p for p in tree if runbook.path_hit(p, rules))
+    else:
+        own = {from_top(os.path.basename(path))}
+        if isinstance(defaults_name, str):
+            own.add(from_top(defaults_name))
+        # the runbook and its defaults file stay out: their fields are compared one by one (section 7.7)
+        chosen = sorted(p for p in tree if p not in own and (_under(p, folder) or runbook.path_hit(p, rules)))
     blobs = _blobs(top, [tree[p][1] for p in chosen])
     files = dict((p, _sha(blobs[tree[p][1]])) for p in chosen)
+    on_disk = {}
+    if studio:
+        on_disk = _studio_files(os.path.realpath(base), studio_skip)
+        for rel, (content, _mode) in on_disk.items():
+            files["%s/%s" % (folder, rel)] = _sha(content)
     missing = []
     lessons = block.get("lessons") if isinstance(block.get("lessons"), dict) else {}
     named = [("research.lessons.file", lessons.get("file"))]
@@ -309,7 +375,13 @@ def load_block(runbook_path: str) -> dict:
     for n, case in enumerate(repair.get("cases") or []):
         named.append(("research.repair.cases[%d].bug_report" % n, case.get("bug_report")))
     for where, rel in named:
-        if isinstance(rel, str) and from_top(rel) not in tree:
+        if not isinstance(rel, str):
+            continue
+        if studio:
+            if os.path.normpath(rel).replace(os.sep, "/") not in on_disk:
+                missing.append("FILE-MISSING %s: %s is not a file of the studio pack folder %s, and a run reads a "
+                               "pack file only from its frozen copy" % (where, rel, folder))
+        elif from_top(rel) not in tree:
             missing.append("FILE-MISSING %s: %s is not tracked at commit %s, and a run reads a pack file only "
                            "from its frozen copy" % (where, from_top(rel), commit))
     if missing:
@@ -330,6 +402,10 @@ def load_block(runbook_path: str) -> dict:
     if isinstance(defaults_name, str):
         full = os.path.join(base, defaults_name)
         pack["defaults"] = {"path": from_project(full), "sha256": _sha(_read_bytes(full))}
+    if studio:
+        pack["pack_source"] = "studio"
+        pack["_studio_dir"] = os.path.realpath(base)
+        pack["_studio_skip"] = sorted(studio_skip)
     pack["pack_sha256"] = pack_sha256(pack)
     return pack
 
@@ -847,7 +923,9 @@ def _tracked(repo, commit):
 
 
 def check_overlap(root: str, contract: Contract, *, run: str | None = None) -> None:
-    """Raises CONTRACT-PACK-OUTSIDE-REPO when the runbook folder is not inside repo_path, and
+    """Raises CONTRACT-PACK-OUTSIDE-REPO when the runbook folder is not inside repo_path (unless the project is
+    attached, repo_path is the attached repository and the folder is a plain folder of the studio: op-062
+    t-653, a studio pack), and
     CONTRACT-UNPROTECTED for a tracked file under the runbook folder that no protected rule hits
     (t-088 section 14.2). Raises CONTRACT-ALLOWLIST-OVERLAP (1) when an editable rule matches
     engine code (alpaca/, bin/, setup/), .alpaca/, a protected path, a hidden or held-out path,
@@ -866,15 +944,23 @@ def check_overlap(root: str, contract: Contract, *, run: str | None = None) -> N
     root = os.path.realpath(root)
     repo = _repo_abs(root, contract)
     folder_abs = os.path.realpath(os.path.dirname(os.path.join(root, contract.runbook)))
-    if not _within(folder_abs, repo):
-        raise _refuse("CONTRACT-PACK-OUTSIDE-REPO", "the runbook folder %s does not lie inside repo.path %s"
-                      % (folder_abs, repo))
+    studio = not _within(folder_abs, repo)
+    if studio:
+        # a pack outside the repository is a studio pack, frozen from disk and never in the repository, so no
+        # tracked file is "loose". Whether it may be one is asked again here, from the spelling of repo.path as
+        # the contract holds it, so a contract.json that puts its pack outside the repository in a project that
+        # is not attached to that repository is refused, as before
+        spelled = contract.repo_path if os.path.isabs(contract.repo_path) else os.path.join(root, contract.repo_path)
+        if not _studio_pack_allowed(root, spelled, folder_abs):
+            raise _refuse("CONTRACT-PACK-OUTSIDE-REPO", "the runbook folder %s does not lie inside repo.path %s"
+                          % (folder_abs, repo))
     tracked = _tracked(repo, contract.repo_commit)
-    folder = os.path.relpath(folder_abs, repo).replace(os.sep, "/")
-    loose = [p for p in tracked if _under(p, folder) and not runbook.path_hit(p, contract.protected)]
-    if loose:
-        raise _refuse("CONTRACT-UNPROTECTED", "every tracked file under the runbook folder %s must be hit by a "
-                      "protected rule; no rule hits: %s" % (folder, ", ".join(loose)))
+    if not studio:
+        folder = os.path.relpath(folder_abs, repo).replace(os.sep, "/")
+        loose = [p for p in tracked if _under(p, folder) and not runbook.path_hit(p, contract.protected)]
+        if loose:
+            raise _refuse("CONTRACT-UNPROTECTED", "every tracked file under the runbook folder %s must be hit by a "
+                          "protected rule; no rule hits: %s" % (folder, ", ".join(loose)))
     problems = []
     hides = list(contract.hidden) + list(contract.holdout_paths)
     for rule in contract.editable:
@@ -1171,6 +1257,14 @@ def _manifest(root, pack, block):
         content = blobs[oid]
         manifest[key] = {"sha256": _sha(content), "mode": mode, "size": len(content)}
         sources[key] = ("git", oid)
+    if pack.get("pack_source") == "studio":
+        # the studio pack, read from disk again (freeze compares this manifest with the preview's): the
+        # frozen copy sits at files/@studio/<folder>/<file>, where gates._frozen_runbook_dir looks
+        folder = pack["_studio_dir"]
+        for rel, (content, mode) in sorted(_studio_files(folder, set(pack["_studio_skip"])).items()):
+            key = "files/%s/%s" % (pack["folder"], rel)
+            manifest[key] = {"sha256": _sha(content), "mode": mode, "size": len(content)}
+            sources[key] = ("studio", os.path.join(folder, rel))
     repair = block.get("repair") if isinstance(block.get("repair"), dict) else {}
     for case in repair.get("cases") or []:
         if (case.get("fail_to_pass") or {}).get("origin") != "store":
@@ -1251,6 +1345,8 @@ def preview(root: str, runbook: str, *, task: str | None = None, conn=None) -> d
                 "reproducers": reproducers, "read_real": reads, "tools_real": tools,
                 "task": task, "ref": ref(rel, task), "override": override, "override_diff": override_diff,
                 "grants": [], "pack_sha256": pack["pack_sha256"]}
+    if pack.get("pack_source"):
+        contract["pack_source"] = pack["pack_source"]      # only a studio pack says so: other hashes do not move
     contract["contract_sha256"] = contract_sha256(contract)
     return {"contract": contract, "contract_sha256": contract["contract_sha256"],
             "pack_sha256": pack["pack_sha256"], "files_sha256": files_sha256, "files": manifest,

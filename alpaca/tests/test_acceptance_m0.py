@@ -2,7 +2,7 @@
 import json, os, shutil, subprocess, sys
 from alpaca import manifest
 from alpaca.tests import proofkit
-from alpaca.tests.conftest import REPO
+from alpaca.tests.conftest import REPO, git_ignored_top
 
 FIX = os.path.join(os.path.dirname(__file__), "fixtures")
 
@@ -19,16 +19,23 @@ def _read(p):
         return fh.read()
 
 _MEMORY_IGNORE = manifest.memory_ignore(REPO)
+_GIT_IGNORED_TOP = git_ignored_top(REPO)
 
 
 def _ignore(dirpath, names):
     skip = {".git", ".alpaca", "__pycache__", ".superpowers", "RESUME.md", "project.yaml", ".venv", ".pytest_cache", "dist"}
     if os.path.abspath(dirpath) == os.path.abspath(REPO):
         skip.add("analytics")
+        skip |= _GIT_IGNORED_TOP
     # every [memory] path stays behind too, nested ones included (host-local tool installs and
     # build outputs under a mechanism dir): the copy stands for a fresh clone, which has none.
     memory = set(_MEMORY_IGNORE(dirpath, names))
-    return [n for n in names if n in skip or n in memory]
+    # .te is a symlink to .alpaca, and copytree follows symlinks: skip any link into the live record
+    # dir, or the copy carries the whole record, receipts and worktrees (44 GB of /tmp on 2026-10-14).
+    private = os.path.realpath(os.path.join(REPO, ".alpaca"))
+    linked = {n for n in names if os.path.islink(os.path.join(dirpath, n))
+              and (os.path.realpath(os.path.join(dirpath, n)) + os.sep).startswith(private + os.sep)}
+    return [n for n in names if n in skip or n in memory or n in linked]
 
 def test_m0_end_to_end(tmp_path):
     # 1. copy the harness and rename it to the project name
@@ -77,3 +84,24 @@ def test_m0_end_to_end(tmp_path):
     assert sh(alpaca + ["verify"], proj, env).returncode == 0
     pad = _read(proj / "RESUME.md")
     assert "t-002" in pad and "test --shout" in pad
+
+
+def test_ignore_skips_links_into_the_record_dir(tmp_path):
+    """A symlink into .alpaca (the repo's .te) never enters a harness copy (op-059 t-671)."""
+    names = [n for n in os.listdir(REPO)]
+    assert ".alpaca" in _ignore(REPO, names)
+    if os.path.islink(os.path.join(REPO, ".te")):
+        assert ".te" in _ignore(REPO, names)
+    (tmp_path / "rec").mkdir()
+    os.symlink(os.path.join(REPO, ".alpaca"), tmp_path / "rec" / "link")
+    assert "link" in _ignore(str(tmp_path / "rec"), ["link"])
+
+
+def test_a_fresh_clone_copy_leaves_out_what_git_ignores():
+    """Every top-level path git ignores (runtime folders, .te) stays out of a harness copy (t-672)."""
+    names = os.listdir(REPO)
+    dropped = set(_ignore(REPO, names))
+    assert _GIT_IGNORED_TOP <= dropped
+    for name in (".te", ".rune2-dev", "research-refs"):
+        if name in names and name in _GIT_IGNORED_TOP:
+            assert name in dropped

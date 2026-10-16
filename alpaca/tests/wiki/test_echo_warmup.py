@@ -77,8 +77,7 @@ def _store_with_retired_blocks(project):
 
 
 def _state(index):
-    return {name: {k: (sorted(v) if isinstance(v, set) else v) for k, v in getattr(index, name).items()}
-            for name in ("_doc", "_by_doc", "_by_size", "_norm", "_tokens", "_exact", "_postings")}
+    return index.entries()
 
 
 def test_the_echo_index_read_visits_the_active_rows_only(project):
@@ -112,7 +111,7 @@ def test_the_new_read_builds_the_index_the_ordered_read_built(project):
         before.load((r[0], r[2], r[1]) for r in conn.execute(OLD_ECHO_INDEX_SQL))
         after = absorb.load_echo_index(conn)
         assert _state(after) == _state(before)
-        assert len(after._doc) == conn.execute("SELECT count(*) FROM blocks WHERE status='active'").fetchone()[0]
+        assert len(after) == conn.execute("SELECT count(*) FROM blocks WHERE status='active'").fetchone()[0]
         for text in ("Ada keeps the lantern.", "Cy keeps the lantern now.", "note 3 of the lantern rota, shift 0"):
             assert after.detect(text) == before.detect(text)
     finally:

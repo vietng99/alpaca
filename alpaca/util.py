@@ -19,6 +19,14 @@ def now_iso() -> str:
         return _CLOCK()
     return datetime.datetime.now().astimezone().isoformat(timespec="seconds")
 
+def now_iso_precise() -> str:
+    """Like now_iso, with microseconds. A clock installed with set_clock may offer a `precise` method for a
+    sub-second reading; a clock without one is used as it is."""
+    if _CLOCK is not None:
+        read = getattr(_CLOCK, "precise", None)
+        return read() if read is not None else _CLOCK()
+    return datetime.datetime.now().astimezone().isoformat(timespec="microseconds")
+
 def canonical_json(obj) -> str:
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 

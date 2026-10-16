@@ -364,6 +364,127 @@ def test_malformed_registered_transcript_fails_before_capture_checkpoint(project
     conn.close()
 
 
+def _torn(project, sid):
+    """A native transcript as the live store held it on 2026-10-11 (t-684): a record cut part way,
+    the next record appended on the same line, and the session going on after it, so the torn line
+    ends with a newline and no later read heals it."""
+    path = Path(project, 'native', sid + '.jsonl')
+    path.parent.mkdir(parents=True, exist_ok=True)
+    whole = json.dumps({'type': 'assistant', 'message': {'content': 'TORN_' + 'x' * 200}})
+    rows = [json.dumps({'type': 'user', 'message': {'content': 'BEFORE_TEAR'}}),
+            whole[:90] + json.dumps({'type': 'user', 'message': {'content': 'GLUED'}}),
+            json.dumps({'type': 'user', 'message': {'content': 'AFTER_TEAR'}})]
+    path.write_text(''.join(row + '\n' for row in rows))
+    observability.expect_source(project, sid, 'claude', locator=str(path))
+    return path
+
+
+def _open(root, code):
+    conn = db.connect_readonly(root)
+    try:
+        return [dict(r) for r in conn.execute(
+            'SELECT * FROM obs_issue WHERE code=? AND resolved_at IS NULL', (code,))]
+    finally:
+        conn.close()
+
+
+def _retry_now(conn, failures):
+    conn.execute("UPDATE obs_consumer_checkpoint SET failures=?, next_attempt=NULL WHERE consumer='wiki'",
+                 (failures,))
+
+
+def test_a_torn_transcript_is_handed_to_its_snapshot_job_after_the_retries(project):
+    # t-684: a torn record in the middle of a transcript never reads clean again. The consumer fails
+    # on it, as merge decision D2 asks, for `MALFORMED_AFTER_FAILURES` tries; then the session goes
+    # to its own snapshot job with an open `transcript-malformed` issue and the consumer advances,
+    # where it stalled for 3 days (293 failures at event 238470) with five such transcripts.
+    conn = db.connect(project)
+    transcript(project, 'good', assistant='GOOD_MARKER')
+    torn = _torn(project, 'torn')
+    db.append_event(conn, session='torn', actor='test', kind='session-checkpoint')
+    db.append_event(conn, session='good', actor='test', kind='session-checkpoint')
+    first = consumers.consume(project, conn)
+    assert first['wiki'] == {'status': 'failed', 'error': 'TranscriptMalformed', 'through_event': 0}
+    assert 'GOOD_MARKER' in corpus(project)              # the rest of the batch landed all the same
+    assert _open(project, 'transcript-malformed') == []
+    for tries in range(2, consumers.MALFORMED_AFTER_FAILURES + 1):
+        _retry_now(conn, tries - 1)
+        assert consumers.consume(project, conn)['wiki']['status'] == 'failed'
+    _retry_now(conn, consumers.MALFORMED_AFTER_FAILURES)
+    last = db.append_event(conn, session='good', actor='test', kind='heartbeat')
+    handed = consumers.consume(project, conn)
+    assert handed['wiki'] == {'status': 'ok', 'through_event': last['id']}
+    issue, = _open(project, 'transcript-malformed')
+    assert 'torn' in issue['detail'] and str(torn) not in issue['detail']
+    assert _open(project, 'consumer-failed') == []
+    issues, jobs, checkpoint, failed = _gap_rows(project)
+    assert jobs['torn']['status'] == 'pending' and checkpoint['failures'] == 0
+    assert _transcript_docs(project, 'torn') == []       # nothing of a torn transcript lands
+    # A later event of the session does not stop the consumer again: its snapshot job owns it.
+    later = db.append_event(conn, session='torn', actor='test', kind='heartbeat')
+    assert consumers.consume(project, conn)['wiki'] == {'status': 'ok', 'through_event': later['id']}
+    # The job fails loudly on its own; a transcript that reads clean again lands and closes both.
+    conn.execute('UPDATE obs_projection_job SET next_attempt=NULL')
+    assert consumers.run_snapshot_jobs(project, conn)['failed'] == 1
+    torn.write_text(json.dumps({'type': 'assistant', 'message': {'content': 'MENDED_MARKER'}}) + '\n')
+    conn.execute('UPDATE obs_projection_job SET next_attempt=NULL')
+    assert consumers.run_snapshot_jobs(project, conn)['completed'] == 1
+    assert 'MENDED_MARKER' in corpus(project)
+    assert _open(project, 'transcript-malformed') == [] and _open(project, 'snapshot-failed') == []
+    conn.close()
+
+
+def test_a_torn_transcript_is_not_handed_off_before_the_retries(project):
+    conn = db.connect(project)
+    _torn(project, 'torn')
+    db.append_event(conn, session='torn', actor='test', kind='session-checkpoint')
+    _retry_now(conn, consumers.MALFORMED_AFTER_FAILURES - 1)
+    consumers.consume(project, conn)                     # seeds the checkpoint row on its first run
+    _retry_now(conn, consumers.MALFORMED_AFTER_FAILURES - 2)
+    result = consumers.consume(project, conn)
+    assert result['wiki']['status'] == 'failed' and result['wiki']['through_event'] == 0
+    assert _open(project, 'transcript-malformed') == []
+    conn.close()
+
+
+def test_a_broken_locator_still_stops_the_consumer_after_the_retries(project):
+    # The hand-off is for a torn transcript only: a directory at the locator still fails the
+    # consumer however many times it was tried (merge decision D2).
+    conn = db.connect(project)
+    broken = Path(project, 'broken.jsonl')
+    observability.expect_source(project, 'odd', 'claude', locator=str(broken))
+    broken.mkdir()
+    db.append_event(conn, session='odd', actor='test', kind='session-checkpoint')
+    assert consumers.consume(project, conn)['wiki']['status'] == 'failed'
+    _retry_now(conn, consumers.MALFORMED_AFTER_FAILURES + 3)
+    result = consumers.consume(project, conn)
+    assert result['wiki'] == {'status': 'failed', 'error': 'TranscriptUnavailable', 'through_event': 0}
+    assert _open(project, 'transcript-malformed') == [] and _open(project, 'transcript-unavailable') == []
+    conn.close()
+
+
+def test_a_transcript_gone_while_the_batch_reads_it_is_a_gap(project, monkeypatch):
+    # A recorded gap never stops the consumer, also when the file goes between the consumer's check
+    # and the read (subagent transcripts are pruned while the collector runs).
+    conn = db.connect(project)
+    native = Path(project, 'native', 'brief.jsonl')
+    native.parent.mkdir()
+    native.write_text(json.dumps({'type': 'user', 'message': {'content': 'BRIEF'}}) + '\n')
+    observability.expect_source(project, 'brief', 'claude', locator=str(native))
+    real = drain._visible_transcript
+
+    def pruned(session, path, *args):
+        if session == 'brief':
+            native.unlink()
+        return real(session, path, *args)
+    monkeypatch.setattr(drain, '_visible_transcript', pruned)
+    event = db.append_event(conn, session='brief', actor='test', kind='session-checkpoint')
+    assert consumers.consume(project, conn)['wiki'] == {'status': 'ok', 'through_event': event['id']}
+    gap, = _open(project, 'transcript-unavailable')
+    assert 'brief' in gap['detail'] and str(native) not in gap['detail']
+    conn.close()
+
+
 def test_capture_preserves_large_visible_content_beyond_ui_budgets(project, monkeypatch):
     from alpaca.analytics import detail
     conn = db.connect(project)
